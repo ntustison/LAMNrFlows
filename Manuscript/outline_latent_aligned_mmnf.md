@@ -105,6 +105,14 @@ $$\mathcal{L} = \mathrm{NLL}(x) + \sum_{\ell=0}^{L-1}\sum_{t\in\mathcal{T}} \lam
   batch-size sensitive.  
 - **HSIC (biased).** Kernel dependence measure capturing higher-order relations.  
 
+| Method                   | Objective (sketch)                                                                        | Encourages                           | Typical hyperparams                                              | Batch size need | Notes                                                                                                                |
+| ------------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **Pearson (multi)**      | Maximize mean pairwise corr: maximize $\mathrm{corr}(\tilde Z^{(i)},\tilde Z^{(j)})$      | Linear shared structure              | projector dim; feature normalization (pre-BN/L2)                 | **Low**         | Simple, fast, stable at small batch; second-order only—can over-smooth fine texture if over-weighted at high levels. |
+| **Barlow Twins (multi)** | Cross-corr to identity: $\mathcal{L}=\sum_i (1-C_{ii})^2+\lambda!\sum_{i\neq j} C_{ij}^2$ | Invariance + decorrelation           | $\lambda$ (off-diag weight); covariance shrinkage; projector dim | **Med**         | No negatives; good default. Needs decent batch to estimate $C$; shrinkage helps stability.                           |
+| **VICReg (multi)**       | $\alpha,\text{Inv}+\beta,\text{Var}+\gamma,\text{Cov}$                                    | Invariance while preserving variance | $\alpha,\beta,\gamma$; var margin; projector dim                 | **Med–Low**     | Collapse-resistant; tunable trade-offs. More knobs; match var margin to feature dim.                                 |
+| **InfoNCE (multi)**      | Contrastive: $\mathcal{L}=-\log \frac{\exp(s/\tau)}{\sum \exp(s'/\tau)}$                  | Discriminative cross-view alignment  | temperature $\tau$; projector dim; (optional) aug strength       | **High**        | Strong signal with large batches; sensitive to batch/negatives; heavier compute.                                     |
+| **HSIC (biased)**        | Maximize kernel dependence: $\mathrm{HSIC}(X,Y)$ (e.g., RBF)                              | Non-linear shared structure          | kernel type; bandwidth $\sigma$ (median heuristic); reg          | **Med**         | Captures beyond second-order; $O(B^2)$ cost; bandwidth selection matters.                                            |
+
 **Implementation notes.** Feature normalization; projector depth 1–2;
 temperature schedules; covariance shrinkage for Barlow/VICReg.
 
