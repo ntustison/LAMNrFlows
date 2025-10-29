@@ -14,6 +14,14 @@ python eval_conditional_gaussian.py \
 
 ### vicreg
 
+__Ground truth:__ FA given T1 + T2
+<img width="1042" height="522" alt="gt_FA_given_T1+T2" src="https://github.com/user-attachments/assets/bc990285-4f91-4717-ac87-bab1899054a1" />
+
+__Prediction:__ FA given T1 + T2
+<img width="1042" height="522" alt="hat_FA_given_T1+T2" src="https://github.com/user-attachments/assets/3d014eb5-cba9-4cf2-aa33-45c9a85430db" />
+
+---
+
 __Ground truth:__ T1 + FA given T2
 <img width="1042" height="522" alt="gt_T1+FA_given_T2" src="https://github.com/user-attachments/assets/87ddc84d-a5ba-44d5-8e16-62969588888f" />
 
