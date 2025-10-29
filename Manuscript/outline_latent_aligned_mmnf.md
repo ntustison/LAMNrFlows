@@ -83,7 +83,7 @@
 
 ## 4. Latent-Aligned Training (with Aleatoric-Aware Weighting)
 ### 4.1 Setup and notation
-Let $(V)$ modalities \(\{x^{(v)}\}_{v=1}^V\). Flow \(f\) factorizes into levels \(f_\ell\), yielding per-level latents \(Z_\ell^{(v)}=f_\ell(x^{(v)})\). Lightweight projector \(P_\ell\) (shared or per-view) produces \(\tilde Z_\ell^{(v)}=P_\ell Z_\ell^{(v)}\).  
+Let $(V)$ modalities $\(\{x^{(v)}\}_{v=1}^V\)$. Flow \(f\) factorizes into levels \(f_\ell\), yielding per-level latents \(Z_\ell^{(v)}=f_\ell(x^{(v)})\). Lightweight projector \(P_\ell\) (shared or per-view) produces \(\tilde Z_\ell^{(v)}=P_\ell Z_\ell^{(v)}\).  
 Unified training objective:
 \[
 \mathcal{L} = \mathrm{NLL}(x) + \sum_{\ell=0}^{L-1}\sum_{t\in\mathcal{T}} \lambda_{\ell,t}\,\mathcal{R}_{\ell,t}\big(\{\tilde Z_\ell^{(v)}\}_v\big).
