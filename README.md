@@ -1,2 +1,1 @@
-# MultimodalNormalizingFlows
-Latent-Aligned Multimodal Normalizing Flows for Medical Images
+# Latent-Aligned Multimodal Normalizing Flows for Medical Images
