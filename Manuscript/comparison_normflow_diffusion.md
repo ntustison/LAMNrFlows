@@ -1,8 +1,8 @@
 
 ---
 title: "Gaussian Diffusion vs. Normalizing Flows (concise overview)"
-bibliography: references.bib        # path to your .bib
-csl: 
+bibliography: references.bib       
+csl: nature.csl
 link-citations: true
 citeproc: true
 ---
