@@ -1,61 +1,89 @@
 # Latent-Aligned Multimodal Normalizing Flows for Medical Images
 
-> **Document type:** Working outline (Methods-focused).  
-> **Scope covered:** Sections 1–5 (Library fixes/extensions, latent-aligned training, and Conditional Gaussian Modeling).  
-> **Status:** Experiments for §5 in progress; text describes finalized *technical* design.
-
 ---
 
-## Abstract (placeholder, ~150–200 words)
-- Motivation: invertible models for multimodal medical imaging (exact likelihoods, faithful inverses, multiscale latents).  
-- Contributions (high level): hardened 2D/3D Glow + ANTsTorch integration; per-level latent alignment family with CCA safety; Kendall–Gal–style aleatoric weighting; conditional Gaussian modeling (CGM) for imputation.  
+## Abstract
+
+- Motivation: invertible models for multimodal medical imaging (exact
+  likelihoods, faithful inverses, multiscale latents).  
+
+- Contributions (high level): hardened 2D/3D Glow + ANTsTorch integration;
+  per-level latent alignment family with CCA safety; Kendall–Gal–style aleatoric
+  weighting; conditional Gaussian modeling (CGM) for imputation.  
+
 - Results teaser (to be filled after experiments).  
 
 ---
 
 ## 1. Introduction
-- **Problem setting.** Co-registered modalities (e.g., T1, T2, FA). Desire a single invertible backbone for generation, cross-modal synthesis, and (later) imputation.  
-- **Practical gaps.** 3D Glow brittleness; under/over-alignment risks when coupling views; manual loss balancing across noisy modalities.  
-- **Uncertainty motivation.** Following Kendall–Gal, treat alignment as heteroscedastic auxiliary objectives; learn aleatoric weights instead of hand-tuning.  
+
+- **Problem setting.** Co-registered modalities (e.g., T1, T2, FA). Desire a
+  single invertible backbone for generation, cross-modal synthesis, and
+  imputation.  
+- **Practical gaps.** 3D Glow brittleness; under/over-alignment risks when
+  coupling views; manual loss balancing across noisy modalities.  
+- **Uncertainty motivation.** Following Kendall–Gal, treat alignment as
+  heteroscedastic auxiliary objectives; learn aleatoric weights instead of
+  hand-tuning.  
 - **Contributions.**
   1. Hardened 2D/3D Glow in *normflows* with ANTsTorch IO & tests.  
-  2. **Per-level latent alignment** with projector heads and **CCA-guided clamp** across multiple objective families.  
+  2. **Per-level latent alignment** with projector heads and **CCA-guided
+     clamp** across multiple objective families.  
   3. **Aleatoric-aware loss balancing** (Kendall–Gal–style) for alignment.  
-  4. **Conditional Gaussian Modeling** (CGM) for multimodal imputation in latent space with CCA subspace control and uncertainty-aware sampling.  
+  4. **Conditional Gaussian Modeling** (CGM) for multimodal imputation in latent
+     space with CCA subspace control and uncertainty-aware sampling.  
 - **Manuscript scope.** Methods (§§3–5); experiments for §5 to be added.
 
 ---
 
 ## 2. Related Work
-- **Normalizing flows.** RealNVP/Glow; multiscale squeeze/split; 3D extensions; invertibility vs. diffusion trade-offs.  
-- **Multiview alignment.** Barlow Twins, VICReg, InfoNCE, HSIC; relation to medical translation and registration.  
-- **Uncertainty in deep learning.** Kendall–Gal: epistemic vs. aleatoric; heteroscedastic task weighting; multi-task learning connections.  
-- **Positioning.** Robust 3D flows + principled, uncertainty-aware latent alignment + CGM for imputation in a unified pipeline.
+
+- **Normalizing flows.** RealNVP/Glow; multiscale squeeze/split; 3D extensions;
+  invertibility vs. diffusion trade-offs.  
+- **Multiview alignment.** Barlow Twins, VICReg, InfoNCE, HSIC; relation to
+  medical translation and registration.  
+- **Uncertainty in deep learning.** Kendall–Gal: epistemic vs. aleatoric;
+  heteroscedastic task weighting; multi-task learning connections.  
+- **Positioning.** Robust 3D flows + principled, uncertainty-aware latent
+  alignment + CGM for imputation in a unified pipeline.
 
 ---
 
 ## 3. Library Fixes & Extensions (normflows + ANTsTorch)
+
 ### 3.1 Architecture corrections & 3D enablement
-- **Correct multiscale pipeline.** Fix **squeeze/unsqueeze** and **split/merge** ordering; explicit shape asserts; stable log-det tracking.  
-- **3D invertible components.** `GlowBlock3d`, `Invertible1x1x1Conv`, `ActNorm3d`; optional spectral norm; gradient clipping.  
+
+- **Correct multiscale pipeline.** Fix **squeeze/unsqueeze** and **split/merge**
+  ordering; explicit shape asserts; stable log-det tracking.  
+- **3D invertible components.** `GlowBlock3d`, `Invertible1x1x1Conv`,
+  `ActNorm3d`; optional spectral norm; gradient clipping.  
 
 ### 3.2 Training stability & performance
-- **AMP + EMA**, LR warmup, **jitter** (with annealable jitter-alpha) as an aleatoric proxy; deterministic seeds.  
-- **Resumable training.** Checkpoints (model/optimizer/EMA), TQDM progress; consistent metric logging (bpd/NLL, alignment diagnostics, grad norms).  
+
+- **AMP + EMA**, LR warmup, **jitter** (with annealable jitter-alpha) as an
+  aleatoric proxy; deterministic seeds.  
+- **Resumable training.** Checkpoints (model/optimizer/EMA), TQDM progress;
+  consistent metric logging (bpd/NLL, alignment diagnostics, grad norms).  
 
 ### 3.3 Data & IO
-- ANTsTorch paired-modality loaders; resampling/cropping; reproducible splits; intensity standardization.  
+
+- ANTsTorch paired-modality loaders; resampling/cropping; reproducible splits;
+  intensity standardization.  
 
 ### 3.4 Reproducibility assets
-- Single-entry `train.py` with flags for: alignment family, per-level taps, CCA clamp, aleatoric weighting.  
-- **pytest**: round-trip/inversion; log-det consistency; level-wise shape invariants; 3D path tests.  
+
+- Single-entry `train.py` with flags for: alignment family, per-level taps, CCA
+  clamp, aleatoric weighting.  
+- **pytest**: round-trip/inversion; log-det consistency; level-wise shape
+  invariants; 3D path tests.  
 - Minimal docs/API; CI notes.
 
 ---
 
+
 ## 4. Latent-Aligned Training (with Aleatoric-Aware Weighting)
 ### 4.1 Setup and notation
-Let \(V\) modalities \(\{x^{(v)}\}_{v=1}^V\). Flow \(f\) factorizes into levels \(f_\ell\), yielding per-level latents \(Z_\ell^{(v)}=f_\ell(x^{(v)})\). Lightweight projector \(P_\ell\) (shared or per-view) produces \(\tilde Z_\ell^{(v)}=P_\ell Z_\ell^{(v)}\).  
+Let $\(V\) modalities \(\{x^{(v)}\}_{v=1}^V\). Flow \(f\) factorizes into levels \(f_\ell\), yielding per-level latents \(Z_\ell^{(v)}=f_\ell(x^{(v)})\). Lightweight projector \(P_\ell\) (shared or per-view) produces \(\tilde Z_\ell^{(v)}=P_\ell Z_\ell^{(v)}\).  
 Unified training objective:
 \[
 \mathcal{L} = \mathrm{NLL}(x) + \sum_{\ell=0}^{L-1}\sum_{t\in\mathcal{T}} \lambda_{\ell,t}\,\mathcal{R}_{\ell,t}\big(\{\tilde Z_\ell^{(v)}\}_v\big).
