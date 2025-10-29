@@ -1,6 +1,37 @@
 ## Latent-Aligned Multimodal Normalizing Flows for Medical Images
 
+```bash
+# Minimize regularization
+python eval_conditional_gaussian.py \
+  --run-dir runs2/t1_t2_fa_128x128_${i} \
+  --use-ema \
+  --gauss-samples 10000 --eval-samples 256 --batch 64 \
+  --cov-mode perlevel \
+  --cov-estimator diag --cov-lam 0.0 \
+  --shrinkage 1e-6 \
+  --cov-debug \
+  --eval-tag gauss_minreg
 ```
+
+### vicreg
+
+__Ground truth:__ FA given T1 + T2
+<img width="1042" height="522" alt="gt_FA_given_T1+T2" src="https://github.com/user-attachments/assets/f08a7ec4-9f62-4e33-8a0c-37ca110e0ee7" />
+
+__Prediction:__ FA given T1 + T2
+<img width="1042" height="522" alt="hat_FA_given_T1+T2" src="https://github.com/user-attachments/assets/ae591ab1-03a4-4416-afa1-13883e67107f" />
+
+---
+
+__Ground truth:__ T1 + FA given T2
+<img width="1042" height="522" alt="gt_T1+FA_given_T2" src="https://github.com/user-attachments/assets/ccd9396c-9088-477c-a6d8-58277fc7872d" />
+
+__Prediction:__ T1 + FA given T2
+<img width="1042" height="522" alt="hat_T1+FA_given_T2" src="https://github.com/user-attachments/assets/039ae080-dc52-4f8e-a65a-bd28e363f880" />
+
+---
+
+```bash
 # Optimal balance between data fidelity and regularization
 python eval_conditional_gaussian.py \
     --run-dir runs2/t1_t2_fa_128x128_vicreg \
