@@ -1,10 +1,11 @@
----
-title: "Latent alignment strategies: expanded overview"
-bibliography: references.bib       
-csl: nature.csl
-link-citations: true
-citeproc: true
----
+
+\clearpage
+
+# Latent alignment
+
+
+\footnotesize
+
 
 | Method                   | Objective (sketch)                                                                        | Encourages                           | Typical hyperparams                                              | Batch size need | Notes                                                                                                                |
 | ------------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------- |
@@ -13,6 +14,8 @@ citeproc: true
 | **VICReg (multi)**       | $\alpha,\text{Inv}+\beta,\text{Var}+\gamma,\text{Cov}$                                    | Invariance while preserving variance | $\alpha,\beta,\gamma$; var margin; projector dim                 | **Med–Low**     | Collapse-resistant; tunable trade-offs. More knobs; match var margin to feature dim.                                 |
 | **InfoNCE (multi)**      | Contrastive: $\mathcal{L}=-\log \frac{\exp(s/\tau)}{\sum \exp(s'/\tau)}$                  | Discriminative cross-view alignment  | temperature $\tau$; projector dim; (optional) aug strength       | **High**        | Strong signal with large batches; sensitive to batch/negatives; heavier compute.                                     |
 | **HSIC (biased)**        | Maximize kernel dependence: $\mathrm{HSIC}(X,Y)$ (e.g., RBF)                              | Non-linear shared structure          | kernel type; bandwidth $\sigma$ (median heuristic); reg          | **Med**         | Captures beyond second-order; $O(B^2)$ cost; bandwidth selection matters.                                            |
+
+\normalsize
 
 
 We align per-level projected latents $\tilde Z_\ell^{(v)} = P_\ell Z_\ell^{(v)}$
@@ -115,6 +118,8 @@ factor $\alpha\in(0,1]$ to avoid runaway alignment along a few axes.
 
 ### Compact comparison (with pointers)
 
+\footnotesize
+
 | Method | What it optimizes | Captures | Negatives? | Batch need | Key knobs |
 |---|---|---|---|---|---|
 | Pearson | Mean pairwise corr | Linear, second-order | No | Low | Feature norm; weight |
@@ -124,3 +129,4 @@ factor $\alpha\in(0,1]$ to avoid runaway alignment along a few axes.
 | HSIC [@gretton2005hsic] | Kernel dependence | Non-linear relations | No | Med | Kernel/bandwidth; reg |
 | CCA clamp [@hotelling1936; @andrew2013dcca] | Subspace + scaling | Stabilizes shared axes | — | Low | Rank $k$; clamp $\alpha$ |
 
+\normalsize

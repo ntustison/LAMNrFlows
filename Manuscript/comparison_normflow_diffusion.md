@@ -1,12 +1,9 @@
 
----
-title: "Gaussian Diffusion vs. Normalizing Flows (concise overview)"
-bibliography: references.bib       
-csl: nature.csl
-link-citations: true
-citeproc: true
----
+\clearpage
 
+# Normalizing flows vs. Gaussian diffusion
+
+\footnotesize
 
 | Aspect               | Diffusion / Score-based                                                                                    | Normalizing Flows                                                               |
 | -------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -17,6 +14,8 @@ citeproc: true
 | Conditioning         | Very flexible (CFG, cross-attention) [@rombach2022ldm]                                                | Via conditioning in coupling/1×1 conv; integrates into likelihood               |
 | Strengths            | SOTA perceptual quality; robust training                                                                   | Exact density; calibrated comparisons; natural for cross-modal transforms       |
 | Typical pitfalls     | Slow sampling; compute-heavy; likelihood metrics awkward                                                   | Architecture care needed; coupling expressivity vs. Jacobian cost               |
+
+\normalsize
 
 
 * __Modeling objective__
@@ -70,8 +69,3 @@ citeproc: true
     * Flows: exact likelihoods + invertibility make them natural for multimodal
       latent alignment and our Conditional Gaussian imputation pipeline.
 
-
-
-## References
-::: {#refs]
-:::
