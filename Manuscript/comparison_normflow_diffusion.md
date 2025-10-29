@@ -72,4 +72,6 @@ citeproc: true
 
 
 
-
+## References
+::: {#refs}
+:::
