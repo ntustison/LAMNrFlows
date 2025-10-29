@@ -6,11 +6,9 @@
 
 - Motivation: invertible models for multimodal medical imaging (exact
   likelihoods, faithful inverses, multiscale latents).  
-
 - Contributions (high level): hardened 2D/3D Glow + ANTsTorch integration;
   per-level latent alignment family with CCA safety; Kendall–Gal–style aleatoric
   weighting; conditional Gaussian modeling (CGM) for imputation.  
-
 - Results teaser (to be filled after experiments).  
 
 ---
@@ -20,14 +18,11 @@
 - **Problem setting.** Co-registered modalities (e.g., T1, T2, FA). Desire a
   single invertible backbone for generation, cross-modal synthesis, and (later)
   imputation.  
-
 - **Practical gaps.** 3D Glow brittleness; under/over-alignment risks when
   coupling views; manual loss balancing across noisy modalities.  
-
 - **Uncertainty motivation.** Following Kendall–Gal, treat alignment as
   heteroscedastic auxiliary objectives; learn aleatoric weights instead of
   hand-tuning.  
-
 - **Contributions.**
   1. Hardened 2D/3D Glow in *normflows* with ANTsTorch IO & tests.  
   2. **Per-level latent alignment** with projector heads and **CCA-guided
@@ -35,7 +30,6 @@
   3. **Aleatoric-aware loss balancing** (Kendall–Gal–style) for alignment.  
   4. **Conditional Gaussian Modeling** (CGM) for multimodal imputation in latent
      space with CCA subspace control and uncertainty-aware sampling.  
-
 - **Manuscript scope.** Methods (§§3–5); experiments for §5 to be added.
 
 ---
@@ -98,7 +92,7 @@
 Let $V$ modalities $\lbrace x^{(v)}\rbrace_{v=1}^V$. Flow $f$ factorizes into
 levels $f_\ell$, yielding per-level latents $Z_\ell^{(v)}=f_\ell(x^{(v)})$.
 Lightweight projector $P_\ell$ (shared or per-view) produces
-$\tildeZ_\ell^{(v)}=P_\ell Z_\ell^{(v)}$.  Unified training objective:
+$\tilde Z_\ell^{(v)}=P_\ell Z_\ell^{(v)}$.  Unified training objective:
 
 $$\mathcal{L} = \mathrm{NLL}(x) + \sum_{\ell=0}^{L-1}\sum_{t\in\mathcal{T}} \lambda_{\ell,t}\,\mathcal{R}_{\ell,t}\big(\{\tilde Z_\ell^{(v)}\}_v\big).$$
 
