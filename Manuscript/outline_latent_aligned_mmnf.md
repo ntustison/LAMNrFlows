@@ -1,9 +1,5 @@
 # Latent-Aligned Multimodal Normalizing Flows for Medical Images
 
-> **Document type:** Working outline (Methods-focused).  
-> **Scope covered:** Sections 1–5 (Library fixes/extensions, latent-aligned training, and Conditional Gaussian Modeling).  
-> **Status:** Experiments for §5 in progress; text describes finalized *technical* design.
-
 ---
 
 ## Abstract (placeholder, ~150–200 words)
@@ -55,8 +51,9 @@
 
 ## 4. Latent-Aligned Training (with Aleatoric-Aware Weighting)
 ### 4.1 Setup and notation
-Let $V$ modalities $\{x^{(v)}\}_{v=1}^V$. Flow $f$ factorizes into levels $f_\ell$, yielding per-level latents $Z_\ell^{(v)}=f_\ell(x^{(v)})$. Lightweight projector $P_\ell$ (shared or per-view) produces $\tilde Z_\ell^{(v)}=P_\ell Z_\ell^{(v)}$.  
+Let $V$ modalities $\lbrace x^{(v)}\rbrace_{v=1}^V$. Flow $f$ factorizes into levels $f_\ell$, yielding per-level latents $Z_\ell^{(v)}=f_\ell(x^{(v)})$. Lightweight projector $P_\ell$ (shared or per-view) produces $\tilde Z_\ell^{(v)}=P_\ell Z_\ell^{(v)}$.  
 Unified training objective:
+
 $$\mathcal{L} = \mathrm{NLL}(x) + \sum_{\ell=0}^{L-1}\sum_{t\in\mathcal{T}} \lambda_{\ell,t}\,\mathcal{R}_{\ell,t}\big(\{\tilde Z_\ell^{(v)}\}_v\big).$$
 
 ### 4.2 Alignment objective family (unified view)
@@ -73,7 +70,9 @@ $$\mathcal{L} = \mathrm{NLL}(x) + \sum_{\ell=0}^{L-1}\sum_{t\in\mathcal{T}} \lam
 
 ### 4.4 Aleatoric-aware weighting (Kendall–Gal–style)
 Replace fixed $\lambda_{\ell,t}$ with learned log-variances:
+
 $$\mathcal{L} = \mathrm{NLL}(x) + \sum_{\ell,t} \Big[ \frac{\mathcal{R}_{\ell,t}}{2\sigma_{\ell,t}^2} + \log \sigma_{\ell,t} \Big],$$
+
 interpreting $\sigma_{\ell,t}$ as alignment **aleatoric** noise.  
 **Recipe.** Initialize $\log\sigma=0$; exclude from EMA; optional L2 prior on $\log\sigma$; joint or delayed warmup; anneal jitter-alpha; schedule InfoNCE temperature.
 
