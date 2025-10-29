@@ -55,11 +55,9 @@
 
 ## 4. Latent-Aligned Training (with Aleatoric-Aware Weighting)
 ### 4.1 Setup and notation
-Let \(V\) modalities \(\{x^{(v)}\}_{v=1}^V\). Flow \(f\) factorizes into levels \(f_\ell\), yielding per-level latents \(Z_\ell^{(v)}=f_\ell(x^{(v)})\). Lightweight projector \(P_\ell\) (shared or per-view) produces \(\tilde Z_\ell^{(v)}=P_\ell Z_\ell^{(v)}\).  
+Let $V$ modalities $\{x^{(v)}\}_{v=1}^V$. Flow $f$ factorizes into levels $f_\ell$, yielding per-level latents $Z_\ell^{(v)}=f_\ell(x^{(v)})$. Lightweight projector $P_\ell$ (shared or per-view) produces $\tilde Z_\ell^{(v)}=P_\ell Z_\ell^{(v)}$.  
 Unified training objective:
-\[
-\mathcal{L} = \mathrm{NLL}(x) + \sum_{\ell=0}^{L-1}\sum_{t\in\mathcal{T}} \lambda_{\ell,t}\,\mathcal{R}_{\ell,t}\big(\{\tilde Z_\ell^{(v)}\}_v\big).
-\]
+$$\mathcal{L} = \mathrm{NLL}(x) + \sum_{\ell=0}^{L-1}\sum_{t\in\mathcal{T}} \lambda_{\ell,t}\,\mathcal{R}_{\ell,t}\big(\{\tilde Z_\ell^{(v)}\}_v\big).$$
 
 ### 4.2 Alignment objective family (unified view)
 - **Pearson (multi).** Maximize mean pairwise correlation; low overhead; robust at small batch.  
@@ -71,57 +69,53 @@ Unified training objective:
 
 ### 4.3 Per-level extraction & CCA-guided safety
 - **Why per-level?** Coarse structure (lower levels) vs. fine texture (higher levels). Avoids one-size-fits-all pressure and blur.  
-- **CCA-safe clamp.** At each level, compute minibatch CCA across views; scale top-\(k\) canonical directions by \(\alpha\in(0,1]\) to prevent runaway spikes/collapse. Modes: `perlevel` or `global` aggregation.
+- **CCA-safe clamp.** At each level, compute minibatch CCA across views; scale top-$k$ canonical directions by $\alpha\in(0,1]$ to prevent runaway spikes/collapse. Modes: `perlevel` or `global` aggregation.
 
 ### 4.4 Aleatoric-aware weighting (Kendall–Gal–style)
-Replace fixed \(\lambda_{\ell,t}\) with learned log-variances:
-\[
-\mathcal{L} = \mathrm{NLL}(x) + \sum_{\ell,t} \Big[ \frac{\mathcal{R}_{\ell,t}}{2\sigma_{\ell,t}^2} + \log \sigma_{\ell,t} \Big],
-\]
-interpreting \(\sigma_{\ell,t}\) as alignment **aleatoric** noise.  
-**Recipe.** Initialize \(\log\sigma=0\); exclude from EMA; optional L2 prior on \(\log\sigma\); joint or delayed warmup; anneal jitter-alpha; schedule InfoNCE temperature.
+Replace fixed $\lambda_{\ell,t}$ with learned log-variances:
+$$\mathcal{L} = \mathrm{NLL}(x) + \sum_{\ell,t} \Big[ \frac{\mathcal{R}_{\ell,t}}{2\sigma_{\ell,t}^2} + \log \sigma_{\ell,t} \Big],$$
+interpreting $\sigma_{\ell,t}$ as alignment **aleatoric** noise.  
+**Recipe.** Initialize $\log\sigma=0$; exclude from EMA; optional L2 prior on $\log\sigma$; joint or delayed warmup; anneal jitter-alpha; schedule InfoNCE temperature.
 
 ### 4.5 Hyper-parameters & optimization
-- Architecture: \(L,K\), hidden channels; projector width/depth.  
+- Architecture: $L,K$, hidden channels; projector width/depth.  
 - Optimization: LR/WD, gradient clipping, AMP+EMA, batch size; covariance shrinkage for Barlow/VICReg.  
 
 ---
 
 ## 5. Conditional Gaussian Modeling (CGM) for Multimodal Imputation
 ### 5.1 Problem setup
-For a subject with observed set \(S\) and missing set \(M\), operate **per level** in latent space. Concatenate projected latents across views:  
-\(\tilde Z_\ell = [\tilde Z_\ell^{(1)};\dots;\tilde Z_\ell^{(V)}]\). Assume dataset-level Gaussianity after flow+alignment: \(\tilde Z_\ell \sim \mathcal{N}(\mu_\ell,\Sigma_\ell)\). Partition into observed \(X\) and missing \(Y\) blocks and use the standard conditional:
-\[
-\mu_{Y|X} = \mu_Y + \Sigma_{YX}\Sigma_{XX}^{-1}(x-\mu_X), \quad
-\Sigma_{Y|X} = \Sigma_{YY}-\Sigma_{YX}\Sigma_{XX}^{-1}\Sigma_{XY}.
-\]
+For a subject with observed set $S$ and missing set $M$, operate **per level** in latent space. Concatenate projected latents across views:  
+$\tilde Z_\ell = [\tilde Z_\ell^{(1)};\dots;\tilde Z_\ell^{(V)}]$. Assume dataset-level Gaussianity after flow+alignment: $\tilde Z_\ell \sim \mathcal{N}(\mu_\ell,\Sigma_\ell)$. Partition into observed $X$ and missing $Y$ blocks and use the standard conditional:
+$$\mu_{Y|X} = \mu_Y + \Sigma_{YX}\Sigma_{XX}^{-1}(x-\mu_X), \quad
+\Sigma_{Y|X} = \Sigma_{YY}-\Sigma_{YX}\Sigma_{XX}^{-1}\Sigma_{XY}.$$
 
-### 5.2 Estimation of \(\mu_\ell,\Sigma_\ell\) (robust)
+### 5.2 Estimation of $\mu_\ell,\Sigma_\ell$ (robust)
 - Centering + optional per-feature scaling.  
-- **Regularized covariance:** ridge/diagonal loading \(\widehat\Sigma+\varepsilon I\) (flag `--jitter`) and/or **Ledoit–Wolf** shrinkage.  
-- **CCA subspace control:** project \(X,Y\) into rank-\(k\) shared subspace (`--cca perlevel --cca-k k`) before covariance; **CCA-safe clamp** with strength \(\alpha\).  
+- **Regularized covariance:** ridge/diagonal loading $\widehat\Sigma+\varepsilon I$ (flag `--jitter`) and/or **Ledoit–Wolf** shrinkage.  
+- **CCA subspace control:** project $X,Y$ into rank-$k$ shared subspace (`--cca perlevel --cca-k k`) before covariance; **CCA-safe clamp** with strength $\alpha$.  
 - **SPD numerics:** Cholesky solves; SVD fallback; auto-jitter retries.
 
 ### 5.3 Inference pipeline (per level; vectorized)
-1. Encode observed modalities: \(Z_\ell^{(v)}=f_\ell(x^{(v)})\) → \(\tilde Z_\ell^{(v)}=P_\ell Z_\ell^{(v)}\) for \(v\in S\).  
-2. Build block means/covariances \((\mu_Y,\mu_X,\Sigma_{YY},\Sigma_{YX},\Sigma_{XX})\).  
-3. Compute \((\mu_{Y|X},\Sigma_{Y|X})\).  
-4. **Posterior mean** or samples \(y_\ell \sim \mathcal{N}(\mu_{Y|X},\,\tau^2\Sigma_{Y|X})\) (temperature \(\tau\)).  
-5. Replace missing latents for \(v\in M\); **invert flow** to reconstruct \(\hat y\).  
+1. Encode observed modalities: $Z_\ell^{(v)}=f_\ell(x^{(v)})$ → $\tilde Z_\ell^{(v)}=P_\ell Z_\ell^{(v)}$ for $v\in S$.  
+2. Build block means/covariances $(\mu_Y,\mu_X,\Sigma_{YY},\Sigma_{YX},\Sigma_{XX})$.  
+3. Compute $(\mu_{Y|X},\Sigma_{Y|X})$.  
+4. **Posterior mean** or samples $y_\ell \sim \mathcal{N}(\mu_{Y|X},\,\tau^2\Sigma_{Y|X})$ (temperature $\tau$).  
+5. Replace missing latents for $v\in M$; **invert flow** to reconstruct $\hat y$.  
 **Engineering:** chunked latent indexing; batched solves; arbitrary missingness supported.
 
 ### 5.4 Control knobs (noise ↔ variance)
-- **Temperature \(\tau\):** scales \(\Sigma_{Y|X}\).  
-- **CCA rank \(k\):** subspace dimensionality.  
-- **Clamp \(\alpha\):** limit top-\(k\) canonical directions.  
-- **Jitter \(\varepsilon\):** SPD stability vs. bias.  
-- **Per-level ranks \(k_\ell\):** larger at coarse levels, smaller at texture levels.
+- **Temperature $\tau$:** scales $\Sigma_{Y|X}$.  
+- **CCA rank $k$:** subspace dimensionality.  
+- **Clamp $\alpha$:** limit top-$k$ canonical directions.  
+- **Jitter $\varepsilon$:** SPD stability vs. bias.  
+- **Per-level ranks $k_\ell$:** larger at coarse levels, smaller at texture levels.
 
 ### 5.5 Diagnostics & planned reports
-- **Calibration:** coverage vs. \(\Sigma_{Y|X}\); Mahalanobis residuals.  
+- **Calibration:** coverage vs. $\Sigma_{Y|X}$; Mahalanobis residuals.  
 - **Fidelity:** PSNR/SSIM; structure correlation; intensity bias.  
-- **Uncertainty maps:** trace\((\Sigma_{Y|X})\) per voxel.  
-- **Ablations:** \(\varepsilon,k,\alpha,\tau\), mean vs. sampling; EMA on/off during encode/decode.  
+- **Uncertainty maps:** trace$(\Sigma_{Y|X})$ per voxel.  
+- **Ablations:** $\varepsilon,k,\alpha,\tau$, mean vs. sampling; EMA on/off during encode/decode.  
 - **Efficiency:** wall-clock, memory; chunk-size sensitivity.
 
 ### 5.6 Interface flags (current defaults)
@@ -135,7 +129,7 @@ Notes: fixed seed; EMA weights optional during encode/decode.
 ### 5.7 Limitations & future work
 - Approximate Gaussianity; consider **mixture models** / **graphical shrinkage**.  
 - Covariance across subjects at fixed spatial indices; consider **local spatial banding**.  
-- Data-driven selection of \(k_\ell\) (eigengap, held-out likelihood).
+- Data-driven selection of $k_\ell$ (eigengap, held-out likelihood).
 
 ---
 
