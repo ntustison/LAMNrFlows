@@ -58,6 +58,10 @@
 
 ### 3.2 Training stability & performance
 
+- **NNL** Negative log-likelihood (NLL): The key training objective for flows.
+  For $z=f(x)$ and a standard normal prior, 
+  $\text{NLL}(x) = \tfrac12(|z|^2 + d\log(2\pi)) - \log |\det J_f(x)|$; 
+  expressed in nats or bits-per-dimension ($\mathrm{bpd} = \text{NLL}/(D \ln 2)$).
 - **AMP + EMA**, LR warmup, **jitter** (with annealable jitter-alpha) as an
   aleatoric proxy; deterministic seeds.  
 - **Resumable training.** Checkpoints (model/optimizer/EMA), TQDM progress;
