@@ -38,13 +38,10 @@
 
 - **Normalizing flows.** RealNVP/Glow; multiscale squeeze/split; 3D extensions;
   invertibility vs. diffusion trade-offs.  
-
 - **Multiview alignment.** Barlow Twins, VICReg, InfoNCE, HSIC; relation to
   medical translation and registration.  
-
 - **Uncertainty in deep learning.** Kendall–Gal: epistemic vs. aleatoric;
   heteroscedastic task weighting; multi-task learning connections.  
-
 - **Positioning.** Robust 3D flows + principled, uncertainty-aware latent
   alignment + CGM for imputation in a unified pipeline.
 
@@ -56,7 +53,6 @@
 
 - **Correct multiscale pipeline.** Fix **squeeze/unsqueeze** and **split/merge**
   ordering; explicit shape asserts; stable log-det tracking.  
-
 - **3D invertible components.** `GlowBlock3d`, `Invertible1x1x1Conv`,
   `ActNorm3d`; optional spectral norm; gradient clipping.  
 
@@ -64,7 +60,6 @@
 
 - **AMP + EMA**, LR warmup, **jitter** (with annealable jitter-alpha) as an
   aleatoric proxy; deterministic seeds.  
-
 - **Resumable training.** Checkpoints (model/optimizer/EMA), TQDM progress;
   consistent metric logging (bpd/NLL, alignment diagnostics, grad norms).  
 
@@ -77,10 +72,8 @@
 
 - Single-entry `train.py` with flags for: alignment family, per-level taps, CCA
   clamp, aleatoric weighting.  
-
 - **pytest**: round-trip/inversion; log-det consistency; level-wise shape
   invariants; 3D path tests.  
-
 - Minimal docs/API; CI notes.
 
 ---
@@ -100,16 +93,12 @@ $$\mathcal{L} = \mathrm{NLL}(x) + \sum_{\ell=0}^{L-1}\sum_{t\in\mathcal{T}} \lam
 
 - **Pearson (multi).** Maximize mean pairwise correlation; low overhead; robust
   at small batch.  
-
 - **Barlow Twins (multi).** Push cross-correlation toward identity; penalize
   off-diagonals; decorrelate.  
-
 - **VICReg (multi).** Invariance + variance floor + covariance shrinkage to
   prevent collapse.  
-
 - **InfoNCE (multi).** Contrastive with in-batch negatives; temperature control;
   batch-size sensitive.  
-
 - **HSIC (biased).** Kernel dependence measure capturing higher-order relations.  
 
 **Implementation notes.** Feature normalization; projector depth 1–2;
@@ -119,7 +108,6 @@ temperature schedules; covariance shrinkage for Barlow/VICReg.
 
 - **Why per-level?** Coarse structure (lower levels) vs. fine texture (higher
   levels). Avoids one-size-fits-all pressure and blur.  
-
 - **CCA-safe clamp.** At each level, compute minibatch CCA across views; scale
   top-$k$ canonical directions by $\alpha\in(0,1]$ to prevent runaway
   spikes/collapse. Modes: `perlevel` or `global` aggregation.
@@ -138,7 +126,6 @@ temperature.
 ### 4.5 Hyper-parameters & optimization
 
 - Architecture: $L,K$, hidden channels; projector width/depth.  
-
 - Optimization: LR/WD, gradient clipping, AMP+EMA, batch size; covariance
   shrinkage for Barlow/VICReg.  
 
@@ -161,14 +148,11 @@ $$\mu_{Y|X} = \mu_Y + \Sigma_{YX}\Sigma_{XX}^{-1}(x-\mu_X), \quad
 ### 5.2 Estimation of $\mu_\ell,\Sigma_\ell$ (robust)
 
 - Centering + optional per-feature scaling.  
-
 - **Regularized covariance:** ridge/diagonal loading $\widehat\Sigma+\varepsilon
   I$ (flag `--jitter`) and/or **Ledoit–Wolf** shrinkage.  
-
 - **CCA subspace control:** project $X,Y$ into rank-$k$ shared subspace (`--cca
   perlevel --cca-k k`) before covariance; **CCA-safe clamp** with strength
   $\alpha$.  
-
 - **SPD numerics:** Cholesky solves; SVD fallback; auto-jitter retries.
 
 ### 5.3 Inference pipeline (per level; vectorized)
@@ -188,26 +172,18 @@ supported.
 ### 5.4 Control knobs (noise ↔ variance)
 
 - **Temperature $\tau$:** scales $\Sigma_{Y|X}$.  
-
 - **CCA rank $k$:** subspace dimensionality.  
-
 - **Clamp $\alpha$:** limit top-$k$ canonical directions.  
-
 - **Jitter $\varepsilon$:** SPD stability vs. bias.  
-
 - **Per-level ranks $k_\ell$:** larger at coarse levels, smaller at texture levels.
 
 ### 5.5 Diagnostics & planned reports
 
 - **Calibration:** coverage vs. $\Sigma_{Y|X}$; Mahalanobis residuals.  
-
 - **Fidelity:** PSNR/SSIM; structure correlation; intensity bias.  
-
 - **Uncertainty maps:** trace$(\Sigma_{Y|X})$ per voxel.  
-
 - **Ablations:** $\varepsilon,k,\alpha,\tau$, mean vs. sampling; EMA on/off
   during encode/decode.  
-
 - **Efficiency:** wall-clock, memory; chunk-size sensitivity.
 
 ### 5.6 Interface flags (current defaults)
@@ -223,7 +199,5 @@ Notes: fixed seed; EMA weights optional during encode/decode.
 ### 5.7 Limitations & future work
 
 - Approximate Gaussianity; consider **mixture models** / **graphical shrinkage**.  
-
 - Covariance across subjects at fixed spatial indices; consider **local spatial banding**.  
-
 - Data-driven selection of $k_\ell$ (eigengap, held-out likelihood).
