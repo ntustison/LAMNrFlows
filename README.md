@@ -3,7 +3,7 @@
 ```bash
 # Minimize regularization
 python eval_conditional_gaussian.py \
-  --run-dir runs2/t1_t2_fa_128x128_${i} \
+  --run-dir runs2/t1_t2_fa_128x128_vicreg \
   --use-ema \
   --gauss-samples 10000 --eval-samples 256 --batch 64 \
   --cov-mode perlevel \
