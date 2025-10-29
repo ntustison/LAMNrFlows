@@ -193,7 +193,7 @@ supported.
 
 - **Calibration:** coverage vs. $\Sigma_{Y|X}$; Mahalanobis residuals.  
 - **Fidelity:** PSNR/SSIM; structure correlation; intensity bias.  
-- **Uncertainty maps:** trace$(\Sigma_{Y|X})$ per voxel.  
+- **Uncertainty maps:** trace $(\Sigma_{Y|X})$ per voxel.  
 - **Ablations:** $\varepsilon,k,\alpha,\tau$, mean vs. sampling; EMA on/off
   during encode/decode.  
 - **Efficiency:** wall-clock, memory; chunk-size sensitivity.
