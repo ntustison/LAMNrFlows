@@ -1,4 +1,12 @@
-## Gaussian Diffusion vs. Normalizing Flows (concise overview)
+
+---
+title: "Gaussian Diffusion vs. Normalizing Flows (concise overview)"
+bibliography: references.bib        # path to your .bib
+csl: 
+link-citations: true
+citeproc: true
+---
+
 
 | Aspect               | Diffusion / Score-based                                                                                    | Normalizing Flows                                                               |
 | -------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
