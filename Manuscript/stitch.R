@@ -9,6 +9,8 @@ rmdFiles <- c( "format.md",
                "intro.md",
                "comparison_normflow_diffusion.md",
                "latent_alignment_expanded.md",
+               "cgm_overview.md",
+               "hcp_ya_experiments.md",
                "references.md"
              )
 
