@@ -6,6 +6,84 @@
 ## Motivation and setting
 Our goal is **imputation of missing modalities** using an *already trained*, **invertible** multimodal flow with **per-level latent taps**. Let $V$ denote the number of modalities, and let the flow factorize into $L$ multiscale levels. For subject $n$ and level $\ell$, we extract per-view latents $Z_{\ell}^{(v)}=f_{\ell}(x_n^{(v)})$ and pass them through a light projector $P_{\ell}$ to obtain features $\tilde Z_{\ell}^{(v)}=P_{\ell} Z_{\ell}^{(v)}$. We then **model the joint distribution across views at each level** as approximately Gaussian, estimated *across subjects*. This enables **closed-form conditioning** for imputation before decoding through the exact inverse of the flow. The approach leverages classical multivariate-Gaussian identities [@bishop2006prml; @murphy2012mlpp] while staying faithful to flow invertibility [@kingma2018glow; @papamakarios2021nfreview].
 
+### Overview
+
+Our Conditional Gaussian Modeling (CGM) uses **classical multivariate‑Gaussian identities** to impute missing **per‑level, per‑view latents** before **exactly** decoding with the inverse flow. This note spells out the identities and explains why they apply (or approximately apply) in our pipeline.
+
+### The identities we use
+
+Let
+\[
+\begin{bmatrix} Y \\ X \end{bmatrix} \sim 
+\mathcal{N}\!\left(
+\begin{bmatrix} \mu_Y \\ \mu_X \end{bmatrix},
+\begin{bmatrix} \Sigma_{YY} & \Sigma_{YX} \\ \Sigma_{XY} & \Sigma_{XX} \end{bmatrix}
+\right).
+\]
+
+1. **Gaussian conditioning (Schur complement form).**  
+\[
+\mu_{Y\mid X=x} \;=\; \mu_Y + \Sigma_{YX}\,\Sigma_{XX}^{-1}\,(x - \mu_X), 
+\qquad
+\Sigma_{Y\mid X} \;=\; \Sigma_{YY} - \Sigma_{YX}\,\Sigma_{XX}^{-1}\,\Sigma_{XY}.
+\]
+This is the closed‑form update we apply to the **missing‑view latents**. See standard treatments in [@bishop2006prml, §2], [@murphy2012mlpp, ch. 4].
+
+2. **Marginalization.**  
+Ignoring \(X\) gives \(Y \sim \mathcal{N}(\mu_Y, \Sigma_{YY})\).
+
+3. **Affine closure (stability under linear maps).**  
+If \(Z \sim \mathcal{N}(\mu,\Sigma)\) and \(\tilde Z = A Z + b\) for any matrix \(A\) and vector \(b\), then
+\(\tilde Z \sim \mathcal{N}(A\mu + b,\; A \Sigma A^\top)\).
+This justifies projecting per‑level latents with **linear projectors** (e.g., CCA) and reasoning about their moments.
+
+4. **Block inversion / numerics.**  
+The conditional covariance above is the **Schur complement** of \(\Sigma_{XX}\) in the joint covariance. In practice we solve systems with \(\Sigma_{XX}\) via **Cholesky** (SPD) with small **ridge/shrinkage** and a **jitter** fallback for robustness [@ledoit2004well; @schafer2005shrinkage; @higham2002accuracy].
+
+5. **LMMSE equivalence.**  
+For jointly Gaussian \((Y,X)\), the conditional mean equals the **best linear predictor** (LMMSE):
+\[
+\mathbb{E}[Y \mid X] \;=\; \mu_Y + \Sigma_{YX}\,\Sigma_{XX}^{-1}\,(X - \mu_X).
+\]
+Thus using the posterior mean minimizes MSE among **all** estimators; sampling with \(\Sigma_{Y\mid X}\) adds calibrated uncertainty ellipsoids.
+
+> **Note on non‑Gaussian/elliptical cases.** Even when the joint is only **approximately** Gaussian (or more broadly **elliptically contoured**, e.g., multivariate \(t\)), the LMMSE predictor retains the same linear form with \(\Sigma_{YX}\Sigma_{XX}^{-1}\). Hence our posterior mean remains a strong and often well‑calibrated estimator even if higher‑order moments deviate from Gaussianity.
+
+### Why the identities apply in our pipeline
+
+- **Exact invertibility ensures faithful decoding.**  
+Our image model is a **bijective** flow \(x \!\leftrightarrow\! z\). Once we impute the missing **latents**, decoding with \(f^{-1}\) produces a valid image deterministically (posterior mean) or stochastically (samples). There is **no decoder mismatch**.
+
+- **Where the approximation lives (Gaussianity of per‑level latents).**  
+The final flow latent is **standard normal by construction**, but our **per‑level latent taps** are not guaranteed Gaussian. We therefore:
+  1) apply **linear projectors** (shared or per‑view; optionally a **CCA** subspace) to emphasize shared, near‑Gaussian structure;
+  2) estimate dataset moments \((\mu_\ell,\Sigma_\ell)\) with **shrinkage** for SPD safety; and
+  3) apply the **Gaussian conditional** to obtain \((\mu_{Y\mid X}, \Sigma_{Y\mid X})\) at each level.
+
+  Empirically, these projected per‑level latents are close enough to **elliptical/Gaussian** that second‑order statistics (means, covariances) are highly informative for cross‑modal prediction.
+
+- **Why CCA helps.**  
+In the Gaussian case, **CCA** extracts directions that capture **all linear cross‑covariance** between views [@hotelling1936; @andrew2013dcca]. Conditioning in this reduced subspace (rank \(k\)) improves numerical stability (better‑conditioned \(\Sigma_{XX}\)), reduces variance in estimates, and focuses the conditional on genuinely **shared** structure. We additionally apply a **clamp** to moderate top canonical directions when sample size is limited.
+
+- **Uncertainty that tracks reality.**  
+\(\Sigma_{Y\mid X}\) is PSD by construction (a Schur complement). Its **trace/diagonal** provides voxel‑ or patch‑level **aleatoric uncertainty** maps that typically **correlate with reconstruction error**; drawing \(y \sim \mathcal{N}(\mu_{Y\mid X}, \tau^2 \Sigma_{Y\mid X})\) (temperature \(\tau\)) propagates this uncertainty through the **exact inverse** to yield calibrated samples.
+
+### Practical recipe (per level)
+
+1. **Encode:** compute per‑view latents \(Z_\ell^{(v)} = f_\ell(x^{(v)})\) and features \(\tilde Z_\ell^{(v)} = P_\ell Z_\ell^{(v)}\).  
+2. **Subspace (optional):** project to **CCA rank \(k\)** and apply a **clamp** factor \(\alpha\in(0,1]\).  
+3. **Assemble blocks:** form \(\mu\) and \(\Sigma\), partition into \(X\) (observed) and \(Y\) (missing).  
+4. **Condition:** compute \(\mu_{Y\mid X}\) and \(\Sigma_{Y\mid X}\) via Cholesky‑based solves on \(\Sigma_{XX}\).  
+5. **Decode:** fill missing latents with the **posterior mean** (or samples) and apply \(f^{-1}\).  
+6. **Aggregate levels:** repeat across \(\ell=0,\dots,L-1\) and concatenate for the final decode.
+
+### Why we like this in medical imaging
+
+- **Closed‑form, fast, and parallel.** No iterative sampler is needed; conditioning is analytic and **CPU‑friendly**.  
+- **Exact inverse back to images.** No decoder gap—critical in 3‑D.  
+- **Calibrated uncertainty.** The Schur‑complement covariance yields usable uncertainty maps for QA and downstream analyses.  
+- **Compatible with alignment.** Per‑level **latent alignment** (Pearson/Barlow/VICReg/InfoNCE/HSIC) makes the Gaussian approximation **tighter** along shared axes, improving both fidelity and calibration.
+
 ## Joint model and conditioning
 Concatenate per-level features across views,
 $$

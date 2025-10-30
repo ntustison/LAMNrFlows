@@ -17,6 +17,10 @@ csl: nature.csl
 longtable: true
 urlcolor: blue
 header-includes:
+  - \usepackage{pifont}
+  - \newcommand{\cmark}{\ding{51}} 
+  - \newcommand{\xmark}{\ding{55}} 
+  - \newcommand{\pmark}{\(\triangle\)} 
   - \usepackage{longtable}
   - \usepackage{graphicx}
   - \usepackage{booktabs}

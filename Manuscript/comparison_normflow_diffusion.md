@@ -17,6 +17,99 @@
 
 \normalsize
 
+##  A short history of flows vs. diffusion — and why diffusion “won” (for now)
+
+If you rewind to the mid-2010s, **normalizing flows** were the cleanest
+probabilistic story in deep generative modeling. Starting with **NICE** and
+**RealNVP**, and crystallizing with **Glow** (2018), the promise was elegant:
+learn an **exactly invertible** mapping between images and a base Gaussian; get
+**tractable log-likelihoods**, calibrated density estimates, and **one-shot
+sampling** for free. The field finally had a way to optimize the quantity it
+claimed to care about (likelihood) without variational bounds or adversarial
+games. But a truth lingered in the samples: flows were often **sharp but
+plain**. The local, triangular Jacobian structure of coupling layers and the
+reliance on convolutional inductive biases made flows **easier to optimize** but
+**harder to scale** in expressivity at internet scale. They shined in density
+estimation and anomaly detection; they did not (yet) ignite the public
+imagination.
+
+Then came the **score/diffusion** wave. The score-matching revival (Song et al.)
+and **DDPM** (Ho et al.) reframed generation as **progressive denoising** along
+a carefully designed noise schedule. Two things clicked. First, the **loss** was
+simple and stable—just supervised regression to a noise target on top of a
+**U-Net** backbone. Second, the **visual quality** scaled almost monotonically
+with data and compute. In contrast to early GAN instability and flow
+expressivity limits, diffusion models felt **predictable** to train and
+**rewarding** to scale.
+
+**2022** was the inflection. **Latent Diffusion** (a.k.a. **Stable Diffusion**)
+put the denoising dance into a compressed latent space and married it to **text
+conditioning via cross-attention** (think CLIP-like embeddings + classifier-free
+guidance). Suddenly, anyone could type a prompt and get compelling images. The
+model weights were released, the dataset (LAION-5B) was openly mined, and the
+**tooling exploded**: web UIs, control modules (**ControlNet**), fine-tuning
+recipes (**LoRA**), and a frenetic ecosystem of checkpoints. This wasn’t just a
+research breakthrough—it was a **UX watershed**. Diffusion had a **killer
+interface** (prompting) and a **killer distribution channel** (open weights +
+easy fine-tuning). The community bootstrapped itself.
+
+__Why did diffusion win adoption (at least in the short run)?__
+
+- **Quality scaled first and fastest.** At large data/compute, diffusion
+  **looked** better. For most creative and commercial uses, sample fidelity
+  trumped exact likelihoods.
+- **Training was boring—in the best way.** No adversarial min–max, no delicate
+  Jacobian bookkeeping. If you could train a U-Net on images, you could train a
+  diffusion model.
+- **Conditioning was natural and powerful.** Cross-attention + classifier-free
+  guidance made text→image, style control, and multi-modal conditioning
+  straightforward.
+- **The ecosystem flywheel.** Open weights, permissive licenses, Hugging Face
+  hubs, and drag-and-drop GUIs invited millions of non-researchers. Flows rarely
+  had that level of turnkey, high-quality, widely shared checkpoints.
+- **Sampling got “fast enough.”** While diffusion takes multiple steps, samplers
+  (DDIM/DPM-Solver/consistency) made **10–50 steps** viable—acceptable for many
+  apps. The **one-shot** advantage of flows mattered less when diffusion gave
+  better pictures and was still responsive.
+
+Meanwhile, flows kept evolving—but in the background. Researchers pushed on
+three fronts. First, **continuous normalizing flows** (neural ODEs) broadened
+the design space beyond discrete stacks—though at the cost of ODE solves.
+Second, **flow matching** reframed CNF training as **velocity field
+regression**, sidestepping likelihood and score estimation and partially
+shrinking the sampling gap. Third, the community experimented with
+**Transformer-based flows** (e.g., autoregressive or latent-space variants),
+showing that **capacity**, not the flow principle, was the bottleneck; recent
+work attains excellent likelihoods and competitive fidelity. The message: flows
+didn’t “fail”—they were **early**.
+
+__So why do flows still matter—especially for medical imaging?__
+
+Flows bring three things diffusion doesn’t natively:  
+(1) **Exact likelihoods and invertibility,** which enable **calibrated density**
+and principled diagnostics;  
+(2) **Single-pass decoding** (no sampler loop), often **crucial in 3-D**; and  
+(3) **Structured latents** that you can interrogate and manipulate with
+**closed-form statistics**. That last point is where our work slots in: we train
+a **multiscale Glow** and enforce **explicit latent alignment** across
+modalities; then we perform **Conditional Gaussian Modeling** in those aligned
+latents to impute missing views with **analytic conditionals** before exact
+inversion. This turns the flow’s algebraic strengths into practical tools for
+**multimodal inference**—a setting where calibrated likelihoods, invertibility,
+and fast 3-D synthesis **do** matter.
+
+If you zoom out, the recent picture looks less like “diffusion beat flows” and
+more like **two complementary toolkits**: diffusion won **mindshare** by scaling
+quality + UX + community; flows are resurfacing as **probabilistic workhorses**
+in domains that value **tractable latents, exact inverses, and data-centric
+inference**. As architectures cross-pollinate (Transformers in flows;
+consistency/flow-matching bridging to diffusion), the boundary is blurring. For
+now, if your goal is **creative text-to-image**, diffusion is the default. If
+your goal is **multimodal medical inference with calibrated uncertainty and fast
+3-D decoding**, a well-designed flow can be the quieter—but better—fit.
+
+
+## Technical comparison
 
 * __Modeling objective__
     * Diffusion / score-based: learn time-indexed score/denoiser for a
