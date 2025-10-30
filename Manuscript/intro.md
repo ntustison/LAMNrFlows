@@ -18,7 +18,39 @@ variational or ODE-based likelihood surrogates [@ho2020ddpm;
 clinical or large‑scale cohort contexts, the ability to compute likelihoods
 exactly and to invert mappings in a *single pass* is practically useful.
 
-In practice, however, **3D** variants of Glow are brittle when implemented
+Recent work from Apple—TarFlow—demonstrates that flows can match diffusion-like
+sample quality while setting new SOTA on likelihood for images, using a
+Transformer-autoregressive flow over patch tokens that alternates causal
+directions across layers [@zhai2024tarflow]. In short: normalizing flows are
+again a front-line option for large-scale generative modeling, with active
+follow-ups (e.g., STARFlow scaling in autoencoder latent space) underscoring
+momentum [@gu2025starflow].
+
+Trade-offs vs. Glow (our backbone): TarFlow leverages Transformers and
+autoregression, which (i) introduces sequential dependencies during sampling
+(slower than Glow’s fully parallel inverse), and (ii) incurs quadratic
+self-attention cost in token count, raising memory/compute for high-res imagery.
+By contrast, Glow uses convolutional coupling with invertible 1×1
+convolutions, enabling single-pass parallel sampling and memory-efficient
+training via reversibility at the cost of lower per-layer expressivity than a
+full Transformer [@kingma2018glow; @papamakarios2021nfreview]. (Community
+reports also note TarFlow’s sampling speed concerns in practice.)
+
+Addtionally, to our knowledge, there is no publicly available 3-D/volumetric
+TarFlow implementation; the paper and releases focus on 2-D images (and a video
+variant), not voxel volumes. Practically, 3-D is currently prohibitive because
+volumetric token counts grow cubic in resolution while Transformer
+self-attention is quadratic in tokens (steep VRAM/time), and TarFlow’s
+autoregressive sampling is sequential—so generation slows dramatically compared
+with Glow’s fully parallel inverse. Moreover, training at medical-scale would
+demand very large compute/datasets plus specialized memory-aware tricks
+(windowed/axial attention, factorized autoregression) that aren’t yet standard
+in flow toolchains.  In addition, 3-D Glow uses conv-coupling + invertible 1×1×1
+convs, so compute scales roughly linearly in voxel count (per-voxel convs), not
+$O(N)^2$ in tokens.  Autoregressive sampling is not used in 3-D Glow.
+Generation is a single, fully parallel inverse pass, not a long sequential loop.
+
+In practice, however, Glow implementations are brittle when implemented
 naively: subtle mistakes in the **squeeze/unsqueeze** or **split/merge** order
 can lead to channel mismatches at inversion time; unstable log‑det tracking and
 insufficient shape asserts further complicate training at volume scale.
@@ -28,6 +60,8 @@ leakage; over‑alignment blurs contrast‑specific detail. Finally, loss balanc
 is non‑trivial—different modalities and levels exhibit **heteroscedastic
 (aleatoric) variability**, making any single fixed weight sub‑optimal across the
 training trajectory [@kendall2018mtl; @kendall2017uncertainties].
+
+
 
 We address these issues in two layers. **First**, we provide a hardened 2D/3D
 Glow implementation within *normflows* and integrate it with ANTsTorch data/IO.
