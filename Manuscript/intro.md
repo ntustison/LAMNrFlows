@@ -102,6 +102,60 @@ dataset‑level imputation—aligned with the ANTsX philosophy of modular,
 reproducible scientific software.
 
 
+## Related work
+
+**Cross-modal synthesis with flows.** *DUAL-GLOW* learns PET\(\leftarrow\)MRI
+translation using two invertible networks and a relation network to model
+\(p(\mathrm{PET}\mid \mathrm{MRI})\), showing that flow-based,
+likelihood-trained models are competitive for medical cross-modality generation
+[@sun2019dualglow]. Our work differs by (i) **per-level latent alignment**
+across *all* available modalities during training (Pearson/Barlow
+Twins/VICReg/InfoNCE/HSIC) rather than a single pairwise mapping, and (ii) the
+use of **CCA-guided** subspaces/clamps to stabilize downstream statistics.
+
+**Invertible networks for multi-modal registration.** *INNReg* combines an
+invertible translation network with a deformable registration model to align
+multi-modal images, emphasizing geometry-preserving translation
+[@guo2024innreg]. While adjacent in leveraging invertibility with multiple
+contrasts, the goal is *geometric* alignment; we target *latent* alignment and
+**closed-form imputation** over aligned latents.
+
+**Flow-based reconstruction.** Conditional flows have been used for accelerated
+multi-coil MRI reconstruction, sampling plausible solutions consistent with the
+forward model [@wen2023cnf]. This shares the likelihood-based inference spirit,
+but addresses a single-modality inverse problem rather than **multimodal latent
+alignment** or imputation.
+
+**Harmonization with flows.** Recent work employs normalizing flows for
+**unsupervised, source-free MRI harmonization**, aligning site/scanner
+distributions without paired data [@beizaee2025harmonizingflows]. This is
+conceptually related (distribution alignment), but differs from our **per-level,
+within-subject multi-view** alignment and our **CGM** imputation pipeline.
+
+**Latent-space imputation with flows.** *EMFlow* performs missing-data
+imputation by alternating EM with a learned flow over a latent Gaussian, and
+*CFMI* introduces flow-matching for general-purpose imputation [@ma2021emflow;
+@simkus2025cfmi]. We similarly exploit closed-form conditional updates in latent
+space, but (i) operate over **multiscale per-level latents** from an
+exact-invertible image model, (ii) optionally **project into CCA subspaces**
+with shrinkage/jitter for SPD safety, and (iii) decode through the **exact flow
+inverse** for uncertainty-aware synthesis.
+
+**Invertible fusion.** Invertible fusion networks (e.g., MMIF-INet) integrate
+multiple modalities into a shared representation for fused-image generation
+[@he2025mmifinet]. Our aim is complementary: we maintain **modality-specific
+flows** with **explicit alignment** and support **arbitrary-pattern imputation**
+via conditional Gaussian modeling.
+
+**Summary of departures.** Compared with the above, we combine: (1)
+**per-level** multi-view latent alignment (Pearson/Barlow/VICReg/InfoNCE/HSIC);
+(2) a **CCA-guided safety clamp** to prevent collapse and stabilize statistics;
+and (3) **conditional Gaussian modeling** to impute missing-view latents with
+closed-form posteriors before exact decoding. Together these enable exact
+likelihoods, cross-modal synthesis, and principled imputation in a single,
+tested backbone.
+
+
 <!--
 *Organization.* Section 2 reviews related work in flows, alignment, and
 uncertainty. Section 3 details library changes. Section 4 presents
