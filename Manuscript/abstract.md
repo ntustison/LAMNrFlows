@@ -3,24 +3,26 @@
 
 # Abstract {-}
 
-We present a practical recipe for training **invertible** generative models that
-jointly model multiple medical imaging modalities while exposing multiscale
-latents that can be aligned, analyzed, and used for imputation. Concretely, we
-harden 2D/3D **Glow** inside *normflows* with ANTsTorch integration—correcting
-multiscale reshape orderings, adding 3D invertible layers, stabilizing
-log-determinants, and providing a reproducible CLI with AMP/EMA, resumable
-checkpoints, and tests [@kingma2018glow; @papamakarios2021nfreview]. On top of
-the likelihood objective, we support **per-level latent alignment** via
-projector heads with a family of objectives (Pearson, **Barlow Twins**,
-**VICReg**, **InfoNCE**, **HSIC**) and an optional **CCA-guided** subspace/clamp
-used to stabilize downstream estimation [@zbontar2021barlow; @bardes2021vicreg;
-@oord2018cpc; @gretton2005hsic; @hotelling1936; @andrew2013dcca]. For missing
-contrasts, we describe a **conditional Gaussian modeling** (CGM) pipeline:
-estimate dataset means/covariances per level—optionally in a CCA subspace with
-shrinkage/jitter—and compute closed‑form posteriors to impute latents before
-exact decoding. Motivated by **aleatoric** variability across modalities, we
-outline an uncertainty‑aware weighting of alignment terms à la **Kendall–Gal**
-as an optional extension [@kendall2018mtl; @kendall2017uncertainties]. The
-result is a single, tested backbone that supports exact likelihoods, cross‑modal
-synthesis, and principled imputation, while remaining faithful to the ANTsX
-emphasis on modularity and reproducibility.
+Normalizing flows provide invertible, exact-likelihood generative models whose
+multiscale latent representations are well suited to multi-modal medical imaging
+and missing-data settings. While diffusion models have recently dominated image
+synthesis, the lineage from reversible networks through NICE/RealNVP to Glow
+offers a complementary path that emphasizes tractable change-of-variables and
+exact inversion between image and latent spaces. Here, we present multimodal
+imaging workflows within the ANTsX ecosystem that make this approach practical.
+Specifically, we: 1) extend the PyTorch-based normflows and ANTsTorch libraries
+supporting 2D/3D Glow implementations, correcting multiscale reshape orderings,
+stabilizing log-determinants, and providing a reproducible command-line
+interface with mixed precision, EMA, resumable checkpoints, and augmentation
+scheduling; 2) introduce per-level latent alignment via lightweight projector
+heads and an optional CCA-guided subspace/clamp, with uncertainty-aware
+(Kendall–Gal) weighting across objectives including Pearson correlation, Barlow
+Twins, VICReg, InfoNCE, and HSIC; and 3) propose conditional-Gaussian modeling
+for image imputation that estimates per-level means and covariances (with
+shrinkage/jitter as needed), computes closed-form posteriors for
+observed/missing splits, and inversely maps precisely from the imputed latent
+space to the corresponding image space. We demonstrate these workflows on the
+young-adult HCP T1-weighted, T2-weighted, and FA images, yielding a tested,
+open-source template for cross-modal synthesis, exact likelihood estimation, and
+principled imputation, along with practical guidance for selecting alignment
+objectives and regularization strategies across modalities.
