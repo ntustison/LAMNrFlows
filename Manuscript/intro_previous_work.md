@@ -35,7 +35,7 @@ registration, and deformation **smoothness**. The registration head predicts a
 invertibility with multiple contrasts, INNReg focuses on **geometric** alignment
 after invertible translation; our work targets **latent** alignment inside a
 likelihood-trained flow and **closed-form imputation** over aligned latents.
-[@guo2024innreg;
+[@guo2024innreg]
 
 **Reproducibility check (as of 2025-10-30).** The public repository (**GitHub:**
 `MeggieGuo/INNReg`) is **present and populated** (e.g., `models/`, `util/`,
@@ -74,7 +74,6 @@ diffusion/Langevin alternatives. [@wen2023cnf]
 usage. Pretrained checkpoints are linked, and usage instructions target
 **fastMRI** (multicoil) with PSNR/SSIM/FID evaluation. Overall, the codebase
 **substantiates the paper’s claims** and is suitable as a baseline reference.
-:contentReference[oaicite:1]{index=1}
 
 **Scope and contrast to our work.** This CNF addresses a **single-modality
 inverse problem** (MRI reconstruction) and does **not** tackle **multimodal
@@ -98,9 +97,6 @@ flow**, then deploy harmonized images for downstream tasks (e.g., adult/neonatal
 segmentation, neonatal brain-age). This is a **distribution-alignment** method
 across domains; it does not involve multi-view per-subject modeling.
 [@beizaee2025harmonizingflows; @beizaee2024hf-arxiv]  
-``Harmonizing Flows: Leveraging normalizing flows for unsupervised and
-source-free MRI harmonization,'' **MedIA 2025**, with code released at
-`farzad-bz/Harmonizing-Flows`. 
 
 **Reproducibility check (as of 2025-10-30).** The public repository (**GitHub:**
 `farzad-bz/Harmonizing-Flows`) mirrors the three-step design with top-level

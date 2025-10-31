@@ -11,7 +11,7 @@ $ $
 
 \LARGE
 
-{\bf Latent-Aligned Multimodal Normalizing Flows for Medical Images}
+{\bf Latent-Aligned Normalizing Flows for Multimodal Medical Image Imputation and Synthesis}
 
 \vspace{1.0 cm}
 
@@ -19,7 +19,7 @@ $ $
 
 Nicholas J. Tustison\textsuperscript{1,\textrm{\Letter}},
 Brian B. Avants\textsuperscript{1},
-Philip A. Cook\textsuperscript{2},
+\dots\textsuperscript{?},
 James R. Stone\textsuperscript{1},
 James C. Gee\textsuperscript{2}
 
@@ -30,7 +30,7 @@ James C. Gee\textsuperscript{2}
 
 \end{centering}
 
-\vspace{3.5 cm}
+\vspace{7 cm}
 
 \noindent\rule{8cm}{0.4pt}
 

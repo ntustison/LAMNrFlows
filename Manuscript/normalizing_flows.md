@@ -1,5 +1,5 @@
 
-## Why the library matters (and why we built on `normflows`) — **strong internal note**
+# Why the library matters (and why we built on `normflows`) — **strong internal note**
 
 A dependable **normalizing flows** stack is the difference between “we have a
 cool demo” and “we can **ship** multimodal, 3-D, likelihood-trained models with
@@ -92,7 +92,7 @@ Below is a concise survey you can keep in the notes. It’s deliberately
 
 ---
 
-## Feature snapshot (our assessment)
+## Feature snapshot
 
 | Library             | Glow-style conv **image** flows | **3-D** conv path        | Multiscale squeeze/split | Built-in NLL/log-det utils | CNF / Flow-matching |
 |---------------------|----------------------------------|---------------------------|--------------------------|----------------------------|---------------------|
@@ -109,6 +109,8 @@ Below is a concise survey you can keep in the notes. It’s deliberately
 \cmark{} = fully supported / works out of the box  
 \pmark{} = **partial / possible with non-trivial engineering** (limited or incomplete support)  
 \xmark{} = not supported / out of scope
+
+---
 
 **Interpretation.** If your goal is **multiscale conv-Glow** with **3-D**
 support, **per-level latents**, and **exact NLL**, you either (a) start from
@@ -157,11 +159,10 @@ nflows), `normflows` provided the most direct path for our
 - **PyTest** suite: round-trip invariance, finite-logdet checks, per-level shape contracts, and CGM numerics (SPD, Cholesky success).
 - **Documentation** for each alignment objective (equations, references, API examples) in your preferred docstring style, plus end-to-end examples.
 
-> **Net effect.** Starting from a strong base (`normflows`), we turned the stack into a **multimodal, 3-D-ready, likelihood-trained** platform with **statistically principled alignment** and **closed-form imputation**. Our hope is that this raises the floor for researchers who want to revisit flows—not as nostalgia, but as **probabilistic workhorses** with exact inverses, tractable latents, and calibrated uncertainty.
-
----
-
-## Suggested paragraph for the paper (drop-in)
-
-> **Software infrastructure.** We build on the open-source **`normflows`** library [@stimper2023normflows], which we extended substantially for **3-D Glow**, multiscale **per-level latent taps**, and a **CGM** imputation pipeline (shrinkage covariances, CCA subspaces, closed-form conditioning, exact inverse decode). We implemented and tested five latent-alignment objectives (Pearson/Barlow/VICReg/InfoNCE/HSIC), added AMP/EMA training with reproducible resume semantics, and contributed a comprehensive PyTest suite (round-trip, numerics, and shape contracts). In our hands, these engineering investments transformed flows from a promising concept into a reliable **multimodal medical** backbone. We acknowledge **Stimper et al. (2023)** for `normflows`—a pragmatic and well-designed foundation that made this work feasible at pace.
+**Net effect.** Starting from a strong base (`normflows`), we turned the stack
+into a **multimodal, 3-D-ready, likelihood-trained** platform with
+**statistically principled alignment** and **closed-form imputation**. Our hope
+is that this raises the floor for researchers who want to revisit flows—not as
+nostalgia, but as **probabilistic workhorses** with exact inverses, tractable
+latents, and calibrated uncertainty.
 

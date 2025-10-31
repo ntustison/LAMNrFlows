@@ -9,11 +9,13 @@ rmdFiles <- c( "format.md",
                "intro.md",
                "intro_previous_work.md",
                "normalizing_flows.md",
+               "glow_lite_to_canonical.md",
                "comparison_df_vs_cnf.md",
                "comparison_normflow_diffusion.md",
                "latent_alignment_expanded.md",
                "cgm_overview.md",
                "hcp_ya_experiments.md",
+               "future_work.md",
                "references.md"
              )
 

@@ -3,6 +3,54 @@
 
 # Results
 
+```bash
+# Minimize regularization
+python eval_conditional_gaussian.py \
+  --run-dir runs2/t1_t2_fa_128x128_vicreg \
+  --use-ema \
+  --gauss-samples 10000 --eval-samples 256 --batch 64 \
+  --cov-mode perlevel \
+  --cov-estimator diag --cov-lam 0.0 \
+  --shrinkage 1e-6 \
+  --cov-debug \
+  --eval-tag gauss_minreg
+```
+
+\begin{figure}[!h]
+  \centering
+
+  \begin{subfigure}{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{Figures/vicreg_gt_fa_given_t1_t2.png}
+    \caption{Ground truth:  FA $\leftarrow$ T1 + T2}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{Figures/vicreg_hat_fa_given_t1_t2.png}
+    \caption{Predicted:  FA $\leftarrow$ T1 + T2}
+  \end{subfigure}
+
+  \vspace{0.6em}
+
+  \begin{subfigure}{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{Figures/vicreg_gt_t1_fa_given_t2.png}
+    \caption{Ground truth:  T1 + FA $\leftarrow$ T2}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{Figures/vicreg_hat_t1_fa_given_t2.png}
+    \caption{Predicted:  T1 + FA $\leftarrow$ T2}
+  \end{subfigure}
+
+  \caption{Results with minimal CGM regularization.}
+  \label{fig:two-by-two}
+\end{figure}
+
+
+
+
+
 ## Dataset and modalities
 We use the **Human Connectome Project – Young Adult (HCP-YA) S1200** cohort (ages 22–35) with high-quality 3 T multimodal MRI and standardized **minimal preprocessing pipelines** [@vanessen2013hcp; @glasser2013mpp]. From S1200 we draw **T1w/T2w** structural volumes (0.7 mm isotropic) and **diffusion MRI** (1.25 mm isotropic; three shells at **b = 1000/2000/3000 s/mm²** with ~**90** dir/shell; reverse phase-encoding runs), and compute **fractional anisotropy (FA)** from the preprocessed diffusion tensors to serve as our third view [@basser1996fa]. Where needed, we reference the **S1200 release manual** for exact acquisition and pipeline details [@hcp2017s1200].
 
