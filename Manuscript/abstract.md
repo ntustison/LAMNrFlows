@@ -4,8 +4,8 @@
 # Abstract {-}
 
 Normalizing flows provide invertible, exact-likelihood generative models whose
-multiscale latent representations are well suited to multi-modal medical imaging
-and missing-data settings. While diffusion models have recently dominated image
+multiscale latent representations are well suited to multimodal medical imaging
+applications. While diffusion models have recently dominated image
 synthesis, the lineage from reversible networks through NICE/RealNVP to Glow
 offers a complementary path that emphasizes tractable change-of-variables and
 exact inversion between image and latent spaces. Here, we present multimodal
