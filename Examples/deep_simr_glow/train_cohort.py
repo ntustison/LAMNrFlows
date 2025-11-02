@@ -1,16 +1,3 @@
-#!/usr/bin/env python3
-"""
-Glow 2D trainer (ANTsTorch builder) with:
-  • Multi-view (T2/T1/FA), exact log-likelihood
-  • Warmup + ReduceLROnPlateau, grad clip, AMP (bf16/fp16), EMA
-  • Resume, CSV logging, preview grids (model or val data)
-  • Alignment across views: --align {none,infonce,barlow,vicreg,hsic,pearson}
-  • Optional Kendall & Gal uncertainty weighting: --weighting {fixed,kendall}
-  • Data modes:
-      - --data hcpya      (single-slice template w/ augmentation, original behavior)
-      - --data cohort     (NEW) subject-wise slices from a cohort folder + augmentation
-      - --data synthetic  (random noise sanity check)
-"""
 
 import argparse
 from pathlib import Path
@@ -36,6 +23,85 @@ import normflows as nf
 
 from contextlib import nullcontext
 from multiprocessing import Value  # optional but recommended if num_workers>0
+
+from datetime import datetime
+import json, platform
+
+def screen_dump_run_config(args, out_dir: Path, note: str = "", dataset_info: dict | None = None):
+    """
+    Pretty-print the effective CLI + a few env bits. Also saves JSON/TXT to out_dir.
+    Call once right after args are finalized (post resume/ckpt overrides),
+    and optionally again after dataloaders are built with dataset_info.
+    """
+
+    def _fmt_bool(x): return "true" if bool(x) else "false"
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cfg = dict(vars(args))  # argparse Namespace -> dict (includes defaults)
+    # Lightweight env/context
+    env = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "python": platform.python_version(),
+        "torch": torch.__version__,
+        "cuda_available": torch.cuda.is_available(),
+        "cuda_device_count": torch.cuda.device_count(),
+    }
+    if dataset_info:  # append dataset stats if provided later
+        cfg["dataset_info"] = dataset_info
+
+    # Save JSON (machine-readable)
+    with open(out_dir / "run_config.json", "w") as f:
+        json.dump({"env": env, "config": cfg, "note": note}, f, indent=2)
+
+    # Pretty TXT (human-readable)
+    rows = []
+    rows.append(f"[run] {env['timestamp']} | Py {env['python']} | torch {env['torch']} "
+                f"| cuda={_fmt_bool(env['cuda_available'])} (n={env['cuda_device_count']})")
+    if note:
+        rows.append(f"[note] {note}")
+
+    def add(k, v):
+        if v is None: v = "None"
+        rows.append(f"{k:>24}: {v}")
+
+    # Core architecture & training knobs (edit the list to taste)
+    add("out_dir", cfg.get("out_dir"))
+    add("views", getattr(args, "num_views", None))
+    # add("--view (globs)", cfg.get("view"))
+    add("H×W", f"{cfg.get('H')}×{cfg.get('W')}")
+    add("L / K / hidden", f"{cfg.get('L')} / {cfg.get('K')} / {cfg.get('hidden')}")
+    add("align", cfg.get("align"))
+    add("weighting", cfg.get("weighting"))
+    add("batch", cfg.get("batch"))
+    add("max_iter", cfg.get("max_iter"))
+    add("extra_iters", cfg.get("extra_iters"))
+    add("lr / warmup", f"{cfg.get('lr')} / {cfg.get('warmup_iters')}")
+    add("ema / decay", f"{_fmt_bool(cfg.get('ema'))} / {cfg.get('ema_decay')}")
+    add("precision", cfg.get("precision"))
+    add("devices", cfg.get("devices"))
+    add("slice_idx", cfg.get("slice_idx"))
+    add("val_frac", cfg.get("val_frac"))
+    add("train_samples / val_samples", f"{cfg.get('train_samples')} / {cfg.get('val_samples')}")
+    add("num_workers", cfg.get("num_workers"))
+    add("seed", cfg.get("seed"))
+    add("smooth_alpha", cfg.get("smooth_alpha"))
+    add("sample_mode / temp", f"{cfg.get('sample_mode')} / {cfg.get('sample_temp')}")
+    add("disable_aug_anneal", _fmt_bool(cfg.get("disable_aug_anneal")))
+    # Schedules can be long—still print them explicitly:
+    add("aug_schedules", cfg.get("aug_schedules"))
+
+    # Dataset summary if available
+    if dataset_info:
+        rows.append("-" * 60)
+        for k, v in dataset_info.items():
+            add(k, v)
+
+    txt = "\n".join(rows) + "\n"
+    print("\n" + txt)
+    with open(out_dir / "run_config.txt", "a") as f:
+        f.write(txt)
+
+
 
 # ------------------------- small utils -------------------------
 
@@ -75,6 +141,24 @@ def _copy_actnorm_state(src, dst):
                 if hasattr(ms, fld) and hasattr(md, fld):
                     try: getattr(md, fld).data.copy_(getattr(ms, fld).data)
                     except Exception: setattr(md, fld, bool(getattr(ms, fld)))
+
+@torch.no_grad()
+def _prime_if_needed(model, x_view_1bhw: torch.Tensor):
+    """
+    Ensure MultiscaleFlow has cached latent shapes for .sample() by running a real forward.
+    Avoids probing with sample(1), which can be a false negative in normflows.
+    """
+    x1 = x_view_1bhw[:1]
+    if x1.ndim == 3:  # (B,H,W) -> (B,1,H,W)
+        x1 = x1.unsqueeze(1)
+    p = next(model.parameters(), None)
+    dev = (p.device if p is not None else x1.device)
+    x1 = x1.to(dev, dtype=torch.float32)
+    # Prefer inverse_and_log_det to guarantee multiscale shapes are established
+    try:
+        _ = model.inverse_and_log_det(x1)
+    except Exception:
+        _ = model.log_prob(x1)
 
 # Robust, version-agnostic exact log p(x)
 def log_prob_exact(model, x: torch.Tensor) -> torch.Tensor:
@@ -302,7 +386,26 @@ def _coerce_nchw_4d(x, target_hw=None):
     return x
 
 @torch.no_grad()
-def _save_samples_grid(model, n, temp, out_path, nrow=10, target_hw=None):
+def _save_samples_grid(model, n, temp, out_path, nrow=10, target_hw=None, warm_x=None):
+    try:
+        try:
+            s = model.sample(n, temperature=temp)
+        except TypeError:
+            s = model.sample(n)
+    except Exception as e:
+        msg = str(e).lower()
+        if "latent shapes unknown" in msg and warm_x is not None:
+            _prime_if_needed(model, warm_x)
+            try:
+                try:
+                    s = model.sample(n, temperature=temp)
+                except TypeError:
+                    s = model.sample(n)
+            except Exception as e2:
+                return False, str(e2)
+        else:
+            return False, str(e)
+
     try:
         try:
             s = model.sample(n, temperature=temp)   
@@ -370,138 +473,105 @@ def _save_metric_plots(csv_path: Path, out_dir: Path):
 
 # ------------------------- data -------------------------
 
-def load_hcpya_slices(mods: List[str], H: int, W: int, slice_idx=120):
-    keys = dict(T2="hcpyaT2Template", T1="hcpyaT1Template", FA="hcpyaFATemplate")
-    imgs = [ants.image_read(antstorch.get_antstorch_data(keys[m])) for m in mods]
-    slcs = [ants.slice_image(im, axis=2, idx=slice_idx, collapse_strategy=1) for im in imgs]
-    tmpl = ants.resample_image(slcs[0], (H, W), use_voxels=True)
-    return slcs, tmpl
+def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch, num_workers,
+                             slice_idx: int, val_frac: float,
+                             subject_limit: int | None,
+                             do_aug=True, aug_schedules=None, disable_aug_anneal=False, seed: int = 0):
 
-def _read_slice(path: Path, idx: int, H: int, W: int):
-    im = ants.image_read(str(path))
-    slc = ants.slice_image(im, axis=2, idx=idx, collapse_strategy=1)
-    slc = ants.resample_image(slc, (H, W), use_voxels=True)
-    return slc
+    def _scan_globbed_views(view_specs, H, W, slice_idx, subject_limit=None):
+        """
+        Returns images_by_subject = [ [ [view0_k, view1_k, ...], ... ] for each subject ], where each element is an ANTs 2D image.
+        """
+        import ants
 
-def _scan_cohort_slices(root: Path, mods: List[str], H: int, W: int, slice_idx: int,
-                        subject_limit: int | None = None) -> list[list]:
-    """
-    Returns: images_cohort = [ [slc_T2, slc_T1, slc_FA], [ ... next subject ... ], ... ]
-             where each element is an ANTsImage 2D slice resampled to (H,W).
-    """
-    mod_files = {m: f"{m}.nii.gz" for m in mods}
-    subjects = sorted([p for p in root.iterdir() if p.is_dir()])
-    if subject_limit and subject_limit > 0:
-        subjects = subjects[:int(subject_limit)]
-    cohort = []
-    missing = []
-    for sdir in subjects:
-        try:
-            per_mod = []
-            ok = True
-            for m in mods:
-                f = sdir / mod_files[m]
-                if not f.exists():
-                    ok = False
-                    break
-                per_mod.append(_read_slice(f, slice_idx, H, W))
-            if ok:
-                cohort.append(per_mod)
-            else:
-                missing.append(sdir.name)
-        except Exception:
-            missing.append(sdir.name)
-    if len(cohort) == 0:
-        raise RuntimeError(f"No valid subjects found under {str(root)} for mods={mods}. Missing={missing[:5]} ...")
-    return cohort
+        def _group_by_subject(per_view_files):
+            """
+            Groups file lists by subject folder (parent dir name).
+            Ensures all views share the same subject set; returns mapping subj -> list[list[Path]] per view index within subject.
+            """
+            from collections import defaultdict
+            per_view_by_subj = []
+            subj_sets = []
+            for files in per_view_files:
+                d = defaultdict(list)
+                for f in files:
+                    subj = f.parent.name
+                    d[subj].append(f)
+                # sort within subject for determinism
+                for k in d:
+                    d[k] = sorted(d[k])
+                per_view_by_subj.append(d)
+                subj_sets.append(set(d.keys()))
+            common_subj = set.intersection(*subj_sets) if subj_sets else set()
+            if not common_subj:
+                raise RuntimeError("No common subjects found across views (based on parent folder names).")
+            # Ensure consistent counts per subject across views
+            per_subj = {}
+            for s in sorted(common_subj):
+                counts = [len(d[s]) for d in per_view_by_subj]
+                if len(set(counts)) != 1:
+                    raise RuntimeError(f"Subject {s} has different file counts across views: {counts}")
+                # collect per-index across views
+                M = counts[0]
+                per_subj[s] = [[per_view_by_subj[v][s][k] for v in range(len(per_view_by_subj))] for k in range(M)]
+            return per_subj
 
-def build_loaders_hcpya(mods, H, W, train_samples, val_samples, batch, num_workers,
-                        do_aug=True, aug_schedules=None, disable_aug_anneal=False, slice_idx=120):
-    slcs, tmpl = load_hcpya_slices(mods, H, W, slice_idx=slice_idx)
+        def _expand_globs_per_view(view_specs):
+            """
+            view_specs: list[list[str]]; each inner list are glob patterns for that view
+            Returns: list[list[Path]] per view (sorted)
+            """
+            import glob, os
+            per_view_files = []
+            for specs in view_specs:
+                paths = []
+                for pat in specs:
+                    pat = os.path.expanduser(pat)
+                    paths.extend(glob.glob(pat))
+                # unique + sort
+                paths = sorted({str(p) for p in paths})
+                per_view_files.append([Path(p) for p in paths])
+            return per_view_files
 
-    if aug_schedules and not disable_aug_anneal:
-        sched = antstorch.MultiParamScheduler(antstorch.parse_schedules(aug_schedules))
-        def aug_sched_fn(step: int):
-            return sched.step(step)
-    else:
-        aug_sched_fn = None
+        def _read_slice(path: Path, idx: int, H: int, W: int):
+            im = ants.image_read(str(path))
+            slc = ants.slice_image(im, axis=2, idx=idx, collapse_strategy=1)
+            slc = ants.resample_image(slc, (H, W), use_voxels=True)
+            return slc
+        
+        per_view_files = _expand_globs_per_view(view_specs)
+        per_subj = _group_by_subject(per_view_files)
+        subjects = list(sorted(per_subj.keys()))
+        if subject_limit and subject_limit > 0:
+            subjects = subjects[:int(subject_limit)]
+        images_by_subject = []
+        for s in subjects:
+            samples = []
+            for sample in per_subj[s]:
+                views = []
+                for f in sample:
+                    views.append(_read_slice(Path(f), slice_idx, H, W))
+                samples.append(views)
+            images_by_subject.append(samples)
+        if len(images_by_subject) == 0:
+            raise RuntimeError("No images assembled from provided --view globs.")
+        return images_by_subject
 
-    global_step = Value('i', 0)
-
-    train = antstorch.ImageDataset(
-        images=[slcs],
-        template=tmpl,
-        do_data_augmentation=do_aug,
-        data_augmentation_transform_type="affineAndDeformation",
-        data_augmentation_sd_affine=0.05,
-        data_augmentation_sd_deformation=10.0,
-        data_augmentation_noise_model="additivegaussian",
-        data_augmentation_noise_parameters=(0.0, 0.05),
-        data_augmentation_sd_simulated_bias_field=0.00000001,
-        data_augmentation_sd_histogram_warping=0.025,
-        number_of_samples=int(train_samples),
-        aug_scheduler=aug_sched_fn,
-    )
-    train.global_step_ref = global_step
-
-    val = antstorch.ImageDataset(
-        images=[slcs],
-        template=tmpl,
-        do_data_augmentation=do_aug,
-        data_augmentation_transform_type="affineAndDeformation",
-        data_augmentation_sd_affine=0.05,
-        data_augmentation_sd_deformation=10.0,
-        data_augmentation_noise_model="additivegaussian",
-        data_augmentation_noise_parameters=(0.0, 0.05),
-        data_augmentation_sd_simulated_bias_field=0.00000001,
-        data_augmentation_sd_histogram_warping=0.025,
-        number_of_samples=int(train_samples),
-        aug_scheduler=aug_sched_fn,
-    )
-
-    train_loader = DataLoader(train, batch_size=batch, shuffle=True, num_workers=num_workers)
-    val_loader   = DataLoader(val,   batch_size=min(16, batch), shuffle=False, num_workers=max(1, num_workers // 2))
-    return train_loader, val_loader, global_step
-
-def build_loaders_cohort(mods, H, W, train_samples, val_samples, batch, num_workers,
-                         data_root: str, slice_idx: int, val_frac: float,
-                         subject_limit: int | None,
-                         do_aug=True, aug_schedules=None, disable_aug_anneal=False, seed: int = 0):
-    """
-    NEW: Build dataloaders from a cohort organized as:
-      root/
-        100610/T1.nii.gz T2.nii.gz FA.nii.gz
-        102311/...
-        ...
-
-    We pre-read each subject's requested slice for each modality as ANTsImages so that
-    antstorch.ImageDataset can apply the exact same augmentation machinery as before.
-    """
-    root = Path(data_root).expanduser()
-    if not root.exists():
-        raise FileNotFoundError(f"--data-root does not exist: {str(root)}")
-
-    # Read all per-subject slices
-    images_all = _scan_cohort_slices(root, mods, H, W, slice_idx, subject_limit=subject_limit)
-
-    # Template: keep HCP-YA template slice to anchor augmentation (assumes alignment)
-    tmpl_slice_list, tmpl_ref = load_hcpya_slices(mods=mods, H=H, W=W, slice_idx=slice_idx)
-    tmpl = tmpl_ref  # 2D ANTsImage
-
-    # Subject split (train/val by subjects)
-    n = len(images_all)
+    images_by_subject = _scan_globbed_views(view_specs, H, W, slice_idx, subject_limit=subject_limit)
+    n_subj = len(images_by_subject)
     rng = np.random.default_rng(seed)
-    idx = np.arange(n)
-    rng.shuffle(idx)
-    n_val = max(1, int(round(float(val_frac) * n)))
+    idx = np.arange(n_subj); rng.shuffle(idx)
+    n_val = max(1, int(round(float(val_frac) * n_subj)))
     val_idx = set(idx[:n_val])
-    images_train = [images_all[i] for i in range(n) if i not in val_idx]
-    images_val   = [images_all[i] for i in range(n) if i in val_idx]
+
+    images_train = [s for si, subj in enumerate(images_by_subject) if si not in val_idx for s in subj]
+    images_val   = [s for si, subj in enumerate(images_by_subject) if si in val_idx for s in subj]
 
     if len(images_train) == 0:
-        raise RuntimeError("Cohort split produced an empty training set. Decrease --val-frac or increase subjects.")
+        raise RuntimeError("Split produced an empty training set. Decrease --val-frac or increase subjects.")
 
-    # Aug scheduler
+    tmpl = images_train[0][0]
+
     if aug_schedules and not disable_aug_anneal:
         sched = antstorch.MultiParamScheduler(antstorch.parse_schedules(aug_schedules))
         def aug_sched_fn(step: int):
@@ -511,9 +581,8 @@ def build_loaders_cohort(mods, H, W, train_samples, val_samples, batch, num_work
 
     global_step = Value('i', 0)
 
-    # Train dataset: same augmentation knobs as template mode
     train_ds = antstorch.ImageDataset(
-        images=images_train,             # LIST[ LIST[ANTsImage_per_mod] ]
+        images=images_train,
         template=tmpl,
         do_data_augmentation=do_aug,
         data_augmentation_transform_type="affineAndDeformation",
@@ -523,12 +592,11 @@ def build_loaders_cohort(mods, H, W, train_samples, val_samples, batch, num_work
         data_augmentation_noise_parameters=(0.0, 0.05),
         data_augmentation_sd_simulated_bias_field=0.00000001,
         data_augmentation_sd_histogram_warping=0.025,
-        number_of_samples=int(train_samples),   # total draws (with replacement) across the cohort
+        number_of_samples=int(train_samples),
         aug_scheduler=aug_sched_fn,
     )
     train_ds.global_step_ref = global_step
 
-    # Validation dataset: no augmentation, cycle through held-out subjects repeatedly until val_samples
     val_ds = antstorch.ImageDataset(
         images=(images_val if len(images_val) > 0 else images_train[:1]),
         template=tmpl,
@@ -546,22 +614,6 @@ def build_loaders_cohort(mods, H, W, train_samples, val_samples, batch, num_work
     train_loader = DataLoader(train_ds, batch_size=batch, shuffle=True,  num_workers=num_workers, pin_memory=True)
     val_loader   = DataLoader(val_ds,   batch_size=min(16, batch), shuffle=False, num_workers=max(1, num_workers // 2), pin_memory=True)
     return train_loader, val_loader, global_step
-
-class _SyntheticDataset(Dataset):
-    def __init__(self, n_samples:int, views:int, H:int, W:int, seed:int=0):
-        self.n = int(n_samples); self.v = int(views); self.H = int(H); self.W = int(W)
-        g = torch.Generator().manual_seed(seed)
-        self.data = torch.rand((self.n, self.v, self.H, self.W), generator=g)
-    def __len__(self): return self.n
-    def __getitem__(self, i): return self.data[i]
-
-def build_loaders_synth(mods, H, W, train_samples, val_samples, batch, num_workers, seed=0):
-    views = len(mods)
-    train = _SyntheticDataset(n_samples=int(train_samples), views=views, H=int(H), W=int(W), seed=seed)
-    val   = _SyntheticDataset(n_samples=int(val_samples),   views=views, H=int(H), W=int(W), seed=seed+1)
-    train_loader = DataLoader(train, batch_size=batch, shuffle=True,  num_workers=0)
-    val_loader   = DataLoader(val,   batch_size=min(16, batch), shuffle=False, num_workers=0)
-    return train_loader, val_loader, Value('i', 0)
 
 def ensure_shapes_cached(model, x_template: torch.Tensor):
     try:
@@ -612,7 +664,8 @@ def _manual_prior_sample(model, n: int, temp: float = 1.0, x_template: torch.Ten
 
 def main():
     ap = argparse.ArgumentParser("Glow 2D (builder) trainer")
-    ap.add_argument("--modalities", nargs="+", default=["T2"], choices=["T2","T1","FA"])
+    ap.add_argument("--view", action="append", nargs="+", required=True,
+                help="Repeat per view. Each view takes one or more glob patterns (full paths). Files are paired across views by subject folder.")
     ap.add_argument("--H", type=int, default=128)
     ap.add_argument("--W", type=int, default=128)
     ap.add_argument("--L", type=int, default=4)
@@ -660,14 +713,7 @@ def main():
     ap.add_argument("--auto-resume", action="store_true", help="If set, try <out-dir>/training_state.pt when --resume is not provided")
     ap.add_argument("--out-dir", type=str, default="runs_glow2d_builder")
 
-    # DATA MODES: hcpya (template), cohort (NEW), synthetic
-    ap.add_argument("--data", type=str, choices=["hcpya","cohort","synthetic"], default="hcpya",
-                    help="Use HCP-YA template slice, HCP cohort slices, or synthetic noise data")
-    ap.add_argument("--synthetic-samples", type=int, default=8192, help="Dataset size per split when using synthetic data")
-
     # NEW cohort options
-    ap.add_argument("--data-root", type=str, default="",
-                    help="Root directory of cohort with subfolders per subject (each containing T1/T2/FA .nii.gz). Required if --data cohort.")
     ap.add_argument("--slice-idx", type=int, default=120, help="Z slice index to extract across cohort/template")
     ap.add_argument("--val-frac", type=float, default=0.10, help="Fraction of subjects held out for validation in cohort mode")
     ap.add_argument("--subject-limit", type=int, default=0, help="(Debug) limit number of subjects; 0 means all")
@@ -714,6 +760,7 @@ def main():
                 help="Sampling temperature: scales prior noise (z = T·ε) when --sample-mode model")
 
     args = ap.parse_args()
+    args.num_views = len(args.view)
 
     # Device + precision
     set_deterministic(args.seed)
@@ -751,35 +798,20 @@ def main():
     n_dims = int(np.prod(input_shape))
 
     # ---------------- Data ----------------
+    
     try:
-        if args.data == "synthetic":
-            train_loader, val_loader, global_step = build_loaders_synth(
-                mods=args.modalities, H=args.H, W=args.W,
-                train_samples=args.synthetic_samples, val_samples=max(256, args.batch * 4),
-                batch=args.batch, num_workers=0, seed=args.seed)
-        elif args.data == "cohort":
-            if not args.data_root:
-                raise ValueError("--data-root is required when --data cohort")
-            train_loader, val_loader, global_step = build_loaders_cohort(
-                mods=args.modalities, H=args.H, W=args.W,
-                train_samples=args.train_samples, val_samples=args.val_samples,
-                batch=args.batch, num_workers=args.num_workers,
-                data_root=args.data_root, slice_idx=args.slice_idx, val_frac=float(args.val_frac),
-                subject_limit=(args.subject_limit if args.subject_limit > 0 else None),
-                do_aug=True, aug_schedules=(args.aug_schedules if not args.disable_aug_anneal else None),
-                disable_aug_anneal=args.disable_aug_anneal, seed=args.seed)
-        else:  # hcpya template (original behavior)
-            train_loader, val_loader, global_step = build_loaders_hcpya(
-                mods=args.modalities, H=args.H, W=args.W,
-                train_samples=args.train_samples, val_samples=args.val_samples,
-                batch=args.batch, num_workers=args.num_workers,
-                do_aug=True, aug_schedules=(args.aug_schedules if not args.disable_aug_anneal else None),
-                disable_aug_anneal=args.disable_aug_anneal, slice_idx=args.slice_idx)
+        train_loader, val_loader, global_step = build_loaders_from_globs(
+            view_specs=args.view, H=args.H, W=args.W,
+            train_samples=args.train_samples, val_samples=args.val_samples,
+            batch=args.batch, num_workers=args.num_workers,
+            slice_idx=args.slice_idx, val_frac=float(args.val_frac),
+            subject_limit=(args.subject_limit if args.subject_limit > 0 else None),
+            do_aug=True, aug_schedules=(args.aug_schedules if not args.disable_aug_anneal else None),
+            disable_aug_anneal=args.disable_aug_anneal, seed=args.seed)
     except Exception as e:
         import traceback
         print("[data] failed to build loaders:", repr(e))
         traceback.print_exc()
-        print("Hint: try --data synthetic to verify training loop independent of ANTs/ANTsTorch data availability.")
         raise
 
     input_data_sampled = False
@@ -787,7 +819,7 @@ def main():
     # Build models using the builder
     from antstorch import create_glow_normalizing_flow_model_2d
     models: List[nf.Flow] = []
-    for _ in args.modalities:
+    for _ in range(args.num_views):
         m = create_glow_normalizing_flow_model_2d(
             input_shape=input_shape,
             L=args.L, K=args.K, hidden_channels=args.hidden,
@@ -815,10 +847,19 @@ def main():
 
     # ---- One-time ActNorm warmup on REAL data (before projectors) ----
     with torch.no_grad():
-        warm_batch = next(iter(train_loader))               # (B, V, H, W)
-        for vi, m in enumerate(models):
-            xv0 = to01(warm_batch[:, vi:vi+1].to(dev)).to(torch.float32)
-            warmup_actnorm_with_real_batch(m, xv0)
+        try:
+            warm_batch = next(iter(train_loader))
+            xs = _extract_views_from_batch(warm_batch, num_views=len(models))
+            with torch.no_grad():
+                # base
+                for vi, m in enumerate(models):
+                    _prime_if_needed(m, xs[vi])
+                # ema
+                if ema_models is not None:
+                    for vi, em in enumerate(ema_models):
+                        _prime_if_needed(em, xs[vi])
+        except StopIteration:
+            pass
 
     # --- projection heads for alignment ---
     projectors = None
@@ -873,8 +914,14 @@ def main():
 
         blob = torch.load(resume_path, map_location="cpu")
         ckpt_cfg = blob.get("config", {})
+        # backward-compat: handle old checkpoints that used \"modalities\" list
+        if ckpt_cfg and "num_views" not in ckpt_cfg and "modalities" in ckpt_cfg:
+            try:
+                args.num_views = len(ckpt_cfg.get("modalities") or [])
+            except Exception:
+                pass
 
-        arch_keys = ["modalities","H","W","L","K","hidden","base",
+        arch_keys = ["num_views","H","W","L","K","hidden","base",
                     "glowbase_logscale_factor","glowbase_min_log","glowbase_max_log",
                     "scale_map","scale_cap","net_actnorm"]  # add split_mode if exposed
         if args.use_ckpt_config and ckpt_cfg:
@@ -931,8 +978,61 @@ def main():
                 tqdm.write(f"[resume] warning: could not load Kendall scalars: {e}")
         tqdm.write(f"[resume] from {str(resume_path)} @ iter {start_iter}")
 
+
+    # ---- Prime latent-shape caches for ALL views (base + EMA) ----
+    def _ensure_4d(x: torch.Tensor) -> torch.Tensor:
+        # Expect (B, C, H, W). If (B,H,W), add channel; if (H,W), add batch+channel.
+        if x.ndim == 3:
+            x = x.unsqueeze(1)
+        elif x.ndim == 2:
+            x = x.unsqueeze(0).unsqueeze(0)
+        return x
+
+    def _prime_latent_shapes(models, ema_models, loader, device):
+        try:
+            batch = next(iter(loader))
+        except StopIteration:
+            return  # nothing to prime
+        xs = _extract_views_from_batch(batch, num_views=len(models))
+        with torch.no_grad():
+            for vi, m in enumerate(models):
+                xb = xs[vi][:1]                      # 1 sample
+                xb = _ensure_4d(xb).to(device, non_blocking=True)
+                # match dtype to model (avoid half/float mismatch under mixed precision)
+                p = next(m.parameters(), None)
+                if p is not None and xb.dtype != p.dtype:
+                    xb = xb.to(p.dtype)
+                # disable autocast here; we just need to cache shapes cheaply
+                with torch.amp.autocast(device_type=dev.type, enabled=False):
+                    try:
+                        _ = m.log_prob(xb)           # primes base model
+                    except Exception as e:
+                        print(f"[prime] base view{vi} log_prob failed: {e}")
+                    if ema_models is not None:
+                        try:
+                            _ = ema_models[vi].log_prob(xb)  # primes EMA model too
+                        except Exception as e:
+                            print(f"[prime] ema  view{vi} log_prob failed: {e}")
+
+    # Call it once after weights are loaded and loaders are built:
+    _prime_latent_shapes(models, ema_models, train_loader, dev)
+
     if args.extra_iters > 0:
         args.max_iter = (start_iter - 1) + args.extra_iters
+
+    try:
+        dataset_info = {
+            "subjects_total": getattr(train_loader.dataset, "subjects_total", "n/a"),
+            "train_images_list_len": len(getattr(train_loader.dataset, "images", [])),
+            "val_images_list_len": len(getattr(val_loader.dataset, "images", [])),
+            "effective_train_samples": args.train_samples,
+            "effective_val_samples": args.val_samples,
+            "batch_size": args.batch,
+        }
+    except Exception:
+        dataset_info = {"note": "dataset stats unavailable (non-ANTs dataset type)"}
+
+    screen_dump_run_config(args, Path(args.out_dir), note="post-dataset build", dataset_info=dataset_info)
 
     if not csv_path.exists():
         with open(csv_path, "w") as f:
@@ -1146,6 +1246,7 @@ def main():
                         if tmpl_by_view[vi] is None:
                             tqdm.write(f"[warn] no real template available for view {vi}; skipping model samples this eval")
                             continue
+                        _prime_if_needed(m, tmpl_by_view[vi])
                         warmup_actnorm_with_real_batch(m, tmpl_by_view[vi])
                         cpu_state = torch.random.get_rng_state()
                         cuda_states = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
@@ -1155,6 +1256,7 @@ def main():
                                 m, n_samples, args.sample_temp,
                                 run_dir / f"samples_view{vi}_it{it:06d}.png",
                                 nrow=nrow, target_hw=(args.H, args.W),
+                                warm_x=tmpl_by_view[vi],   # <— add this
                             )
                         finally:
                             torch.random.set_rng_state(cpu_state)
@@ -1203,3 +1305,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
