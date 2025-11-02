@@ -6,7 +6,10 @@ Glow 2D trainer (ANTsTorch builder) with:
   • Resume, CSV logging, preview grids (model or val data)
   • Alignment across views: --align {none,infonce,barlow,vicreg,hsic,pearson}
   • Optional Kendall & Gal uncertainty weighting: --weighting {fixed,kendall}
-  • Synthetic data fallback: --data synthetic
+  • Data modes:
+      - --data hcpya      (single-slice template w/ augmentation, original behavior)
+      - --data cohort     (NEW) subject-wise slices from a cohort folder + augmentation
+      - --data synthetic  (random noise sanity check)
 """
 
 import argparse
@@ -20,7 +23,6 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 import torchvision as tv
 
-
 from tqdm.auto import tqdm
 
 import matplotlib
@@ -33,13 +35,7 @@ import antstorch
 import normflows as nf
 
 from contextlib import nullcontext
-
-def _no_autocast_for(device_type: str):
-    # keep NF math in FP32 for stability under AMP
-    try:
-        return torch.autocast(device_type=device_type, enabled=False)
-    except Exception:
-        return nullcontext()
+from multiprocessing import Value  # optional but recommended if num_workers>0
 
 # ------------------------- small utils -------------------------
 
@@ -65,7 +61,6 @@ def bits_per_dim(logp: torch.Tensor, num_dims: int) -> torch.Tensor:
 def n_params(m: nn.Module) -> int:
     return sum(p.numel() for p in m.parameters())
 
-# --- helpers (put near imports) ---
 @torch.no_grad()
 def _copy_actnorm_state(src, dst):
     for ms, md in zip(src.modules(), dst.modules()):
@@ -143,7 +138,6 @@ def _flatten_latents(z):
     zs = z if isinstance(z, (list, tuple)) else [z]
     return torch.cat([zi.flatten(1) for zi in zs], dim=1)  # [B, sum_i CiHiWi]
 
-
 # ------------------------- viz helpers -------------------------
 
 def _extract_views_from_batch(batch, num_views: int | None = None):
@@ -160,13 +154,11 @@ def _extract_views_from_batch(batch, num_views: int | None = None):
     """
     import torch
 
-    # If it's a (inputs, labels, ...) style tuple, peel off the first element.
     if isinstance(batch, tuple) and len(batch) > 0 and (
         torch.is_tensor(batch[0]) or isinstance(batch[0], (list, tuple, dict))
     ):
         return _extract_views_from_batch(batch[0], num_views=num_views)
 
-    # Dict-based batches
     if isinstance(batch, dict):
         if 'x' in batch:
             return _extract_views_from_batch(batch['x'], num_views=num_views)
@@ -175,24 +167,19 @@ def _extract_views_from_batch(batch, num_views: int | None = None):
             if isinstance(vs, (list, tuple)) and len(vs) > 0 and torch.is_tensor(vs[0]):
                 return list(vs)
             raise ValueError("Batch['views'] not in expected list/tuple[tensor] format.")
-        # Try any list/tuple-of-tensors value
         for v in batch.values():
             if isinstance(v, (list, tuple)) and len(v) > 0 and torch.is_tensor(v[0]):
                 return list(v)
         raise ValueError("Batch dict format not recognized for multi-view data.")
 
-    # Already a list/tuple of per-view tensors
     if isinstance(batch, (list, tuple)) and len(batch) > 0 and torch.is_tensor(batch[0]):
         return list(batch)
 
-    # Tensor formats
     if torch.is_tensor(batch):
         if batch.ndim == 5:
-            # (B, V, C, H, W)
             B, V, C, H, W = batch.shape
             return [batch[:, vi, :, :, :] for vi in range(V)]
         elif batch.ndim == 4:
-            # (B, C_total, H, W) possibly packed views
             if num_views is None or num_views <= 1:
                 return [batch]
             B, Ctot, H, W = batch.shape
@@ -209,9 +196,6 @@ def _extract_views_from_batch(batch, num_views: int | None = None):
     raise ValueError(f"Unsupported batch type for multi-view extraction: {type(batch)}")
 
 def _save_grid_from_tensor(x, out_path: Path, nrow: int, target_hw=None, value_range=None):
-    """
-    Save a grid image from a tensor x of shape (N,C,H,W).
-    """
     x = x.detach().cpu()
     if target_hw is not None and (x.shape[-2] != target_hw[0] or x.shape[-1] != target_hw[1]):
         x = F.interpolate(x, size=target_hw, mode='bilinear', align_corners=False)
@@ -219,44 +203,58 @@ def _save_grid_from_tensor(x, out_path: Path, nrow: int, target_hw=None, value_r
     tv.utils.save_image(grid, str(out_path))
 
 def save_coordinated_input_grids(val_loader, num_views: int, out_dir: Path,
+                                 fallback_loader=None,
                                  n: int = 100, nrow: int = 10, target_hw=None, device="cpu"):
-    """
-    Collect exactly the SAME n samples (subjects) once and write one grid per view.
-    Returns (ok: bool, err: Optional[str]).
-    """
-    samples_per_view = [ [] for _ in range(num_views) ]
-    collected = 0
+    import torch
 
-    # Single pass over the loader to lock subject alignment
-    for batch in val_loader:
-        xs = _extract_views_from_batch(batch, num_views=num_views)  # [x_v0, x_v1, ...]
-        if len(xs) != num_views:
-            return False, f"Expected {num_views} views, got {len(xs)}."
-        B = xs[0].shape[0]
-        take = min(n - collected, B)
-        if take <= 0:
-            break
-        for vi in range(num_views):
-            xvi = xs[vi][:take].to(device, non_blocking=True)
-            samples_per_view[vi].append(xvi)
-        collected += take
-        if collected >= n:
-            break
+    def collect_from_loader(loader):
+        samples_per_view = [[] for _ in range(num_views)]
+        collected = 0
+        for batch in loader:
+            xs = _extract_views_from_batch(batch, num_views=num_views)
+            if len(xs) != num_views:
+                return None, f"Expected {num_views} views, got {len(xs)}."
+            B = xs[0].shape[0]
+            take = min(n - collected, B)
+            if take > 0:
+                for vi in range(num_views):
+                    xvi = xs[vi][:take].to(device, non_blocking=True)
+                    samples_per_view[vi].append(xvi)
+                collected += take
+            if collected >= n:
+                break
+        if collected == 0:
+            return None, "loader yielded no samples."
+        stacked = [torch.cat(vs, dim=0)[:n] for vs in samples_per_view]
+        return stacked, None
 
-    if collected == 0:
-        return False, "val_loader yielded no samples."
+    try:
+        result, err = collect_from_loader(val_loader)
+        if result is None:
+            if fallback_loader is not None:
+                result, err_fb = collect_from_loader(fallback_loader)
+                if result is None:
+                    return False, f"val+fallback loaders failed: {err}; {err_fb}"
+            else:
+                return False, f"val loader failed: {err}"
+    except Exception as e:
+        if fallback_loader is not None:
+            try:
+                result, err_fb = collect_from_loader(fallback_loader)
+                if result is None:
+                    return False, f"val+fallback loaders failed: {e}; {err_fb}"
+            except Exception as e2:
+                return False, f"val+fallback loaders exception: {e}; {e2}"
+        else:
+            return False, f"val loader exception: {e}"
 
     for vi in range(num_views):
-        x = torch.cat(samples_per_view[vi], dim=0)[:n]  # (n,C,H,W)
+        x = result[vi]  # (n,C,H,W)
         out_path = out_dir / f"input_data_view{vi}.png"
         _save_grid_from_tensor(x, out_path, nrow=nrow, target_hw=target_hw)
-
     return True, None
 
 def _make_grid_canvas(x, nrow=10):
-    """
-    x: Tensor (N,C,H,W). Returns a single (C, H_total, W_total) canvas.
-    """
     assert torch.is_tensor(x) and x.dim() == 4, "x must be (N,C,H,W) tensor"
     N, C, H, W = x.shape
     cols = int(nrow)
@@ -269,59 +267,42 @@ def _make_grid_canvas(x, nrow=10):
     return canvas
 
 def _coerce_nchw_4d(x, target_hw=None):
-    """
-    Ensure x is a 4D float tensor (N,C,H,W), optionally resized to target_hw=(H,W).
-    Handles: tensor, (tensor, logw), list/tuple of tensors (picks largest H*W).
-    Converts channel-last to channel-first, clamps to [0,1], reduces odd C to 1.
-    """
-    # If list/tuple, pick largest candidate (by spatial area) after normalizing shapes
     if isinstance(x, (list, tuple)):
         cands = [t for t in x if torch.is_tensor(t) and t.dim() in (3,4)]
         if not cands:
             raise ValueError("No tensor candidates in sample output.")
         areas, fixed = [], []
         for t in cands:
-            if t.dim() == 3:  # CHW or HWC
+            if t.dim() == 3:
                 if t.shape[-1] in (1,3) and (t.shape[0] not in (1,3)):
                     t = t.permute(2,0,1).contiguous()
-                t = t.unsqueeze(0)  # NCHW
+                t = t.unsqueeze(0)
             elif t.dim() == 4:
                 if t.shape[-1] in (1,3) and t.shape[1] not in (1,3):
                     t = t.permute(0,3,1,2).contiguous()
             fixed.append(t)
             areas.append(int(t.shape[-1]) * int(t.shape[-2]))
         x = fixed[int(torch.tensor(areas).argmax().item())]
-
-    # Tensor path
     if not torch.is_tensor(x):
         raise ValueError(f"Sample output is not a tensor: {type(x)}")
-
     if x.dim() == 3:
         if x.shape[-1] in (1,3) and x.shape[0] not in (1,3):
             x = x.permute(2,0,1).contiguous()
         x = x.unsqueeze(0)
-
     if x.dim() == 4 and x.shape[-1] in (1,3) and x.shape[1] not in (1,3):
         x = x.permute(0,3,1,2).contiguous()
-
     if x.size(1) not in (1,3):
         x = x.mean(dim=1, keepdim=True)
-
     x = torch.clamp(x, 0, 1).float()
-
     if target_hw is not None:
         Ht, Wt = int(target_hw[0]), int(target_hw[1])
         H, W = int(x.shape[-2]), int(x.shape[-1])
         if (H, W) != (Ht, Wt):
             x = F.interpolate(x, size=(Ht, Wt), mode="bilinear", align_corners=False)
-
     return x
 
 @torch.no_grad()
 def _save_samples_grid(model, n, temp, out_path, nrow=10, target_hw=None):
-    """
-    Try model.sample; coerce to (N,C,H,W); tile; save.
-    """
     try:
         try:
             s = model.sample(n, temperature=temp)   
@@ -329,7 +310,6 @@ def _save_samples_grid(model, n, temp, out_path, nrow=10, target_hw=None):
             s = model.sample(n)                     
         x = s[0] if isinstance(s, (list, tuple)) else s
         x = _coerce_nchw_4d(x, target_hw=target_hw)
-        # If std is suspiciously tiny, retry with manual latent sampling
         try:
             _std = x.std().item()
         except Exception:
@@ -340,7 +320,6 @@ def _save_samples_grid(model, n, temp, out_path, nrow=10, target_hw=None):
                 x = _coerce_nchw_4d(x, target_hw=target_hw)
             except Exception:
                 pass
-        # If std is suspiciously tiny, retry with manual latent sampling
         if torch.isfinite(x).all():
             _std = x.std().item()
             if _std < 1e-5:
@@ -362,9 +341,6 @@ def _save_samples_grid(model, n, temp, out_path, nrow=10, target_hw=None):
         return False, str(e)
 
 def _save_metric_plots(csv_path: Path, out_dir: Path):
-    """
-    Reads metrics.csv and writes loss and bpd line plots as PNGs.
-    """
     if not csv_path.exists():
         return
     iters, losses, bpds = [], [], []
@@ -379,20 +355,16 @@ def _save_metric_plots(csv_path: Path, out_dir: Path):
                 iters.append(it); losses.append(loss); bpds.append(bpd)
         if len(iters) < 2:
             return
-        # Loss
         plt.figure()
         plt.plot(iters, losses)
         plt.xlabel("iter"); plt.ylabel("loss"); plt.title("Training loss")
         plt.tight_layout()
-        plt.savefig(out_dir / "loss_curve.png")
-        plt.close()
-        # BPD
+        plt.savefig(out_dir / "loss_curve.png"); plt.close()
         plt.figure()
         plt.plot(iters, bpds)
         plt.xlabel("iter"); plt.ylabel("sum_bpd"); plt.title("Sum BPD (training batches)")
         plt.tight_layout()
-        plt.savefig(out_dir / "bpd_curve.png")
-        plt.close()
+        plt.savefig(out_dir / "bpd_curve.png"); plt.close()
     except Exception:
         pass
 
@@ -405,8 +377,57 @@ def load_hcpya_slices(mods: List[str], H: int, W: int, slice_idx=120):
     tmpl = ants.resample_image(slcs[0], (H, W), use_voxels=True)
     return slcs, tmpl
 
-def build_loaders(mods, H, W, train_samples, val_samples, batch, num_workers, do_aug=True):
-    slcs, tmpl = load_hcpya_slices(mods, H, W)
+def _read_slice(path: Path, idx: int, H: int, W: int):
+    im = ants.image_read(str(path))
+    slc = ants.slice_image(im, axis=2, idx=idx, collapse_strategy=1)
+    slc = ants.resample_image(slc, (H, W), use_voxels=True)
+    return slc
+
+def _scan_cohort_slices(root: Path, mods: List[str], H: int, W: int, slice_idx: int,
+                        subject_limit: int | None = None) -> list[list]:
+    """
+    Returns: images_cohort = [ [slc_T2, slc_T1, slc_FA], [ ... next subject ... ], ... ]
+             where each element is an ANTsImage 2D slice resampled to (H,W).
+    """
+    mod_files = {m: f"{m}.nii.gz" for m in mods}
+    subjects = sorted([p for p in root.iterdir() if p.is_dir()])
+    if subject_limit and subject_limit > 0:
+        subjects = subjects[:int(subject_limit)]
+    cohort = []
+    missing = []
+    for sdir in subjects:
+        try:
+            per_mod = []
+            ok = True
+            for m in mods:
+                f = sdir / mod_files[m]
+                if not f.exists():
+                    ok = False
+                    break
+                per_mod.append(_read_slice(f, slice_idx, H, W))
+            if ok:
+                cohort.append(per_mod)
+            else:
+                missing.append(sdir.name)
+        except Exception:
+            missing.append(sdir.name)
+    if len(cohort) == 0:
+        raise RuntimeError(f"No valid subjects found under {str(root)} for mods={mods}. Missing={missing[:5]} ...")
+    return cohort
+
+def build_loaders_hcpya(mods, H, W, train_samples, val_samples, batch, num_workers,
+                        do_aug=True, aug_schedules=None, disable_aug_anneal=False, slice_idx=120):
+    slcs, tmpl = load_hcpya_slices(mods, H, W, slice_idx=slice_idx)
+
+    if aug_schedules and not disable_aug_anneal:
+        sched = antstorch.MultiParamScheduler(antstorch.parse_schedules(aug_schedules))
+        def aug_sched_fn(step: int):
+            return sched.step(step)
+    else:
+        aug_sched_fn = None
+
+    global_step = Value('i', 0)
+
     train = antstorch.ImageDataset(
         images=[slcs],
         template=tmpl,
@@ -419,11 +440,14 @@ def build_loaders(mods, H, W, train_samples, val_samples, batch, num_workers, do
         data_augmentation_sd_simulated_bias_field=0.00000001,
         data_augmentation_sd_histogram_warping=0.025,
         number_of_samples=int(train_samples),
+        aug_scheduler=aug_sched_fn,
     )
+    train.global_step_ref = global_step
+
     val = antstorch.ImageDataset(
         images=[slcs],
         template=tmpl,
-        do_data_augmentation=True,
+        do_data_augmentation=do_aug,
         data_augmentation_transform_type="affineAndDeformation",
         data_augmentation_sd_affine=0.05,
         data_augmentation_sd_deformation=10.0,
@@ -431,11 +455,97 @@ def build_loaders(mods, H, W, train_samples, val_samples, batch, num_workers, do
         data_augmentation_noise_parameters=(0.0, 0.05),
         data_augmentation_sd_simulated_bias_field=0.00000001,
         data_augmentation_sd_histogram_warping=0.025,
-        number_of_samples=int(val_samples),
+        number_of_samples=int(train_samples),
+        aug_scheduler=aug_sched_fn,
     )
+
     train_loader = DataLoader(train, batch_size=batch, shuffle=True, num_workers=num_workers)
     val_loader   = DataLoader(val,   batch_size=min(16, batch), shuffle=False, num_workers=max(1, num_workers // 2))
-    return train_loader, val_loader
+    return train_loader, val_loader, global_step
+
+def build_loaders_cohort(mods, H, W, train_samples, val_samples, batch, num_workers,
+                         data_root: str, slice_idx: int, val_frac: float,
+                         subject_limit: int | None,
+                         do_aug=True, aug_schedules=None, disable_aug_anneal=False, seed: int = 0):
+    """
+    NEW: Build dataloaders from a cohort organized as:
+      root/
+        100610/T1.nii.gz T2.nii.gz FA.nii.gz
+        102311/...
+        ...
+
+    We pre-read each subject's requested slice for each modality as ANTsImages so that
+    antstorch.ImageDataset can apply the exact same augmentation machinery as before.
+    """
+    root = Path(data_root).expanduser()
+    if not root.exists():
+        raise FileNotFoundError(f"--data-root does not exist: {str(root)}")
+
+    # Read all per-subject slices
+    images_all = _scan_cohort_slices(root, mods, H, W, slice_idx, subject_limit=subject_limit)
+
+    # Template: keep HCP-YA template slice to anchor augmentation (assumes alignment)
+    tmpl_slice_list, tmpl_ref = load_hcpya_slices(mods=mods, H=H, W=W, slice_idx=slice_idx)
+    tmpl = tmpl_ref  # 2D ANTsImage
+
+    # Subject split (train/val by subjects)
+    n = len(images_all)
+    rng = np.random.default_rng(seed)
+    idx = np.arange(n)
+    rng.shuffle(idx)
+    n_val = max(1, int(round(float(val_frac) * n)))
+    val_idx = set(idx[:n_val])
+    images_train = [images_all[i] for i in range(n) if i not in val_idx]
+    images_val   = [images_all[i] for i in range(n) if i in val_idx]
+
+    if len(images_train) == 0:
+        raise RuntimeError("Cohort split produced an empty training set. Decrease --val-frac or increase subjects.")
+
+    # Aug scheduler
+    if aug_schedules and not disable_aug_anneal:
+        sched = antstorch.MultiParamScheduler(antstorch.parse_schedules(aug_schedules))
+        def aug_sched_fn(step: int):
+            return sched.step(step)
+    else:
+        aug_sched_fn = None
+
+    global_step = Value('i', 0)
+
+    # Train dataset: same augmentation knobs as template mode
+    train_ds = antstorch.ImageDataset(
+        images=images_train,             # LIST[ LIST[ANTsImage_per_mod] ]
+        template=tmpl,
+        do_data_augmentation=do_aug,
+        data_augmentation_transform_type="affineAndDeformation",
+        data_augmentation_sd_affine=0.05,
+        data_augmentation_sd_deformation=10.0,
+        data_augmentation_noise_model="additivegaussian",
+        data_augmentation_noise_parameters=(0.0, 0.05),
+        data_augmentation_sd_simulated_bias_field=0.00000001,
+        data_augmentation_sd_histogram_warping=0.025,
+        number_of_samples=int(train_samples),   # total draws (with replacement) across the cohort
+        aug_scheduler=aug_sched_fn,
+    )
+    train_ds.global_step_ref = global_step
+
+    # Validation dataset: no augmentation, cycle through held-out subjects repeatedly until val_samples
+    val_ds = antstorch.ImageDataset(
+        images=(images_val if len(images_val) > 0 else images_train[:1]),
+        template=tmpl,
+        do_data_augmentation=True,
+        data_augmentation_transform_type="affineAndDeformation",
+        data_augmentation_sd_affine=0.0,
+        data_augmentation_sd_deformation=0.0,
+        data_augmentation_noise_model="additivegaussian",
+        data_augmentation_noise_parameters=(0.0, 0.0),
+        data_augmentation_sd_simulated_bias_field=0.0,
+        data_augmentation_sd_histogram_warping=0.0,
+        number_of_samples=int(val_samples),
+    )
+
+    train_loader = DataLoader(train_ds, batch_size=batch, shuffle=True,  num_workers=num_workers, pin_memory=True)
+    val_loader   = DataLoader(val_ds,   batch_size=min(16, batch), shuffle=False, num_workers=max(1, num_workers // 2), pin_memory=True)
+    return train_loader, val_loader, global_step
 
 class _SyntheticDataset(Dataset):
     def __init__(self, n_samples:int, views:int, H:int, W:int, seed:int=0):
@@ -445,22 +555,15 @@ class _SyntheticDataset(Dataset):
     def __len__(self): return self.n
     def __getitem__(self, i): return self.data[i]
 
-def build_loaders2(mods, H, W, train_samples, val_samples, batch, num_workers, data_source="hcpya", seed=0):
-    if data_source == "synthetic":
-        views = len(mods)
-        train = _SyntheticDataset(n_samples=int(train_samples), views=views, H=int(H), W=int(W), seed=seed)
-        val   = _SyntheticDataset(n_samples=int(val_samples),   views=views, H=int(H), W=int(W), seed=seed+1)
-        train_loader = DataLoader(train, batch_size=batch, shuffle=True,  num_workers=0)
-        val_loader   = DataLoader(val,   batch_size=min(16, batch), shuffle=False, num_workers=0)
-        return train_loader, val_loader
-    else:
-        return build_loaders(mods, H, W, train_samples, val_samples, batch, num_workers, do_aug=True)
+def build_loaders_synth(mods, H, W, train_samples, val_samples, batch, num_workers, seed=0):
+    views = len(mods)
+    train = _SyntheticDataset(n_samples=int(train_samples), views=views, H=int(H), W=int(W), seed=seed)
+    val   = _SyntheticDataset(n_samples=int(val_samples),   views=views, H=int(H), W=int(W), seed=seed+1)
+    train_loader = DataLoader(train, batch_size=batch, shuffle=True,  num_workers=0)
+    val_loader   = DataLoader(val,   batch_size=min(16, batch), shuffle=False, num_workers=0)
+    return train_loader, val_loader, Value('i', 0)
 
 def ensure_shapes_cached(model, x_template: torch.Tensor):
-    """
-    Make sure MultiscaleFlow has cached latent shapes for sampling.
-    If sample() complains, do a 1-sample forward to populate cache.
-    """
     try:
         _ = model.sample(1)  # if cache exists this is a no-op
         return
@@ -475,13 +578,8 @@ def ensure_shapes_cached(model, x_template: torch.Tensor):
 
 @torch.no_grad()
 def warmup_actnorm_with_real_batch(model, x_real: torch.Tensor):
-    """
-    Ensures ActNorm in `model` is data-initialized using REAL data.
-    Does a 1-sample likelihood pass; safe to call once per model/view.
-    """
     dev = next(model.parameters()).device
     x1 = x_real[:1].to(dev, torch.float32)
-    # Prefer a path that triggers ActNorm data-init
     for fn in ("log_prob", "inverse_and_log_det", "__call__"):
         if hasattr(model, fn):
             try:
@@ -492,44 +590,25 @@ def warmup_actnorm_with_real_batch(model, x_real: torch.Tensor):
 
 @torch.no_grad()
 def _manual_prior_sample(model, n: int, temp: float = 1.0, x_template: torch.Tensor = None):
-    """
-    Fallback sampler that:
-      1) infers latent shapes via inverse on a REAL template,
-      2) draws Gaussian latents scaled by temp,
-      3) maps z -> x via model's 'forward_from_latents' (or similar).
-    Returns an (N,C,H,W) tensor.
-    """
-    # Device/dtype
     p = next(model.parameters())
     dev, dt = p.device, torch.float32
-
-    # Build a template if none provided
     if x_template is None:
         H = W = 64
         if hasattr(model, "input_shape") and isinstance(model.input_shape, (tuple, list)) and len(model.input_shape) >= 3:
             H, W = int(model.input_shape[-2]), int(model.input_shape[-1])
         x_template = torch.randn(1, 1, H, W, device=dev, dtype=dt) * 0.1
-
-    # 1) infer latent list via inverse pass
     z_tmpl, _ = model.inverse_and_log_det(x_template[:1].to(dev, dt))
     if isinstance(z_tmpl, torch.Tensor):
         z_tmpl = [z_tmpl]
-
-    # 2) sample latents with temperature
     z_list = [torch.randn(n, *z.shape[1:], device=dev, dtype=z.dtype) * float(temp) for z in z_tmpl]
-
-    # 3) map latents to x using best-available API
     for fn in ("forward_from_latents", "forward", "sample_from_latents", "_forward"):
         if hasattr(model, fn):
             out = getattr(model, fn)(z_list)
             return out[0] if isinstance(out, (list, tuple)) else out
-
-    # Last resort: now that shapes exist, try model.sample
     s = model.sample(n, T=temp) if hasattr(model, "sample") and ("T" in model.sample.__code__.co_varnames) else model.sample(n)
     return s[0] if isinstance(s, (list, tuple)) else s
 
 # ------------------------- main -------------------------
-
 
 def main():
     ap = argparse.ArgumentParser("Glow 2D (builder) trainer")
@@ -580,8 +659,19 @@ def main():
     ap.add_argument("--resume", type=str, default="", help="Path to checkpoint .pt to resume from")
     ap.add_argument("--auto-resume", action="store_true", help="If set, try <out-dir>/training_state.pt when --resume is not provided")
     ap.add_argument("--out-dir", type=str, default="runs_glow2d_builder")
-    ap.add_argument("--data", type=str, choices=["hcpya","synthetic"], default="hcpya", help="Use HCP-YA slices or synthetic noise data")
+
+    # DATA MODES: hcpya (template), cohort (NEW), synthetic
+    ap.add_argument("--data", type=str, choices=["hcpya","cohort","synthetic"], default="hcpya",
+                    help="Use HCP-YA template slice, HCP cohort slices, or synthetic noise data")
     ap.add_argument("--synthetic-samples", type=int, default=8192, help="Dataset size per split when using synthetic data")
+
+    # NEW cohort options
+    ap.add_argument("--data-root", type=str, default="",
+                    help="Root directory of cohort with subfolders per subject (each containing T1/T2/FA .nii.gz). Required if --data cohort.")
+    ap.add_argument("--slice-idx", type=int, default=120, help="Z slice index to extract across cohort/template")
+    ap.add_argument("--val-frac", type=float, default=0.10, help="Fraction of subjects held out for validation in cohort mode")
+    ap.add_argument("--subject-limit", type=int, default=0, help="(Debug) limit number of subjects; 0 means all")
+
     ap.add_argument("--smooth-alpha", type=float, default=0.1, help="EMA smoothing factor in (0,1]; higher = faster")
 
     # Alignment & weighting
@@ -600,9 +690,22 @@ def main():
     ap.add_argument("--vicreg-var", type=float, default=25.0, help="VICReg variance weight (keep per-dim std above gamma)")
     ap.add_argument("--vicreg-cov", type=float, default=1.0,  help="VICReg covariance weight (penalize off-diagonals)")
     ap.add_argument("--vicreg-gamma", type=float, default=1.0, help="VICReg variance floor (target std per feature)")
-
     # HSIC hyperparameters (RBF kernel)
     ap.add_argument("--hsic-sigma", type=float, default=0.0, help="RBF bandwidth; 0 -> median heuristic per batch")
+
+    ap.add_argument("--use-ckpt-config", action="store_true",
+                help="When resuming, override arch args with those saved in the checkpoint.")
+
+    ap.add_argument("--aug-schedules", type=str,
+        default=(
+            "noise_std:cos:0.05->0.00@150k,"
+            "sd_affine:linear:0.05->0.00@80k,"
+            "sd_deformation:cos:0.20->0.00@100k,"
+            "sd_simulated_bias_field:cos:1.00->0.00@120k,"
+            "sd_histogram_warping:exp:0.05->0.00@120k"
+        ),
+        help="Multi-parameter anneal spec for ANTs data_augmentation knobs.")
+    ap.add_argument("--disable-aug-anneal", action="store_true", help="If set, uses static augmentation values from dataset ctor.")
 
     # Preview grids
     ap.add_argument("--sample-mode", type=str, choices=["model","data","off"], default="model",
@@ -632,36 +735,57 @@ def main():
         else:
             amp_dtype = torch.float16
 
-    # GradScaler: enable only for fp16 (bf16 doesn't need scaling)
     scaler = torch.amp.GradScaler(enabled=(amp_enabled and amp_dtype == torch.float16))
 
-    # Sizes
+    if not args.disable_aug_anneal:
+        schedules = list(antstorch.parse_schedules(args.aug_schedules))
+        sched = antstorch.MultiParamScheduler(schedules)
+        def aug_sched_fn(step: int):
+            return sched.step(step)
+    else:
+        aug_sched_fn = None
+
     _check_hw_divisible(args.H, args.W, args.L)
     C = 1
     input_shape = (C, args.H, args.W)
     n_dims = int(np.prod(input_shape))
 
-    # Data
+    # ---------------- Data ----------------
     try:
-        train_loader, val_loader = build_loaders2(
-            args.modalities, args.H, args.W,
-            args.train_samples if args.data!="synthetic" else args.synthetic_samples,
-            args.val_samples if args.data!="synthetic" else max(256, args.batch*4),
-            args.batch, args.num_workers,
-            data_source=args.data, seed=args.seed
-        )
+        if args.data == "synthetic":
+            train_loader, val_loader, global_step = build_loaders_synth(
+                mods=args.modalities, H=args.H, W=args.W,
+                train_samples=args.synthetic_samples, val_samples=max(256, args.batch * 4),
+                batch=args.batch, num_workers=0, seed=args.seed)
+        elif args.data == "cohort":
+            if not args.data_root:
+                raise ValueError("--data-root is required when --data cohort")
+            train_loader, val_loader, global_step = build_loaders_cohort(
+                mods=args.modalities, H=args.H, W=args.W,
+                train_samples=args.train_samples, val_samples=args.val_samples,
+                batch=args.batch, num_workers=args.num_workers,
+                data_root=args.data_root, slice_idx=args.slice_idx, val_frac=float(args.val_frac),
+                subject_limit=(args.subject_limit if args.subject_limit > 0 else None),
+                do_aug=True, aug_schedules=(args.aug_schedules if not args.disable_aug_anneal else None),
+                disable_aug_anneal=args.disable_aug_anneal, seed=args.seed)
+        else:  # hcpya template (original behavior)
+            train_loader, val_loader, global_step = build_loaders_hcpya(
+                mods=args.modalities, H=args.H, W=args.W,
+                train_samples=args.train_samples, val_samples=args.val_samples,
+                batch=args.batch, num_workers=args.num_workers,
+                do_aug=True, aug_schedules=(args.aug_schedules if not args.disable_aug_anneal else None),
+                disable_aug_anneal=args.disable_aug_anneal, slice_idx=args.slice_idx)
     except Exception as e:
         import traceback
         print("[data] failed to build loaders:", repr(e))
         traceback.print_exc()
         print("Hint: try --data synthetic to verify training loop independent of ANTs/ANTsTorch data availability.")
         raise
-    train_iter = iter(train_loader)
+
     input_data_sampled = False
 
     # Build models using the builder
     from antstorch import create_glow_normalizing_flow_model_2d
-
     models: List[nf.Flow] = []
     for _ in args.modalities:
         m = create_glow_normalizing_flow_model_2d(
@@ -677,7 +801,7 @@ def main():
             leaky=0.0,
             net_actnorm=bool(args.net_actnorm),
             scale_cap=args.scale_cap,
-        ).to(dev).float().train()  # force FP32 params
+        ).to(dev).float().train()  # FP32 params
         for name, p in m.named_parameters():
             if p.dtype != torch.float32:
                 print(f"[warn] casting param {name} from {p.dtype} -> float32")
@@ -687,20 +811,19 @@ def main():
         models.append(m)
 
     # ---------------- EMA (lazy init) ----------------
-    ema_models = None  # will be created after the first real optimizer step
+    ema_models = None  # created after first optimizer step
 
     # ---- One-time ActNorm warmup on REAL data (before projectors) ----
     with torch.no_grad():
         warm_batch = next(iter(train_loader))               # (B, V, H, W)
         for vi, m in enumerate(models):
             xv0 = to01(warm_batch[:, vi:vi+1].to(dev)).to(torch.float32)
-            warmup_actnorm_with_real_batch(m, xv0)          # uses log_prob/inverse internally
+            warmup_actnorm_with_real_batch(m, xv0)
 
     # --- projection heads for alignment ---
     projectors = None
     if args.align != "none":
         with torch.no_grad():
-            # use the same warmed real batch as template (any view is fine for dim)
             x_tmpl = to01(warm_batch[:, 0:1].to(dev)).to(torch.float32)
             z_probe, _ = models[0].inverse_and_log_det(x_tmpl[:1])
             flat_dim = _flatten_latents(z_probe).size(1)
@@ -726,11 +849,10 @@ def main():
     warm = make_warmup(opt, args.warmup_iters, args.lr_decay_gamma, args.lr_decay_steps)
     plateau = torch.optim.lr_scheduler.ReduceLROnPlateau(
         opt, mode="min", factor=args.plateau_factor,
-        patience=args.plateau_patience, threshold=args.plateau_threshold,
-        cooldown=args.plateau_cooldown, min_lr=args.min_lr
+        patience=args.plateau_patience if hasattr(args, "plateau_patience") else 4,
+        threshold=args.plateau_threshold, cooldown=args.plateau_cooldown, min_lr=args.min_lr
     )
 
-    # Out dir, resume
     run_dir = Path(args.out_dir); run_dir.mkdir(parents=True, exist_ok=True)
     state_path = run_dir / "training_state.pt"
     csv_path   = run_dir / "metrics.csv"
@@ -746,16 +868,45 @@ def main():
     elif args.auto_resume and state_path.exists():
         resume_path = state_path
 
+    ckpt_cfg = None
     if resume_path is not None:
+
+        blob = torch.load(resume_path, map_location="cpu")
+        ckpt_cfg = blob.get("config", {})
+
+        arch_keys = ["modalities","H","W","L","K","hidden","base",
+                    "glowbase_logscale_factor","glowbase_min_log","glowbase_max_log",
+                    "scale_map","scale_cap","net_actnorm"]  # add split_mode if exposed
+        if args.use_ckpt_config and ckpt_cfg:
+            for k in arch_keys:
+                if k in ckpt_cfg:
+                    setattr(args, k, ckpt_cfg[k])
+
+        # optional: warn if you’re overriding user-provided values
+        mismatches = [k for k in arch_keys if k in ckpt_cfg and getattr(args,k)!=ckpt_cfg[k]]
+        if args.use_ckpt_config and mismatches:
+            print("[resume] using checkpoint arch; overrides:", {k:(getattr(args,k), ckpt_cfg[k]) for k in mismatches})
+
         blob = torch.load(resume_path, map_location=dev, weights_only=False)
         start_iter = int(blob.get("iter", 1))
-        opt.load_state_dict(blob.get("opt", opt.state_dict()))
+        try:
+            opt.load_state_dict(blob["opt"])
+        except Exception as e:
+            print(f"[resume] optimizer state not loaded ({e}); using fresh optimizer.")
+            # Optionally preserve LR/betas from ckpt group 0:
+            try:
+                g0 = blob["opt"]["param_groups"][0]
+                for k in ("lr","betas","eps","weight_decay"):
+                    if k in g0:
+                        for g in opt.param_groups:
+                            g[k] = g0[k]
+            except Exception:
+                pass
         if warm and blob.get("warm") is not None:
             warm.load_state_dict(blob["warm"])
         if blob.get("models") is not None:
             for m, sd in zip(models, blob["models"]):
                 m.load_state_dict(sd)
-        # EMA: create lazily and then load if present
         if args.ema and blob.get("ema") is not None:
             import copy
             ema_models = [copy.deepcopy(m).eval().to(dev) for m in models]
@@ -764,14 +915,12 @@ def main():
                     p.requires_grad_(False)
             for em, sd in zip(ema_models, blob["ema"]):
                 em.load_state_dict(sd)
-        # restore projectors if present
         if blob.get("proj") is not None and projectors is not None:
             try:
                 projectors.load_state_dict(blob["proj"])
                 tqdm.write("[resume] restored projectors")
             except Exception as e:
                 tqdm.write(f"[resume] warning: could not load projectors: {e}")
-        # restore Kendall scalars
         if blob.get("kendall") is not None and s_nll is not None:
             try:
                 kd = blob["kendall"]
@@ -782,7 +931,6 @@ def main():
                 tqdm.write(f"[resume] warning: could not load Kendall scalars: {e}")
         tqdm.write(f"[resume] from {str(resume_path)} @ iter {start_iter}")
 
-    # If user asked for extra iters, override max-iter to be (already_done + extra)
     if args.extra_iters > 0:
         args.max_iter = (start_iter - 1) + args.extra_iters
 
@@ -790,11 +938,14 @@ def main():
         with open(csv_path, "w") as f:
             f.write("iter,loss,sum_bpd,lr\n")
 
+    with global_step.get_lock():
+        global_step.value = int(start_iter)
+    train_iter = iter(train_loader)
+
     # ------------------------- train loop -------------------------
     n_views = len(models)
     tqdm.write(f"[info] training {n_views} view(s); params per view: {[n_params(m) for m in models]}")
 
-    # Running averages (EMA) display (simple, not saved)
     alpha = float(args.smooth_alpha)
     ema_loss_disp = None
     ema_sum_bpd_disp = None
@@ -810,11 +961,9 @@ def main():
             train_iter = iter(train_loader)
             x = next(train_iter)
 
-        # Forward
         L_nll = torch.tensor(0.0, device=dev, dtype=torch.float32)
         curr_bpd_views = []
         sum_bpd = 0.0
-
         lat_flat = []
 
         if amp_enabled:
@@ -828,20 +977,16 @@ def main():
             bad_batch = False
             for vi, m in enumerate(models):
                 x_v = to01(x[:, vi:vi+1, :, :].to(dev))
-
-                logp_v = m.log_prob(x_v.float())            # <-- model computes base+logdet
-                z_v, _ = m.inverse_and_log_det(x_v.float()) # <-- still get latents for alignment
-
+                logp_v = m.log_prob(x_v.float())
+                z_v, _ = m.inverse_and_log_det(x_v.float())
                 if not torch.isfinite(logp_v).all():
                     tqdm.write(f"[nan] non-finite logp in view {vi} at iter {it}; skipping step")
                     bad_batch = True
                     break
-
                 bpd_v   = -logp_v / (np.log(2.0) * float(n_dims))
                 bpd_mean = float(bpd_v.mean().detach().cpu().item())
                 curr_bpd_views.append(bpd_mean)
                 sum_bpd += bpd_mean
-
                 L_nll = L_nll - logp_v.mean()
                 if isinstance(z_v, (list, tuple)):
                     zflat = torch.cat([zi.flatten(1) for zi in z_v], dim=1)
@@ -853,21 +998,16 @@ def main():
             tqdm.write(f"[nan] skipping iter {it} (bad_batch={bad_batch}, L_nll finite={torch.isfinite(L_nll).item()})")
             continue
 
-        # Alignment loss (if requested)
         L_align = torch.tensor(0.0, device=dev)
         if args.align != "none" and it >= args.align_warmup:
             feats = [projectors[i](lat_flat[i]) for i in range(len(lat_flat))]
-            feats = [f.float() for f in feats]  # keep loss math in fp32
-
+            feats = [f.float() for f in feats]
             if args.align == "barlow":
                 L_align = antstorch.barlow_twins_multi(feats, lam=float(args.barlow_lambda))
             elif args.align == "vicreg":
                 L_align = antstorch.vicreg_multi(
-                    feats,
-                    w_inv=float(args.vicreg_inv),
-                    w_var=float(args.vicreg_var),
-                    w_cov=float(args.vicreg_cov),
-                    gamma=float(args.vicreg_gamma),
+                    feats, w_inv=float(args.vicreg_inv), w_var=float(args.vicreg_var),
+                    w_cov=float(args.vicreg_cov), gamma=float(args.vicreg_gamma),
                 )
             elif args.align == "infonce":
                 L_align = antstorch.info_nce_multi(feats, T=float(args.temperature))
@@ -876,7 +1016,6 @@ def main():
             elif args.align == "pearson":
                 L_align = antstorch.pearson_multi(feats)
 
-        # Combine with fixed or Kendall weighting
         if args.weighting == "fixed" or args.align == "none":
             loss_total = L_nll + (args.align_weight * L_align if args.align != "none" else 0.0)
             w_nll = 1.0
@@ -894,62 +1033,49 @@ def main():
             w_nll   = float(torch.exp(-s_nll_eff).detach().cpu().item())
             w_align = float(torch.exp(-s_align_eff).detach().cpu().item())
 
-        # Backprop + clip + step
-        all_params = []
-        for g in param_groups:
-            for p in g["params"]:
-                if isinstance(p, torch.Tensor) and p.grad is not None:
-                    all_params.append(p)
-
         if scaler.is_enabled():
             scaler.scale(loss_total).backward()
-            scaler.unscale_(opt)  # grads are now FP32
-
+            scaler.unscale_(opt)
             params_to_clip = []
             for g in opt.param_groups:
                 params_to_clip.extend(g["params"])
             torch.nn.utils.clip_grad_norm_(params_to_clip, max_norm=float(args.grad_clip))
-
-            scaler.step(opt)
-            scaler.update()
+            scaler.step(opt); scaler.update()
         else:
             loss_total.backward()
             params_to_clip = []
             for g in opt.param_groups:
                 params_to_clip.extend(g["params"])
-            torch.nn.utils.clip_grad_norm_(params_to_clip, max_norm=float(args.grad_clip))
+            torch.nn.utils.clip_grad_norm_(params_to_clip, max_norm=float(args.grad_clip) if hasattr(args,"grad_clip") else 2.0)
             opt.step()
 
-        # -------- Lazy EMA init right after the first real update --------
         if args.ema and ema_models is None:
             import copy
             ema_models = [copy.deepcopy(m).eval().to(dev) for m in models]
             for em in ema_models:
                 for p in em.parameters():
                     p.requires_grad_(False)
-            # copy ActNorm state from base → EMA, then warm on REAL batch
             with torch.no_grad():
                 for vi, (m, em) in enumerate(zip(models, ema_models)):
-                    _copy_actnorm_state(m, em)  # <-- helper you added
+                    _copy_actnorm_state(m, em)
                     xv_real = to01(x[:, vi:vi+1, :, :].to(dev)).float()
-                    warmup_actnorm_with_real_batch(em, xv_real)  # <-- helper you added
+                    warmup_actnorm_with_real_batch(em, xv_real)
             tqdm.write("[ema] initialized from base after first update")
 
-        # EMA update each step
         if ema_models is not None:
             with torch.no_grad():
                 for em, m in zip(ema_models, models):
                     for p_em, p in zip(em.parameters(), m.parameters()):
                         p_em.data.mul_(args.ema_decay).add_(p.data, alpha=1.0 - args.ema_decay)
 
-        # Warmup/exp decay
         if warm is not None:
             warm.step()
 
-        # Update tqdm with live metrics
+        with global_step.get_lock():
+            global_step.value += 1
+
         lr_now = opt.param_groups[0]["lr"]
 
-        # EMA smoothing for display
         curr_loss = float(loss_total.detach().cpu().item())
         if ema_loss_disp is None:
             ema_loss_disp = curr_loss
@@ -964,47 +1090,29 @@ def main():
                 ema_bpd_views_disp[i] = (1.0 - a) * ema_bpd_views_disp[i] + a * curr_bpd_views[i]
 
         postfix = {
-            "iter": it,
-            "loss": f"{curr_loss:.4f}",
-            "loss~": f"{ema_loss_disp:.4f}",
-            "bpd": f"{sum_bpd:.3f}",
-            "bpd~": f"{ema_sum_bpd_disp:.3f}",
-            "lr": f"{lr_now:.2e}",
-            "align": f"{float(L_align.detach().cpu().item()):.4f}",
-            "mode": args.align,
-            "w_nll": f"{w_nll:.2f}",
-            "w_aln": f"{w_align:.2f}",
+            "iter": it, "loss": f"{curr_loss:.4f}", "loss~": f"{ema_loss_disp:.4f}",
+            "bpd": f"{sum_bpd:.3f}", "bpd~": f"{ema_sum_bpd_disp:.3f}", "lr": f"{lr_now:.2e}",
+            "align": f"{float(L_align.detach().cpu().item()):.4f}", "mode": args.align,
+            "w_nll": f"{w_nll:.2f}", "w_aln": f"{w_align:.2f}",
         }
         for i in range(n_views):
             postfix[f"v{i}"] = f"{curr_bpd_views[i]:.3f}/{ema_bpd_views_disp[i]:.3f}"
+        pbar.set_postfix(postfix); pbar.update(1)
 
-        pbar.set_postfix(postfix)
-        pbar.update(1)
-
-
-        # Sample the input data for reference
         if not input_data_sampled:
             with torch.no_grad():
                 eval_models = ema_models if ema_models is not None else models
                 num_views = len(eval_models)
-
                 ok, err = save_coordinated_input_grids(
-                    val_loader,
-                    num_views=num_views,
-                    out_dir=run_dir,
-                    n=100,
-                    nrow=10,
-                    target_hw=(args.H, args.W),
-                    device=dev,
+                    val_loader, num_views=num_views, out_dir=run_dir, fallback_loader=train_loader,
+                    n=100, nrow=10, target_hw=(args.H, args.W), device=dev,
                 )
-
                 if ok:
                     tqdm.write(f"[samples] saved coordinated input data grids @ iter {it}")
                     input_data_sampled = True
                 else:
                     tqdm.write(f"[warn] input data grid failed @ iter {it}: {err}")
 
-        # Eval + plateau + sampling
         if it % args.eval_interval == 0:
             with torch.no_grad():
                 eval_models = ema_models if ema_models is not None else models
@@ -1028,77 +1136,51 @@ def main():
             plateau.step(avg_bpd)
             tqdm.write(f"[eval] iter={it} avg_bpd={avg_bpd:.4f} lr={lr_now:.2e}")
 
-            # preview grids + metric plots
             with torch.no_grad():
                 eval_models = ema_models if ema_models is not None else models
-
                 if args.sample_mode == "model":
                     any_ok = False
                     n_samples, nrow = 100, 10
-                    shared_seed = int(getattr(args, "seed", 12345)) + int(it)  # vary across evals but match across views
-
+                    shared_seed = int(getattr(args, "seed", 12345)) + int(it)
                     for vi, m in enumerate(eval_models):
                         if tmpl_by_view[vi] is None:
                             tqdm.write(f"[warn] no real template available for view {vi}; skipping model samples this eval")
                             continue
-
-                        # Warm ActNorm on REAL data for the exact model we will sample (EMA or base)
                         warmup_actnorm_with_real_batch(m, tmpl_by_view[vi])
-
-                        # Snapshot RNG state (CPU + CUDA) so we can reseed for coordination and then restore.
                         cpu_state = torch.random.get_rng_state()
                         cuda_states = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
-
                         try:
-                            # Reseed so every view draws the *same* z for sample index i.
                             torch.manual_seed(shared_seed)
-
                             ok, err = _save_samples_grid(
-                                m,
-                                n_samples,
-                                args.sample_temp,
+                                m, n_samples, args.sample_temp,
                                 run_dir / f"samples_view{vi}_it{it:06d}.png",
-                                nrow=nrow,
-                                target_hw=(args.H, args.W),
+                                nrow=nrow, target_hw=(args.H, args.W),
                             )
                         finally:
-                            # Restore RNG states to avoid side effects on the rest of training/eval.
                             torch.random.set_rng_state(cpu_state)
                             if cuda_states is not None:
                                 torch.cuda.set_rng_state_all(cuda_states)
-
                         if not ok:
                             tqdm.write(f"[warn] model sampling failed for view {vi} at iter {it}: {err}")
                         any_ok = any_ok or ok
-
                     if any_ok:
                         tqdm.write(f"[samples] saved *coordinated* model sample grids @ iter {it}")
-
                 elif args.sample_mode == "data":
-                    # Coordinate the subjects across views by collecting once and writing per-view grids
                     ok, err = save_coordinated_input_grids(
-                        val_loader,
-                        num_views=len(eval_models),
-                        out_dir=run_dir,
-                        n=100,
-                        nrow=10,
-                        target_hw=(args.H, args.W),
-                        device=dev,
+                        val_loader, num_views=len(eval_models), out_dir=run_dir,
+                        n=100, nrow=10, target_hw=(args.H, args.W), device=dev,
                     )
                     if ok:
                         tqdm.write(f"[samples] saved *coordinated* validation-batch grids @ iter {it}")
                     else:
                         tqdm.write(f"[warn] val-batch grid failed at iter {it}: {err}")
-
                 else:
                     tqdm.write("[samples] skipping previews (--sample-mode off)")
             _save_metric_plots(csv_path, run_dir)
 
-        # CSV log
         with open(csv_path, "a") as f:
             f.write(f"{it},{curr_loss:.6f},{sum_bpd:.6f},{lr_now:.6g}\n")
 
-        # Lightweight checkpoint
         if it % args.eval_interval == 0:
             blob = {
                 "iter": it + 1,
@@ -1118,8 +1200,6 @@ def main():
 
     pbar.close()
     print("Done. Run dir:", str(run_dir))
-
-
 
 if __name__ == "__main__":
     main()
