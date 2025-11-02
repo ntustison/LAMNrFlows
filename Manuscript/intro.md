@@ -65,7 +65,52 @@ competitive high-resolution synthesis (class-conditional and text-conditional)
 that explicitly benchmarks against diffusion while retaining exact likelihood
 training [@gu2025starflow].
 
+## Non-flow medical image imputation / cross-modal synthesis
+
+Early approaches pre-dating deep learning framed cross-modal synthesis (e.g.,
+MR$\rightarrow$CT) and attenuation-correction as either segmentation-/atlas-based mapping or
+patch-based learning from paired MR/CT exemplars. Typical pipelines registered a
+subject to one or more atlases, transferred tissue labels or Hounsfield
+surrogates, and then refined with local patch regressors or random forests to
+better handle bone/air ambiguity and intensity–tissue mismatch
+[@andreasen2015patchpct;@torrado2016fastpatchpct;@yang2017rfpatchpct;@wu2016localdiffeo]. 
+These methods set important baselines and established
+evaluation practices in radiotherapy planning and PET/MR, but accuracy depended
+on registration quality, hand-tuned features, and limited modeling flexibility
+for non-linear cross-modal relationships.
+
+With the advent of deep learning, supervised CNNs (often U-Net–style) became the
+default for sCT generation and related imputation tasks, showing large gains
+with paired MR/CT data [@han2017dcnn; @florkow2020mrm]. To relax pairing
+constraints, unpaired image-translation emerged via adversarial learning
+(CycleGAN and structural-consistency variants) for MR$\leftrightarrow$CT and other modality
+pairs, improving realism while explicitly encouraging anatomy preservation
+[@lei2019densecyclegan; @yang2018structurecyclegan]. In parallel, task pipelines
+that accept missing modalities at inference without explicit synthesis—e.g.,
+HeMIS’s latent “mean-of-modalities” fusion—provided robust alternatives when
+imputation might be risky or unnecessary [@havaei2016hemis]. Broad reviews
+summarize these deep methods and their clinical contexts across MRI/CT/PET
+[@wang2021medimgsynth].
+
+Most recently, diffusion models have been adapted to medical imputation
+settings, offering strong generative priors and uncertainty handling. For
+example, ReMiND targets longitudinal MRI recovery of missing visits via
+conditional diffusion, and domain reviews in reconstruction discuss how
+diffusion-based priors can mitigate domain shift and quantify
+uncertainty—considerations also relevant to translation/imputation
+[@yuan2024remind;@webber2024bjrai].
+
 ## Contribution
+
+Most prior synthesis/imputation frameworks are configured as one-to-one or
+many-to-one mappings: they emit a single target contrast per pass—even when
+trained for multiple targets—and they typically do not model the joint
+conditional over all missing contrasts. In contrast, our Glow + CGM formulation
+treats modalities as a single multiscale latent system: given any observed
+subset, we compute a closed-form joint posterior over the missing latents
+(capturing cross-modal covariance) and then exactly invert once, yielding $M \rightarrow N$
+imputations that are jointly coherent across all outputs.
+
 
 ### Why Glow (vs. TarFlow/STARFlow)
 
