@@ -3,76 +3,89 @@
 
 # Introduction
 
-Insight into biological structure and function is enhanced by medical imaging
-and the associated data latent spaces.  Deep learning has become foundational
-for modern research approaches to investigating and leveraging such spaces.
+Medical imaging data and their representative latent spaces are essential for
+insight into biological structure and function.  Deep learning workflows have
+become foundational for modern approaches to investigating and leveraging such
+spaces.  Many existing approaches, however, are opaque to data likelihoods and
+lack invertibility complicating transformations between image space and their
+latent counterparts. In practice, multimodal medical imaging research is often
+characterized by incomplete contrasts and other constraints which affect
+downstream processing.  Specifically, downstream analyses often require
+cross-modal imputation and synthesis, exact likelihoods for principled model
+comparison and uncertainty modeling, and multiscale latent representations that
+can be aligned and analyzed across modalities.  Normalizing flows
+[@papamakarios2021nfreview] are well-suited for addressing these concerns by
+coupling expressive latent spaces with exact likelihoods and single-pass
+inversion, yielding multiscale latents that can be aligned across modalities and
+precisely decoded back to image space.
 
+## Normalizing flows 
 
+Normalizing flows emerged as a practical class of invertible generative models
+approximately a decade ago.  Although other classes of invertible (or
+approximately invertible) architectures were developed in parallel
+[@gomez2017revnet;@jacobsen2018irevnet], such networks were not designed for
+density modeling with exact likelihoods.  An early pioneer Non-linear
+Independent Components Estimation (NICE) [dinh2014nice] demonstrated that
+features can be split into two parts with one half "nudging" the other with a
+learned shift.  This keeps density computation simple while guaranteeing an
+exact inverse. Variational flows broadened this idea by stacking small,
+invertible "warps" that are easy to compute [@rezende2015variational]. RealNVP
+then added learned scaling in addition to shifting and arranged the model across
+multiple resolutions, improving modeling while keeping computations efficient
+[@dinh2016realnvp]. In parallel, Inverse Autoregressive Flow (IAF) and Masked
+Autoregressive Flow (MAF) explored autoregressive flows that set the direction
+of computation to trade off fast sampling versus fast likelihood evaluation
+[@kingma2016iaf;@papamakarios2017maf]. 
 
-Simplifying inference, deep learning has significantly facilitated the search for latent spaces 
-associated with modern medical image analysis.
-the working currency of modern medical image
-analysis, yet most representations are only indirectly tied to data likelihoods
-and are difficult to invert. In multimodal medical imaging—where subjects often
-have incomplete contrasts and downstream tasks require calibrated
-uncertainty—these limitations matter. Normalizing flows address this gap by
-coupling expressive latent spaces with exact likelihoods and one-shot inversion,
-yielding multiscale latents that can be aligned across modalities and decoded
-back to image space without approximation.
+The Glow architecture consolidated these ideas for large images with
+data-dependent ActNorm, invertible $1\times1$ convolutions, and a clean
+multiscale design, yielding strong likelihoods and single-pass inversion
+[@kingma2018glow]. Subsequent work broadened the family: Flow++ improved sample
+quality via variational dequantization and richer coupling transforms
+[@ho2019flowpp]; Neural Spline Flows replaced affine transforms with monotonic
+splines for greater flexibility [@durkan2019nsf]; Residual Flows enforced
+Lipschitz constraints for stability in deep stacks [@behrmann2019resflow]; and
+FFJORD introduced continuous-time flows with unbiased likelihood estimates via
+Hutchinson trace estimators [@grathwohl2019ffjord]. Continuous-time variants
+(e.g., continuous normalizing flows, flow-matching) are related but generally
+lack the same one-shot inverse and straightforward multiscale architectures 
+leveraged for analytics and imputation.  Surveys synthesize these developments and
+map the trade-offs across density estimation, sampling, and invertibility
+[@kobyzev2020nfsurvey;@papamakarios2021nfreview].
 
+More recent work proposes flow-based models that operate at the same resolution
+and scale that popularized diffusion models
+[@croitoru2023diffusion_vision_survey].  TarFlow (Transformer Autoregressive
+Flow) shows that normalizing flows can achieve state-of-the-art image
+likelihoods and diffusion-comparable sample quality using autoregressive
+Transformers and a few key training recipes [@zhai2024tarflow]. STARFlow builds
+on this with a scalable latent-space design and guidance mechanisms, reporting
+competitive high-resolution synthesis (class-conditional and text-conditional)
+that explicitly benchmarks against diffusion while retaining exact likelihood
+training [@gu2025starflow].
 
-Modern neuroimaging and biomedical studies routinely acquire complementary
-modalities—e.g., T1/T2/FA in structural MRI, PET/MRI in humans, histology/MRI in
-animal models—often with partial or missing contrasts for a subset of
-participants or time points. Downstream analyses increasingly need three things
-at once: (i) faithful cross-modal synthesis and imputation, (ii) calibrated
-likelihoods for principled model comparison and uncertainty reporting, and (iii)
-multiscale latent representations that can be aligned and analyzed across
-modalities. Normalizing flows are attractive in this setting because they are
-exactly invertible and train by maximizing a tractable likelihood via the
-change-of-variables formula:
+## Contribution
 
-$$
-\log p_X(x)=\log p_Z\!\big(f(x)\big)\;+\;\log\left|\det J_f(x)\right|.
-$$
+### Why Glow (vs. TarFlow/STARFlow)
 
-This yields bits-per-dimension metrics and fast, one-pass decoding from latent
-to image space.
+While recent work revisits flows at with transformer backbones and shows diffusion-level sample quality, our setting
+prioritizes calibrated densities, exact inversion, and analyzable latents for
+multi-modal medical volumes. We therefore adopt a Glow-style architecture
+because it provides single-pass exact inverse decoding, explicit log-likelihoods
+with clean per-layer bookkeeping, and straightforward multiscale taps that
+expose per-level latents for cross-modal alignment and conditional Gaussian
+imputation. In practice, this design scales predictably to 2D/3D data
+(ActNorm-3D, invertible $1\times1\times1$ convolutions, corrected reshape
+order), supports per-scale uncertainty-aware alignment (Pearson/Barlow
+Twins/VICReg/InfoNCE/HSIC with optional CCA constraints), and integrates cleanly
+with ANTsTorch tooling. Compared with autoregressive flow variants, which decode
+sequentially over tokens/variables, Glow’s parallel inverse is compute-efficient
+for large volumes and enables per-level statistics needed for imputation. Our
+goal is not web-scale text-conditional synthesis, but fit-for-purpose modeling
+of within-subject multimodal data where exactness, interpretability, and
+reproducibility matter most.
 
-## Historical context and positioning: flows and diffusion as complementary toolkits
-Diffusion/score-based models have recently dominated image synthesis through
-robust training and strong perceptual quality, while the lineage from reversible
-networks to NICE/RealNVP/Glow established a parallel path grounded in exact
-likelihoods and bijective mappings. For multi-modal medical images—often 3-D
-volumes where exact inversion, calibrated densities, and interpretable
-multiscale latents matter—these families are best viewed as complementary. We
-focus on discrete, convolutional Glow-style flows to exploit parallel inversion,
-explicit log-determinant bookkeeping, and per-level latent access.
-
-## Conceptual comparison for imaging (objective, likelihood, inversion cost, 3-D scalability)
-
-- **Training objective.** Diffusion trains a denoiser/score across noise levels;
-  discrete flows perform exact maximum likelihood.  
-- **Likelihood access.** Diffusion likelihoods are often indirect or
-  intractable; flows provide exact log-likelihoods and bpd.  
-- **Sampling/inversion cost.** Diffusion typically requires many function
-  evaluations; flows invert in a single parallel pass.  
-- **3-D scalability.** For volumes, single-pass inversion and explicit Jacobians
-  make flows practical for decoding and analysis.  
-
-Continuous-time variants (CNFs, flow-matching) are related but generally lack
-the same one-shot inverse and straightforward multiscale “taps” we exploit for
-analytics and imputation.
-
-## Practical challenges and our design choices
-
-### Implementation pitfalls that block 3-D adoption
-“Glow-lite” implementations—single-scale setups; inconsistent squeeze/unsqueeze
-and split/merge orderings; missing ActNorm; absent invertible
-\(1\times1(\times1)\) convolutions; ad-hoc log-det tracking—are brittle. Common
-failures include channel mismatches on inverse, unstable log-det accumulation,
-and poorly structured latents that undermine downstream estimation and
-imputation.
 
 ### Robust 2-D/3-D Glow backbone (normflows + ANTsTorch)
 We provide a tested PyTorch backbone that restores canonical Glow step ordering
@@ -102,29 +115,3 @@ naturally with this pipeline: exact likelihoods calibrate estimates; single-pass
 inversion makes 3-D decoding practical; and multiscale taps yield structured
 statistics across resolutions.
 
-## Contributions
-- A robust 2-D/3-D Glow backbone in normflows with ANTsTorch integration,
-  including corrected multiscale reshape orderings, 3-D invertible layers,
-  stabilized log-det tracking, and a reproducible CLI with AMP/EMA, resumable
-  checkpoints, augmentation scheduling, and tests.  
-- Per-level latent alignment across modalities via projector heads, supporting
-  Pearson/Barlow Twins/VICReg/InfoNCE/HSIC, with an optional CCA-guided subspace
-  and aleatoric-aware (Kendall–Gal) weighting.  
-- A conditional Gaussian modeling pipeline that performs closed-form imputation
-  over aligned latents and decodes exactly to one or more target image spaces.
-
-## Datasets, modalities, and generality
-We demonstrate the framework on young-adult HCP T1-weighted, T2-weighted, and FA
-images, and emphasize that the workflow is modality-agnostic by construction.
-The same per-level alignment and CGM machinery apply to human PET/MRI,
-histology/MRI in animal models, and settings with more than two modalities or
-non-uniform availability. Experiments include likelihood/bpd, PSNR/SSIM for
-synthesis, and imputation accuracy, plus ablations over alignment objectives,
-CCA options, and augmentation schedules.
-
-## Paper organization
-We next review background on discrete flows and related generative models;
-detail the Glow backbone, training utilities, and per-level alignment
-objectives; present the conditional Gaussian modeling pipeline; and report
-experiments on HCP with discussion of generality to other modality combinations
-and limitations.
