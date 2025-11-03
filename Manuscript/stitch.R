@@ -7,6 +7,7 @@ rmdFiles <- c( "format.md",
                "titlePage.md",
                "abstract.md",
                "intro.md",
+               "methods.md",
                "hcp_ya_experiments.md",
                "future_work.md",
                "references.md"
