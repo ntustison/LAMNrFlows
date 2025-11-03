@@ -232,17 +232,9 @@ PSNR/SSIM, and imputation-coherence evaluations. It also includes example
 configurations, reproducible command lines for the HCP study, and the manuscript
 sources.
 
-For reproducibility across repositories, we pin dependency versions, record
-configuration and augmentation schedules, and save checkpoints that include
-model, optimizer, EMA, RNG, augmentation state, and any CCA/whitening
-parameters. We recommend using the tagged releases and environment files
-referenced in MultimodalNormalizingFlows to replicate the main experiments
-end-to-end.
-
-
-
-
-
-
-<!-- ## Software and reproducibility
-The codebase provides a **reproducible CLI** with YAML/argparse configuration, deterministic seeds, saved **checkpoints** (model, optimizer, EMA, RNG, augmentation state), and **unit tests** covering forward/inverse consistency (tolerance \(<10^{-6}\) in \(L_\infty\)), log‑det correctness (per‑layer and cumulative), and shape invariants across 2‑D/3‑D. Experiments can be resumed from checkpoints, and all metrics, schedules, and hyperparameters are stored for auditability. The implementation builds on `normflows` with added 3‑D layers and integrates ANTsTorch I/O and augmentation. -->
+The codebase provides a reproducible CLI with YAML/argparse configuration,
+deterministic seeds, saved checkpoints (model, optimizer, EMA, RNG,
+augmentation state), and unit tests covering forward/inverse consistency
+(tolerance \(<10^{-6}\) in \(L_\infty\)), log‑det correctness (per‑layer and
+cumulative), and shape invariants across 2‑D/3‑D. Experiments can be resumed
+from checkpoints, and all metrics, schedules, and hyperparameters are stored. 
