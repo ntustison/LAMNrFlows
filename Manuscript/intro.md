@@ -105,10 +105,10 @@ training [@gu2025starflow].
 ## Contribution
 
 Most prior synthesis/imputation frameworks are configured as one-to-one or
-many-to-one mappings.   They emit a single target contrast per pass—even when
-trained for multiple targets—and rarely model the joint conditional across all
+many-to-one mappings.   They emit a single target contrast per pass even when
+trained for multiple targets and rarely model the joint conditional across all
 missing contrasts. We instead treat modalities as a single multiscale latent
-system. Using a Glow backbone with per-level taps, we fit per-level Gaussian
+system. Using a Glow backbone with multi-scale access, we fit per-level Gaussian
 statistics and, given any observed subset, compute a closed-form joint posterior
 over the missing latents that captures cross-modal covariance. A single, exact
 inverse then yields $M \rightarrow N$ imputations that are jointly coherent across all
@@ -118,9 +118,9 @@ comparison and uncertainty reporting.
 We adopt a Glow-style discrete flow because our setting prioritizes exact
 inversion, explicit log-likelihoods, and analyzable multiscale latents for 3-D
 medical volumes. Concretely, we provide a robust 2-D/3-D implementation as
-open-source (normflows + ANTsTorch) with ActNorm-3D, invertible $1\times1\times1$ convolutions (LU),
+open-source (normflows + ANTsTorch) with ActNorm, invertible $1\times1\times1$ convolutions (LU),
 corrected reshape orderings, stable log-det bookkeeping, and a reproducible CLI
-(AMP/EMA, resumable checkpoints, augmentation schedules, tests). On top, we
+(AMP/EMA, resumable checkpoints, augmentation schedules, tests). We also
 enable per-level latent alignment across modalities via lightweight projector
 heads and multiple objectives (Pearson, Barlow Twins, VICReg, InfoNCE, HSIC),
 with an optional CCA-guided subspace and Kendall–Gal weighting to account for

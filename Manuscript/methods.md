@@ -4,118 +4,138 @@
 # Methods
 
 Our proposed imputation and synthesis framework comprises two main components:
-training and inference.  We describe each of these components below.
-In addition, we detail our open-source PyTorch-based implementation for the
-benefit of the research community.
+training and inference. We describe each below and summarize implementation
+details for reproducibility.
 
 ## Training
 
 ### Architecture
 
-We adopt a multiscale Glow architecture [@kingma2018glow] with $L$ levels and $K$
-flow steps per level. Each step applies (i) ActNorm with data-dependent
-initialization (first batch), (ii) an invertible 1×1(×1) convolution
-parameterized via an LU factorization for stable log-det computation, and (iii)
-an affine coupling transform whose scale/shift predictor is a small ConvNet with
+We train one Glow model per modality, sharing architecture but not parameters.
+Each model uses a multiscale Glow design [@kingma2018glow] with \(L\) levels and
+\(K\) flow steps per level. Each step applies (i) ActNorm with data-dependent
+initialization on the first batch, (ii) an invertible \(1\times1(\times1)\)
+convolution parameterized via LU for stable log-det computation, and (iii) an
+affine coupling transform whose scale/shift predictor is a small ConvNet with
 internal width (“hidden”) that operates on the transformed half of the channels
 at that level. Between levels we apply squeeze (space-to-depth) and split
 operations, which expose multiscale latents for analysis, alignment, and
-conditional modeling.  This is in contrast to many transformer-based flow 
-variants which do not naturally expose multiscale access to latents making 
-mutual alignment (described below) much more difficult.  This is in addition
-to the well-known difficulty of 3-D scaling.
+conditional modeling. In contrast, many transformer-based flow variants decode
+sequentially and do not naturally expose per-level latent access, making our
+multi-scale alignment and CGM machinery less direct in addition to the usual 3-D
+scaling challenges.
 
 ### Single-flow optimization
 
-Given an image \(x\), a flow learns an invertible function \(f_\theta\) that maps
-\(x\) to a latent representation \(z=f_\theta(x)\). We place a simple base density
-on the latents, typically the standard normal \(p_Z=\mathcal{N}(0,I)\). The model
-optimizes the exact change-of-variables objective
+Given an image \(x\), a flow learns an invertible map \(f_\theta\) that transforms
+\(x\) to a latent space \(z=f_\theta(x)\). We place a simple base density on latents,
+typically \(p_Z=\mathcal{N}(0,I)\), and optimize the exact change-of-variables
+objective
 
 \[
 \log p_X(x)=\log p_Z\!\big(f_\theta(x)\big)+\sum_{k=1}^{K\cdot L}\log\big|\det J_{f_k}(h_{k-1})\big|,
 \]
 
-where \(f=f_{K\cdot L}\circ\cdots\circ f_{1}\), \(h_0=x\), and \(h_k=f_k(h_{k-1})\).
-The first term is the log-probability of the latent under the base density; the
-second term is the log-determinant Jacobian that corrects for local
-volume change introduced by each invertible step. Maximizing \(\log p_X(x)\) over
-\(\theta\) (the trainable parameters) encourages images to map to
-high-probability latents while the summed log determinant terms keep the induced
-density over images mathematically consistent.
+where \(f=f_{K\cdot L}\circ\cdots\circ f_1\), \(h_0=x\), and
+\(h_k=f_k(h_{k-1})\). The first term is the log-probability of the latent under
+the base density; the second is the log-det Jacobian that corrects for local
+volume change. Maximizing \(\log p_X(x)\) over \(\theta\) encourages images to
+map to high-probability latents while keeping the induced image-space density
+consistent.
 
-### Latent alignment 
+### Latent alignment
 
-Independently trained flows learn invertible maps, but their latent coordinates
-do not necessarily overlap and therefore not mutually informative.  For our
-multimodal framework, we seek a latent space that captures shared anatomy at
-multiple scales while ignoring modality-specific effects. This motivates the
-inclusion of per-level latent alignment constraints between flows to encourage
-coordinated latent spaces to encode corresponding structure. This simplifies and
-better conditions cross-modal relationships permitting our conditional Gaussian
-modeling inference framework (explained below) and yields joint $M
-\leftrightarrow N$ imputations that are coherent across all outputs. Crucially,
-alignment is an auxiliary objective (via projector heads) that preserves exact
-likelihood training and invertibility.
+When trained separately, each flow’s latent coordinate system is arbitrary,
+i.e., it can be rotated, scaled, or permuted without changing the likelihood so
+different flows do not necessarily align after optimization, thus necessitating
+explicit alignment. For multimodal imaging we seek a shared, multi-scale
+scaffold that captures common anatomy while leaving modality-specific variation.
+We therefore add per-level latent alignment between flows via lightweight
+projector heads, which simplifies cross-modal relations and improves
+conditioning for our conditional-Gaussian inference; this yields joint
+\(M\!\to\!N\) imputations that are coherent across outputs. Alignment is
+auxiliary and preserves exact likelihood training and invertibility.
 
-Assuming alignment, $\mathcal{A}$, the multimodal (i.e., multiple views) objective 
-function becomes
+Including alignment, the multi-view objective is
 
 \[
-\mathcal{L}(\theta,\phi) \;=\; \mathcal{L}_\text{NLL}(\theta) \;+\; \sum_{\ell=1}^{L} \sum_{(m,n)\in\mathcal{P}} \lambda_{\ell}^{(m,n)} \; \mathcal{A}\!\left( g_{\phi_\ell}^{(m)}\big(z_\ell^{(m)}\big),\; g_{\phi_\ell}^{(n)}\big(z_\ell^{(n)}\big) \right) ,
+\mathcal{L}(\Theta,\Phi)
+= \mathcal{L}_\text{NLL}(\Theta)
++ \sum_{\ell=1}^{L}\;\sum_{(m,n)\in\mathcal{P}}
+\lambda_{\ell}^{(m,n)}\;
+\mathcal{A}\!\left(
+g_{\phi_\ell}^{(m)}\!\big(z_\ell^{(m)}\big),\;
+g_{\phi_\ell}^{(n)}\!\big(z_\ell^{(n)}\big)
+\right),
 \]
 
-where 
+with per-modality NLL
 
 \[
 \mathcal{L}_{\text{NLL}}(\Theta)
 = -\,\mathbb{E}_{i\sim\mathcal{D}}
-\Bigg[ \sum_{m\in \mathcal{O}(i)}
-\log p_{X^{(m)}}\!\big(x_i^{(m)};\,\theta^{(m)}\big) \Bigg].
+\Bigg[\sum_{m\in\mathcal{O}(i)}
+\log p_{X^{(m)}}\!\big(x_i^{(m)};\,\theta^{(m)}\big)\Bigg].
 \]
 
-\(z_\ell^{(m)}\) is the latent at level \(\ell\) for modality \(m\), 
-$\lambda_{\ell}^{(m,n)}$ is the (non-negative) alignment weight for a given level $\ell$ 
-and modality pair $(m,n)$, 
-\(g_{\phi_\ell}^{(m)}\) is a lightweight projector head (MLP or 
-\(1\times1(\times1)\) conv), \(\mathcal{P}\) is a set of modality pairs 
-(or all pairs), and \(\mathcal{A}\) is one of the following alignment 
-objectives:.
+Here \(\mathcal{O}(i)\) is the set of observed modalities for sample \(i\);
+\(\Theta=\{\theta^{(m)}\}\) are flow parameters; \(\Phi=\{\phi_\ell^{(m)}\}\)
+are projector parameters; \(\mathcal{P}\) denotes the set of unordered modality
+pairs (e.g., all \(m<n\)); and \(\lambda_{\ell}^{(m,n)}\!\ge 0\) weights
+alignment strength (we do **not** weight the per-modality NLLs).
 
-- **Pearson correlation loss.** \(\mathcal{A}_\text{Pearson} = 1 -
-  \tfrac{1}{d}\sum_i \mathrm{corr}\big(u_i, v_i\big)\) (maximize correlation
-  across features).  
+We support the following alignment objectives \(\mathcal{A}\) (operating on
+projector outputs \(u,v\)):
 
-- **Barlow Twins** [@zbontar2021barlow]. Cross-correlation matrix \(C\) between
-  \(u\) and \(v\); loss \(\sum_i (1-C_{ii})^2 + \lambda \sum_{i\neq j}
-  C_{ij}^2\).  
+- **Pearson correlation.** \(\mathcal{A}_\text{Pearson}=1-\tfrac{1}{d}\sum_i \mathrm{corr}(u_i,v_i)\).
 
-- **VICReg** [@bardes2021vicreg]. Invariance, variance, and covariance terms on
-  \(u,v\); loss \( \alpha \|u-v\|_2^2 + \mu\, \sum \mathrm{penalize\; low\;
-  std}(u,v) + \nu\, \sum
-  \mathrm{offdiag}\big(\mathrm{Cov}(u),\mathrm{Cov}(v)\big)^2\).  
+- **Barlow Twins** [@zbontar2021barlow]. Cross-correlation \(C\) between \(u\) and \(v\); loss \(\sum_i (1-C_{ii})^2+\beta\sum_{i\ne j} C_{ij}^2\), with \(\beta>0\).
 
-- **InfoNCE / CPC** [@oord2018cpc]. Contrastive objective with temperature
-  \(\tau\): aligns positives across modalities and repels negatives within the
-  batch.  
+- **VICReg** [@bardes2021vicreg]. Invariance–variance–covariance: \(\alpha\|u-v\|_2^2 + \mu\,\mathrm{VarPenalty}(u,v)+\nu\,\mathrm{OffDiagCov}(u,v)\).
 
-- **HSIC (biased)** [@gretton2005hsic]. Kernel covariance dependence measure on
-  \((u,v)\); we use Gaussian or linear kernels with bandwidth set by median
-  heuristic or per-level scale.
+- **InfoNCE / CPC** [@oord2018cpc]. Temperature-scaled contrastive objective aligning positives across modalities and repelling in-batch negatives.
 
+- **HSIC (biased)** [@gretton2005hsic]. Kernel dependence measure (Gaussian or linear kernels; bandwidth via median heuristic or per-level scale).
 
-### Modeling aleatoric uncertainty
+### Modeling aleatoric uncertainty (Kendall–Gal weighting)
 
-Because modalities may exhibit **aleatoric noise**, we use **learned task weights** \(\sigma_{\ell}^{(m,n)}\) following Kendall & Gal [@kendall2018mtl; @kendall2017uncertainties]:
+Different modality pairs can exhibit different levels of measurement noise
+(e.g., FA vs. T2), so a fixed alignment weight can over- or under-penalize some
+pairs. Following Kendall & Gal [@kendall2017uncertainties;@kendall2018mtl], 
+we replace the fixed alignment weight with a
+learned log-variance per level and modality pair. Let \(s_{\ell}^{(m,n)}=\log
+(\sigma_{\ell}^{(m,n)})^{2}\) be unconstrained parameters. The total training
+objective becomes
 
-\[
-\sum_{\ell,(m,n)} \left(\frac{1}{2(\sigma_{\ell}^{(m,n)})^{2}} \mathcal{A}_{\ell}^{(m,n)} + \frac{1}{2}\log (\sigma_{\ell}^{(m,n)})^{2} \right).
-\]
+$$
+\begin{aligned}
+\mathcal{L}(\Theta,\Phi,\mathbf{s})
+=& -\,\mathbb{E}_{i\sim\mathcal{D}}\!\Bigg[\sum_{m\in\mathcal{O}(i)} \log p_{X^{(m)}}\!\big(x_i^{(m)};\theta^{(m)}\big)\Bigg] \\ \nonumber
+&+ \mathbb{E}_{i\sim\mathcal{D}}\!\Bigg[\sum_{\ell=1}^{L}\sum_{(m,n)\in \mathcal{P}\cap \mathcal{O}(i)^{2}}
+\underbrace{\Big(\tfrac{1}{2}e^{-s_{\ell}^{(m,n)}} \,\mathcal{A}_{\ell}^{(m,n)} + \tfrac{1}{2}s_{\ell}^{(m,n)}\Big)}_{\text{uncertainty-weighted alignment}}
+\Bigg].
+\end{aligned}
+$$
 
-This down‑weights noisy alignment channels while regularizing the scale via the
-log term.
+Here the first term is the (unweighted) multi-view NLL from above; the second
+term **down-weights** alignment for noisy pairs via \(e^{-s}\) while the
+\(\tfrac{1}{2}s\) term regularizes the scale to prevent trivial solutions. In
+practice, this is equivalent to using
+\(\lambda_{\ell}^{(m,n)}=\tfrac{1}{2}e^{-s_{\ell}^{(m,n)}}\) in the earlier
+alignment objective and adding the \(\tfrac{1}{2}s_{\ell}^{(m,n)}\) penalty.
+
+**Implementation notes.** We parameterize \(s_{\ell}^{(m,n)}\) directly (no
+positivity constraint needed) and initialize \(s{=}0\) (\(\sigma^2{=}1\)). For
+stability, we optionally clamp \(s\in[\log \sigma_{\min}^2,\log
+\sigma_{\max}^2]\) (e.g., \(\sigma_{\min}{=}0.3,\ \sigma_{\max}{=}3\)). Only
+alignment terms are uncertainty-weighted; the likelihood remains unweighted
+across modalities. 
 
 <!-- 
+
+This learned balancing pairs naturally with the optional CCA
+subspace/clamp used for alignment and CGM.
+
 ### CCA‑guided subspace and clamping
 To stabilize estimation, we optionally compute a **CCA subspace** between
 modalities at each level using the *observed* latents during training and CGM
