@@ -123,8 +123,7 @@ term down-weights alignment for noisy pairs via \(e^{-s}\) while the
 practice, this is equivalent to using
 \(\lambda_{\ell}^{(m,n)}=\tfrac{1}{2}e^{-s_{\ell}^{(m,n)}}\) in the earlier
 alignment objective and adding the \(\tfrac{1}{2}s_{\ell}^{(m,n)}\) penalty.
-
-**Implementation notes.** We parameterize \(s_{\ell}^{(m,n)}\) directly (no
+We parameterize \(s_{\ell}^{(m,n)}\) directly (no
 positivity constraint needed) and initialize \(s{=}0\) (\(\sigma^2{=}1\)). For
 stability, we optionally clamp \(s\in[\log \sigma_{\min}^2,\log
 \sigma_{\max}^2]\) (e.g., \(\sigma_{\min}{=}0.3,\ \sigma_{\max}{=}3\)). Only
@@ -183,7 +182,7 @@ estimation we draw posterior samples. In either case, a single exact inverse
 pass then produces all requested image-space contrasts, enabling flexible
 \(M \to N\) imputation with cross-modal coherence.[@bishop2006prml; @murphy2012mlpp]
 
-**Implementation notes.** Optionally, at each level we fit
+Optionally, at each level we fit
 CCA on training latents from observed modalities and keep the top \(k\)
 directions \(U_\ell\) (choose \(k\) by validation) [@hotelling1936;
 @andrew2013dcca]. For alignment and CGM, we project latents to this subspace; at
@@ -194,6 +193,55 @@ map back with \(U_\ell U_\ell^\top\). To avoid ill-conditioning, we add a small
 for consistent evaluation.
 
 ## Open-source availability
+
+Code and documentation is found across the following GitHub repositories:
+
+**ANTsTorch** (``ANTsX/ANTsTorch``) serves as the medical-imaging
+layer. It provides I/O and preprocessing (e.g., N4 bias correction,
+resampling/cropping, intensity standardization), volumetric dataloaders for
+multi-view studies, and spatial/intensity data augmentation with schedulable
+ranges. All latent-alignment machinery lives here: lightweight projector heads,
+the family of alignment objectives (Pearson, Barlow Twins, VICReg, InfoNCE/CPC,
+HSIC), optional Kendall–Gal uncertainty weighting, and the optional CCA-guided
+subspace with clamping. This repository also contains unit tests that exercise
+alignment objectives and numerical sanity checks.
+
+**normalizing-flows** (``ntustison/normalizing-flows``) is the flow
+backbone. We selected this codebase after surveying common PyTorch flow
+libraries; several alternatives are strong for 2-D or tabular settings but
+lacked stable, multiscale Glow with exact log-det bookkeeping in 3-D, or a
+mature path to ActNorm-3D and invertible $1\times1\times1$ convolutions. The chosen
+repository already offered a clean design and probability-centric interfaces.
+Building on that foundation, we contributed features needed for medical-volume
+work: canonical Glow step ordering with strict forward/inverse assertions;
+corrected multiscale squeeze/split/reshape orderings; ActNorm in 2-D/3-D with
+data-dependent initialization; invertible 1×1(×1) convolutions parameterized via
+LU for stable log-det computation; 2-D/3-D coupling networks; and exact,
+numerically stable log-det accumulation. We added tests that catch
+shape-mismatch regressions and verify per-layer and cumulative log-dets. In
+short, the original repo was good; we hardened and extended it for 3-D and
+multimodal analytics without changing its overall philosophy.
+
+**MultimodalNormalizingFlows**
+(``ntustison/MultimodalNormalizingFlows``) is the experiment and
+manuscript layer. It contains the trainer and evaluation pipelines that
+orchestrate multi-flow training (one flow per modality), hooks to ANTsTorch
+augmentations and alignment, conditional-Gaussian modeling utilities for
+per-level moment fitting and M→N imputation, and scripts for likelihood,
+PSNR/SSIM, and imputation-coherence evaluations. It also includes example
+configurations, reproducible command lines for the HCP study, and the manuscript
+sources.
+
+For reproducibility across repositories, we pin dependency versions, record
+configuration and augmentation schedules, and save checkpoints that include
+model, optimizer, EMA, RNG, augmentation state, and any CCA/whitening
+parameters. We recommend using the tagged releases and environment files
+referenced in MultimodalNormalizingFlows to replicate the main experiments
+end-to-end.
+
+
+
+
 
 
 <!-- ## Software and reproducibility
