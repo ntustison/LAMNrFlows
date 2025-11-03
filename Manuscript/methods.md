@@ -4,8 +4,8 @@
 # Methods
 
 Our proposed imputation and synthesis framework comprises two main components:
-training and inference. We describe each below and summarize implementation
-details for reproducibility.
+training and inference. We describe each below and then summarize open-source
+implementation details for reproducibility.
 
 ## Training
 
@@ -43,7 +43,7 @@ volume change. Maximizing \(\log p_X(x)\) over \(\theta\) encourages images to
 map to high-probability latents while keeping the induced image-space density
 consistent.
 
-### Latent alignment
+### Multimodal latent alignment
 
 When trained separately, each flow’s latent coordinate system is arbitrary,
 i.e., it can be rotated, scaled, or permuted without changing the likelihood so
@@ -82,7 +82,7 @@ Here \(\mathcal{O}(i)\) is the set of observed modalities for sample \(i\);
 \(\Theta=\{\theta^{(m)}\}\) are flow parameters; \(\Phi=\{\phi_\ell^{(m)}\}\)
 are projector parameters; \(\mathcal{P}\) denotes the set of unordered modality
 pairs (e.g., all \(m<n\)); and \(\lambda_{\ell}^{(m,n)}\!\ge 0\) weights
-alignment strength (we do **not** weight the per-modality NLLs).
+alignment strength (we do not weight the per-modality NLLs).
 
 We support the following alignment objectives \(\mathcal{A}\) (operating on
 projector outputs \(u,v\)):
@@ -117,8 +117,8 @@ $$
 \end{aligned}
 $$
 
-Here the first term is the (unweighted) multi-view NLL from above; the second
-term **down-weights** alignment for noisy pairs via \(e^{-s}\) while the
+Here the first term is the (unweighted) multi-view NLL from above.  The second
+term down-weights alignment for noisy pairs via \(e^{-s}\) while the
 \(\tfrac{1}{2}s\) term regularizes the scale to prevent trivial solutions. In
 practice, this is equivalent to using
 \(\lambda_{\ell}^{(m,n)}=\tfrac{1}{2}e^{-s_{\ell}^{(m,n)}}\) in the earlier
@@ -131,91 +131,70 @@ stability, we optionally clamp \(s\in[\log \sigma_{\min}^2,\log
 alignment terms are uncertainty-weighted; the likelihood remains unweighted
 across modalities. 
 
-<!-- 
 
-This learned balancing pairs naturally with the optional CCA
-subspace/clamp used for alignment and CGM.
+### Optimization
 
-### CCA‑guided subspace and clamping
-To stabilize estimation, we optionally compute a **CCA subspace** between
-modalities at each level using the *observed* latents during training and CGM
-fitting [@hotelling1936; @andrew2013dcca]. Let \(U_\ell\) denote the top \(k\)
-canonical directions (shared across a modality pair or multi-view
-generalization). We project \(u,v\) onto \(U_\ell\) before alignment or CGM
-moment estimation and optionally **clamp** singular values/eigenvalues to
-\([\epsilon, \gamma]\) to avoid ill-conditioned inverses. Hyperparameters
-\(k,\epsilon,\gamma\) are selected via validation. 
--->
+ We integrate ANTsTorch spatial and intensity transforms (e.g., small affine,
+elastic deformation, bias field, histogram warping, additive
+noise)[@Tustison:2024aa]. Each transform has a schedule \(s(t)\) over training
+steps \(t\) (e.g., linear, exponential or cosine anneal). We use Adam with
+typical settings (\(\beta_1{=}0.9,\;\beta_2{=}0.999\)), learning rate selected
+by validation (e.g., \(1\mathrm{e}{-4}\)–\(2\mathrm{e}{-4}\)), and gradient
+clipping when needed. AMP is enabled via PyTorch GradScaler.  An EMA of weights
+(decay \(0.999\)–\(0.9999\)) is maintained for evaluation. Batch size is adapted
+to memory.  Training proceeds for a fixed number of iterations with early
+stopping on validation likelihood. 
 
 
 ## Inference via Conditional Gaussian Modeling
 
-We model per‑level concatenated latents across modalities as Gaussian:
-
+Following the per-level multimodal training above, we treat the concatenated
+latents at each level as approximately Gaussian across the training cohort:
 \[
-z_\ell \;=\; \big[ z_\ell^{(1)};\dots; z_\ell^{(M)} \big] \sim \mathcal{N}\!\big(\mu_\ell,\; \Sigma_\ell \big).
+z_\ell = \big[z_\ell^{(1)};\dots; z_\ell^{(M)}\big] \sim \mathcal{N}\!\big(\mu_\ell,\; \Sigma_\ell\big).
 \]
+We estimate \((\mu_\ell,\Sigma_\ell)\) from a held-out cache of training latents
+(with covariance shrinkage and a small diagonal jitter for numerical stability).
 
-We estimate \((\mu_\ell,\Sigma_\ell)\) from a held‑out training cache of latents
-(with optional CCA projection first). To ensure well‑conditioned estimates, we
-use shrinkage and jitter:
-
+For any subject with observed views \(O\) and missing views \(M\), we partition
+the moments as
 \[
-\widehat{\Sigma}_\ell \;=\; (1-\lambda)\,S_\ell \;+\; \lambda\,\mathrm{diag}(S_\ell) \;+\; \alpha I ,
+\mu_\ell=\begin{bmatrix}\mu_{\ell,O}\\ \mu_{\ell,M}\end{bmatrix},\qquad
+\Sigma_\ell=\begin{bmatrix}\Sigma_{\ell,OO} & \Sigma_{\ell,OM}\\[2pt]
+\Sigma_{\ell,MO} & \Sigma_{\ell,MM}\end{bmatrix},
 \]
-
-with \(\lambda\in[0,1]\), \(\alpha>0\) (small), and \(S_\ell\) the empirical
-covariance (block‑structured across modalities).
-
-Given an observed set \(\mathcal{O}\) and missing \(\mathcal{M}\), we partition \((\mu_\ell,\Sigma_\ell)\) as
-
+and compute the conditional Gaussian \(p(z_{\ell,M}\mid z_{\ell,O})\) with mean
+and covariance
 \[
-\mu_\ell=\begin{bmatrix}\mu_{\ell,O}\\ \mu_{\ell,M}\end{bmatrix},\quad
-\Sigma_\ell=\begin{bmatrix}\Sigma_{\ell,OO} & \Sigma_{\ell,OM}\\ \Sigma_{\ell,MO} & \Sigma_{\ell,MM}\end{bmatrix},
+\mathbb{E}[z_{\ell,M}\mid z_{\ell,O}]
+= \mu_{\ell,M} + \Sigma_{\ell,MO}\,\Sigma_{\ell,OO}^{-1}\,(z_{\ell,O}-\mu_{\ell,O}),
 \]
-
-and compute the joint conditional for missing latents via standard Gaussian identities:
-
 \[
-z_{\ell,M}\mid z_{\ell,O} \sim \mathcal{N}\!\Big(
-\mu_{\ell,M} + \Sigma_{\ell,MO}\Sigma_{\ell,OO}^{-1}(z_{\ell,O}-\mu_{\ell,O}),\;\;
-\Sigma_{\ell,MM}-\Sigma_{\ell,MO}\Sigma_{\ell,OO}^{-1}\Sigma_{\ell,OM}
-\Big).
+\mathrm{Cov}(z_{\ell,M}\mid z_{\ell,O})
+= \Sigma_{\ell,MM} - \Sigma_{\ell,MO}\,\Sigma_{\ell,OO}^{-1}\,\Sigma_{\ell,OM}.
 \]
+Intuitively, in a jointly Gaussian vector, observing one subset yields the
+minimum mean-squared-error estimate of the remaining subset; the covariance
+above is the Schur complement of \(\Sigma_{\ell,OO}\) in the joint covariance, 
+so uncertainty shrinks most along directions
+best predicted by the observed subset.
+For deterministic reconstructions we use the posterior mean.  For uncertainty
+estimation we draw posterior samples. In either case, a single exact inverse
+pass then produces all requested image-space contrasts, enabling flexible
+\(M \to N\) imputation with cross-modal coherence.[@bishop2006prml; @murphy2012mlpp]
 
-We impute either the posterior mean (for deterministic reconstructions) or
-posterior samples (for uncertainty visualization). The exact inverse of the flow
-then produces all requested image-space contrasts in one pass
-(\(M\!\rightarrow\!N\) imputation), with cross‑modal coherence arising from the
-joint posterior.
+**Implementation notes.** Optionally, at each level we fit
+CCA on training latents from observed modalities and keep the top \(k\)
+directions \(U_\ell\) (choose \(k\) by validation) [@hotelling1936;
+@andrew2013dcca]. For alignment and CGM, we project latents to this subspace; at
+inference we project observed latents, compute the conditional in-subspace, then
+map back with \(U_\ell U_\ell^\top\). To avoid ill-conditioning, we add a small
+\(\varepsilon I\) to covariances and clip canonical correlations/eigenvalues to
+\([\epsilon,\gamma]\). We save \(U_\ell\) (and whitening stats) with checkpoints
+for consistent evaluation.
+
+## Open-source availability
 
 
-## Implementation
-
-
-
-
-
-
-
-
-
-### Data augmentation and schedules
-We integrate ANTsTorch spatial and intensity transforms (e.g., small affine, elastic deformation, bias field, histogram warping, additive noise). Each transform has a **schedule** \(s(t)\) over training steps \(t\) (e.g., linear or cosine anneal):  
-`noise_std:cos:0.02->0.00@150k, sd_affine:linear:0.05->0.00@80k, ...`  
-Schedules are parsed and applied deterministically per step; complete configuration is logged to checkpoints for reproducibility.
-
-### Optimization and training details
-We use **Adam** with typical settings (\(\beta_1{=}0.9,\;\beta_2{=}0.999\)), learning rate selected by validation (e.g., \(1\mathrm{e}{-4}\)–\(2\mathrm{e}{-4}\)), and gradient clipping when needed. **AMP** is enabled via PyTorch GradScaler; an **EMA** of weights (decay \(0.999\)–\(0.9999\)) is maintained for evaluation. Batch size is adapted to memory; training proceeds for a fixed number of iterations with early stopping on validation likelihood. We **prime** shape caches by a dummy `log_prob` call before sampling to avoid unknown-latent‑shape warnings. All experiments fix seeds and record RNG states.
-
-## Evaluation
-We report:
-- **Log-likelihood / bits‑per‑dimension (bpd)** on held‑out data for calibration [@papamakarios2021nfreview].
-- **Synthesis quality** via PSNR/SSIM on cross‑modal reconstructions and imputation targets; optionally perceptual or task-specific metrics.
-- **Imputation accuracy** (MAE/MSE) and **coherence** across jointly imputed contrasts (e.g., correlation or structural consistency).
-- **Ablations** over alignment objectives, CCA dimension \(k\), shrinkage \(\lambda\), jitter \(\alpha\), and augmentation schedules.
-- **Runtime & memory**: wall‑clock for 3‑D inverse vs. alternative methods.
-
-## Software and reproducibility
-The codebase provides a **reproducible CLI** with YAML/argparse configuration, deterministic seeds, saved **checkpoints** (model, optimizer, EMA, RNG, augmentation state), and **unit tests** covering forward/inverse consistency (tolerance \(<10^{-6}\) in \(L_\infty\)), log‑det correctness (per‑layer and cumulative), and shape invariants across 2‑D/3‑D. Experiments can be resumed from checkpoints, and all metrics, schedules, and hyperparameters are stored for auditability. The implementation builds on `normflows` with added 3‑D layers and integrates ANTsTorch I/O and augmentation.
-
+<!-- ## Software and reproducibility
+The codebase provides a **reproducible CLI** with YAML/argparse configuration, deterministic seeds, saved **checkpoints** (model, optimizer, EMA, RNG, augmentation state), and **unit tests** covering forward/inverse consistency (tolerance \(<10^{-6}\) in \(L_\infty\)), log‑det correctness (per‑layer and cumulative), and shape invariants across 2‑D/3‑D. Experiments can be resumed from checkpoints, and all metrics, schedules, and hyperparameters are stored for auditability. The implementation builds on `normflows` with added 3‑D layers and integrates ANTsTorch I/O and augmentation. -->
