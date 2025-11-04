@@ -15,8 +15,8 @@ medical image imputation and synthesis. Specifically, using Glow architectures
 with explicit per-level latent access, we fit per-level Gaussian statistics
 across the multi-view cohort and, for any observed subset of modalities, compute
 a closed-form joint posterior over the missing latents that captures cross-modal
-covariance.  The exact inverse then yields \(M \to N\) imputations that are
-jointly coherent across outputs while preserving estimated likelihoods for
+covariance.  The exact inverse then yields joint imputations that are
+coherent across outputs while preserving estimated likelihoods for
 comparison and uncertainty analyses. We further introduce per-level latent
 alignment across modalities under alignment constraints provided by a family of
 possible objectives: Pearson, Barlow Twins, VICReg, InfoNCE, and HSIC.  Optional

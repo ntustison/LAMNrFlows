@@ -66,7 +66,7 @@ modality-specific variation. We therefore add per-level latent alignment between
 flows via lightweight projector heads[^projnote],
 which simplifies cross-modal relations
 and improves conditioning for our conditional-Gaussian inference.  This yields
-joint \(M\!\to\!N\) imputations that are coherent across outputs. Alignment is
+joint imputations that are coherent across outputs. Alignment is
 auxiliary and preserves exact likelihood training and invertibility. 
 Including alignment, \(\mathcal{A}\), the multi-view objective is
 
@@ -127,7 +127,7 @@ largely linear shared structure is expected and minimal hyperparameters are
 preferred.  It is fast and works with very small batches. Barlow Twins is a
 strong default without negatives as agreement is maximized while features are
 decorrelated, which helps prevent collapse and promotes stability across batch
-sizes. VICReg is similar as Barlow Twinsbut separates invariance, variance, and
+sizes. VICReg is similar as Barlow Twins but separates invariance, variance, and
 covariance terms, providing explicit control over feature spread (variance
 floor) and redundancy (off-diagonal penalties). InfoNCE performs best when
 reliable positives and plentiful negatives can be formed (larger batches or a
@@ -174,10 +174,10 @@ practice, this is equivalent to using
 \(\lambda_{\ell}^{(m,n)}=\tfrac{1}{2}e^{-s_{\ell}^{(m,n)}}\) in the earlier
 alignment objective and adding the \(\tfrac{1}{2}s_{\ell}^{(m,n)}\) penalty.
 We parameterize \(s_{\ell}^{(m,n)}\) directly (no
-positivity constraint needed) and initialize \(s{=}0\) (\(\sigma^2{=}1\)). For
+positivity constraint is needed) and initialize \(s{=}0\) (\(\sigma^2{=}1\)). For
 stability, we optionally clamp \(s\in[\log \sigma_{\min}^2,\log
 \sigma_{\max}^2]\) (e.g., \(\sigma_{\min}{=}0.3,\ \sigma_{\max}{=}3\)). Only
-alignment terms are uncertainty-weighted; the likelihood remains unweighted
+alignment terms are uncertainty-weighted.  The likelihood remains unweighted
 across modalities. 
 
 
@@ -228,22 +228,20 @@ and compute the conditional Gaussian \(p\!\left(z_{\ell,\mathcal{U}}\,\middle|\,
 = \Sigma_{\ell,\mathcal{UU}} - \Sigma_{\ell,\mathcal{UO}}\Sigma_{\ell,\mathcal{OO}}^{-1}\Sigma_{\ell,\mathcal{OU}}.
 \]
 
-Intuitively, observing one subset yields the minimum-mean-squared-error estimate
-of the remaining subset; the covariance above is the Schur complement of
+Intuitively, observing one subset yields the minimum mean-squared-error estimate
+of the remaining subset.  The covariance above is the Schur complement of
 \(\Sigma_{\ell,\mathcal{OO}}\) in the joint covariance, so uncertainty shrinks
 most along directions best predicted by the observed subset [@bishop2006prml;
 @murphy2012mlpp]. Posterior means are used for deterministic reconstructions,
 while posterior samples support uncertainty visualization. In either case, a
 single exact inverse pass produces all requested image-space contrasts, enabling
 flexible \(|\mathcal{O}|\to|\mathcal{U}|\) imputation with cross-modal
-coherence.
-
-At each level, a CCA subspace may be fit on training latents and used for
-alignment and CGM: observed latents are projected, the conditional is computed
-in-subspace, and results are mapped back with \(U_\ell U_\ell^\top\). To avoid
-ill-conditioning, a small \(\varepsilon I\) is added to covariances and
-canonical correlations/eigenvalues are clipped to \([\epsilon,\gamma]\);
-\(U_\ell\) (and whitening statistics) are saved with checkpoints.
+coherence. At each level, a CCA subspace may be fit on training latents and used
+for alignment and CGM.  Observed latents are projected, the conditional is
+computed in-subspace, and results are mapped back with \(U_\ell U_\ell^\top\).
+To avoid ill-conditioning, a small \(\varepsilon I\) is added to covariances and
+canonical correlations/eigenvalues are clipped to \([\epsilon,\gamma]\)
+\(U_\ell\). 
 
 
 
@@ -251,45 +249,38 @@ canonical correlations/eigenvalues are clipped to \([\epsilon,\gamma]\);
 
 Code and documentation is found across the following GitHub repositories:
 
-**ANTsTorch** (``ANTsX/ANTsTorch``) serves as the medical-imaging
-layer. It provides I/O and preprocessing (e.g., N4 bias correction,
+**ANTsTorch** (``ANTsX/ANTsTorch``) As a PyTorch based extension of the ANTsPy
+library, it provides I/O and preprocessing (e.g., N4 bias correction,
 resampling/cropping, intensity standardization), volumetric dataloaders for
 multi-view studies, and spatial/intensity data augmentation with schedulable
-ranges. All latent-alignment machinery lives here: lightweight projector heads,
-the family of alignment objectives (Pearson, Barlow Twins, VICReg, InfoNCE/CPC,
-HSIC), optional Kendall–Gal uncertainty weighting, and the optional CCA-guided
-subspace with clamping. This repository also contains unit tests that exercise
-alignment objectives and numerical sanity checks.
+ranges. The family of alignment objectives (Pearson, Barlow Twins, VICReg,
+InfoNCE/CPC, HSIC) is also available in this toolkit.  This repository also
+contains unit tests that exercise alignment objectives and numerical sanity
+checks.
 
-**normalizing-flows** (``ntustison/normalizing-flows``) is the flow
-backbone. We selected this codebase after surveying common PyTorch flow
-libraries; several alternatives are strong for 2-D or tabular settings but
-lacked stable, multiscale Glow with exact log-det bookkeeping in 3-D, or a
-mature path to ActNorm-3D and invertible $1\times1\times1$ convolutions. The chosen
-repository already offered a clean design and probability-centric interfaces.
-Building on that foundation, we contributed features needed for medical-volume
-work: canonical Glow step ordering with strict forward/inverse assertions;
-corrected multiscale squeeze/split/reshape orderings; ActNorm in 2-D/3-D with
-data-dependent initialization; invertible 1×1(×1) convolutions parameterized via
-LU for stable log-det computation; 2-D/3-D coupling networks; and exact,
-numerically stable log-det accumulation. We added tests that catch
-shape-mismatch regressions and verify per-layer and cumulative log-dets. In
-short, the original repo was good; we hardened and extended it for 3-D and
-multimodal analytics without changing its overall philosophy.
+**normalizing-flows** (``ntustison/normalizing-flows``) was forked from
+(``VincentStimper/normalizing-flows``) after surveying common PyTorch flow
+libraries.[@stimper2023normflows]  The original repository offered a clean
+design and probability-centric interfaces. Building on that foundation, we
+contributed various features such as canonical Glow step ordering with strict
+forward/inverse assertions; corrected multiscale squeeze/split/reshape
+orderings, ActNorm in 2-D/3-D with data-dependent initialization, invertible
+1×1(×1) convolutions parameterized via LU for stable log-det computation,
+2-D/3-D coupling networks, and exact numerically stable log-det accumulation. We
+added tests that catch shape-mismatch regressions and verify per-layer and
+cumulative log-dets.
 
-**MultimodalNormalizingFlows**
-(``ntustison/MultimodalNormalizingFlows``) is the experiment and
-manuscript layer. It contains the trainer and evaluation pipelines that
-orchestrate multi-flow training (one flow per modality), hooks to ANTsTorch
-augmentations and alignment, conditional-Gaussian modeling utilities for
-per-level moment fitting and M→N imputation, and scripts for likelihood,
-PSNR/SSIM, and imputation-coherence evaluations. It also includes example
-configurations, reproducible command lines for the HCP study, and the manuscript
+**MultimodalNormalizingFlows** (``ntustison/MultimodalNormalizingFlows``)
+contains the trainer and evaluation pipelines that orchestrate multi-flow
+training (one flow per modality), hooks to ANTsTorch augmentations and
+alignment, conditional-Gaussian modeling utilities for per-level moment fitting
+and M→N imputation, and scripts for likelihood, PSNR/SSIM, and
+imputation-coherence evaluations. It also includes example configurations,
+reproducible command lines for the evaluation studies, and the manuscript
 sources.
 
 The codebase provides a reproducible CLI with YAML/argparse configuration,
-deterministic seeds, saved checkpoints (model, optimizer, EMA, RNG,
-augmentation state), and unit tests covering forward/inverse consistency
+deterministic seeds, saved checkpoints, and unit tests covering forward/inverse consistency
 (tolerance \(<10^{-6}\) in \(L_\infty\)), log‑det correctness (per‑layer and
 cumulative), and shape invariants across 2‑D/3‑D. Experiments can be resumed
 from checkpoints, and all metrics, schedules, and hyperparameters are stored. 
