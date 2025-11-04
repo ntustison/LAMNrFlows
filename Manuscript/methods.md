@@ -5,32 +5,33 @@
 
 Our proposed imputation and synthesis framework comprises two main components:
 training and inference. We describe each below and then summarize open-source
-implementation details for reproducibility.
+implementation details.
 
 ## Training
 
 ### Architecture
 
-We train one Glow model per modality, sharing architecture but not parameters.
-Each model uses a multiscale Glow design [@kingma2018glow] with \(L\) levels and
-\(K\) flow steps per level. Each step applies (i) ActNorm with data-dependent
+We train one Glow model per modality, sharing architectural configuration but
+not parameters. Each model uses a multiscale design with \(L\) levels and \(K\)
+flow steps per level. Each step applies (i) ActNorm with data-dependent
 initialization on the first batch, (ii) an invertible \(1\times1(\times1)\)
 convolution parameterized via LU for stable log-det computation, and (iii) an
 affine coupling transform whose scale/shift predictor is a small ConvNet with
-internal width (“hidden”) that operates on the transformed half of the channels
-at that level. Between levels we apply squeeze (space-to-depth) and split
-operations, which expose multiscale latents for analysis, alignment, and
-conditional modeling. In contrast, many transformer-based flow variants decode
-sequentially and do not naturally expose per-level latent access, making our
-multi-scale alignment and CGM machinery less direct in addition to the usual 3-D
-scaling challenges.
+internal width (``hidden'') that operates on the transformed half of the
+channels at that level. Between levels we apply squeeze (space-to-depth) and
+split operations, which expose multiscale latents for analysis, alignment, and
+conditional modeling [@kingma2018glow]. In contrast to Glow, transformer-based flow
+variants often rely on sequential (token-wise) decoding and typically lack
+explicit per-level latent access, making per-level alignment and
+conditional-Gaussian modeling less straightforward and further challenging 3-D
+scaling.
 
 ### Single-flow optimization
 
-Given an image \(x\), a flow learns an invertible map \(f_\theta\) that transforms
-\(x\) to a latent space \(z=f_\theta(x)\). We place a simple base density on latents,
-typically \(p_Z=\mathcal{N}(0,I)\), and optimize the exact change-of-variables
-objective
+Given an image \(x\), a flow learns an invertible map \(f_\theta\) that
+transforms \(x\) to a latent space \(z=f_\theta(x)\). A simple base density on
+latents, typically \(p_Z=\mathcal{N}(0,I)\), is used to optimize the exact
+change-of-variables objective
 
 \[
 \log p_X(x)=\log p_Z\!\big(f_\theta(x)\big)+\sum_{k=1}^{K\cdot L}\log\big|\det J_{f_k}(h_{k-1})\big|,

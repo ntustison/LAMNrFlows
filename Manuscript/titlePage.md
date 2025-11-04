@@ -35,7 +35,7 @@ James C. Gee\textsuperscript{2}
 \noindent\rule{8cm}{0.4pt}
 
 \scriptsize
-\Letter$\,$ Corresponding authors: \
+\Letter$\,$ Corresponding author: \
 
 Nicholas J. Tustison, DSc \
 Department of Radiology and Medical Imaging \
