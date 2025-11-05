@@ -21,7 +21,7 @@ ActNorm (i.e., per-channel affine transform) with data-dependent initialization
 on the first batch, (ii) an invertible \(1\times1(\times1)\) convolution
 parameterized via LU for stable log-det computation, and (iii) an affine
 coupling transform whose scale/shift predictor is a small ConvNet with internal
-width (i.e., the ``hidden'' parameter ) that operates on the transformed half of
+width (i.e., the ``hidden'' parameter) that operates on the transformed half of
 the channels at that level. Between levels we apply squeeze (space-to-depth) and
 split operations, which expose multiscale latents for analysis, alignment, and
 conditional modeling [@kingma2018glow]. In contrast to Glow, transformer-based
@@ -258,11 +258,11 @@ InfoNCE/CPC, HSIC) is also available in this toolkit.  This repository also
 contains unit tests that exercise alignment objectives and numerical sanity
 checks.
 
-**normalizing-flows** (``ntustison/normalizing-flows``) was forked from
-(``VincentStimper/normalizing-flows``) after surveying common PyTorch flow
-libraries.[@stimper2023normflows]  The original repository offered a clean
-design and probability-centric interfaces. Building on that foundation, we
-contributed various features such as canonical Glow step ordering with strict
+**normalizing-flows** (``ntustison/normalizing-flows``) after surveying common
+PyTorch flow libraries we forked (``VincentStimper/normalizing-flows``)
+[@stimper2023normflows].  This original repository offered a clean design and
+probability-centric interfaces. Building on that foundation, we contributed
+various features such as canonical Glow step ordering with strict
 forward/inverse assertions; corrected multiscale squeeze/split/reshape
 orderings, ActNorm in 2-D/3-D with data-dependent initialization, invertible
 1×1(×1) convolutions parameterized via LU for stable log-det computation,

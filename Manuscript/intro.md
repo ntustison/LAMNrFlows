@@ -93,7 +93,7 @@ and scale that popularized diffusion models
 [@croitoru2023diffusion_vision_survey].  TarFlow (Transformer Autoregressive
 Flow) shows that normalizing flows can achieve state-of-the-art image
 likelihoods and diffusion-comparable sample quality using autoregressive
-Transformers and a few key training protocols [@zhai2024tarflow]. STARFlow builds
+transformers and a few key training protocols [@zhai2024tarflow]. STARFlow builds
 on this with a scalable latent-space design and guidance mechanisms, reporting
 competitive high-resolution synthesis (class-conditional and text-conditional)
 that explicitly benchmarks against diffusion while retaining exact likelihood
