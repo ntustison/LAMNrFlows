@@ -7,23 +7,22 @@ Normalizing flows are invertible, exact-likelihood generative models whose
 multiscale latent representations are well suited to multimodal medical imaging
 applications. While diffusion models have dominated recent research efforts in
 image synthesis, the developmental trajectory of normalizing flows from
-reversible networks through NICE/RealNVP to Glow offers a complementary path
-that provides a tractable, exact inversion between image and latent spaces.
-Here, we present multimodal imaging workflows within the ANTsX ecosystem that
-make this approach practical. Specifically, 1) we extend the PyTorch-based
-normflows and ANTsTorch libraries supporting 2D/3D Glow implementations,
-correcting multiscale reshape orderings, stabilizing log-determinants, and
-providing a reproducible command-line interface with mixed precision, EMA,
-resumable checkpoints, and augmentation scheduling; 2) we introduce per-level
-latent alignment via lightweight projector heads and an optional CCA-guided
-subspace/clamp, with uncertainty-aware (Kendall–Gal) weighting across objectives
-including Pearson correlation, Barlow Twins, VICReg, InfoNCE, and HSIC; and 3)
-we propose conditional-Gaussian modeling for image imputation that estimates
-per-level means and covariances (with shrinkage/jitter as needed), computes
-closed-form posteriors for observed/missing splits, and inversely maps precisely
-from the imputed latent space to the corresponding image space. We demonstrate
-these workflows on the young-adult HCP T1-weighted, T2-weighted, and FA images,
-yielding a tested, open-source template for cross-modal synthesis, exact
-likelihood estimation, and principled imputation, along with practical guidance
-for selecting alignment objectives and regularization strategies across
-modalities.
+reversible networks through NICE/RealNVP to Glow and beyond offers a
+complementary path that provides a tractable, exact bijective mapping between
+images and their representative latent spaces. Building on this foundational
+work, we propose the use of single multiflow, multiscale latent systems for
+medical image imputation and synthesis. Specifically, using Glow architectures
+with explicit per-level latent access, we fit per-level Gaussian statistics
+across the multi-view cohort and, for any observed subset of modalities, compute
+a closed-form joint posterior over the missing latents that captures cross-modal
+covariance.  The exact inverse then yields joint imputations that are
+coherent across outputs while preserving estimated likelihoods for
+comparison and uncertainty analyses. We further introduce per-level latent
+alignment across modalities under alignment constraints provided by a family of
+possible objectives: Pearson, Barlow Twins, VICReg, InfoNCE, and HSIC.  Optional
+features include CCA-guided subspaces and uncertainty-aware weighting to account
+for aleatoric variability. Together, these components provide a flexible
+framework for multimodal image modeling that scales to medical volumes and
+emphasizes exactness, interpretability, and reproducibility. We provide
+open-source implementations and demonstrate cross-modal synthesis and imputation
+in various medical imaging contexts.
