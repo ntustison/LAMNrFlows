@@ -4,7 +4,7 @@ lam_flow_tool.py — Sample M×N image grids from trained LAM-Flow (Glow 2D) che
 
 v0.3.0 (2025-11-06)
 - Add ANTs resampling by physical spacing (--resample-spacing SxT) and by voxel size (--resample-size HxW).
-- Add --native-spacing override and --interp {nearest,linear,bspline}.
+- Add --native-spacing override.
 - Ensure priming happens at checkpoint-native size to avoid internal shape mismatches.
 - Prefer EMA weights if available; robust checkpoint loader.
 - Save a metadata JSON next to the PNG output for reproducibility.
@@ -17,8 +17,7 @@ python lam_flow_tool.py \
   --view-index 1 \
   --grid-size 6x8 \
   --image-size 192x192 \
-  --resample-spacing 0.8x0.8 \
-  --interp linear \
+  --resample-spacing 0.8x0.8
   --out samples_view1.png
 
 # If native spacing is not in the checkpoint, provide it:
@@ -106,45 +105,6 @@ def to01(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     x_max = x.amax(dim=(2, 3), keepdim=True)
     return (x - x_min) / (x_max - x_min + eps)
 
-
-def parse_interp_to_int(val: str | int) -> int:
-    """
-    Map user-provided interpolation to ANTs integer code:
-      0 linear, 1 nearest, 2 gaussian, 3 windowed sinc, 4 bspline
-    Accepts names (case-insensitive) or integers in 0..4.
-    """
-    if isinstance(val, int):
-        if 0 <= val <= 4:
-            return val
-        raise ValueError("interp integer must be in [0,4]")
-    s = str(val).strip().lower()
-    # allow digits directly
-    if s.isdigit():
-        i = int(s)
-        if 0 <= i <= 4:
-            return i
-        raise ValueError("interp integer must be in [0,4]")
-    name_map = {
-        "linear": 0,
-        "lin": 0,
-        "nearest": 1,
-        "nearestneighbor": 1,
-        "nn": 1,
-        "gaussian": 2,
-        "gauss": 2,
-        "sinc": 3,
-        "windowedsinc": 3,
-        "windowed_sinc": 3,
-        "wsinc": 3,
-        "bspline": 4,
-        "b-spline": 4,
-        "b_spline": 4,
-    }
-    if s in name_map:
-        return name_map[s]
-    raise ValueError(f"Unknown --interp '{val}'. Use one of names {{linear, nearest, gaussian, sinc, bspline}} or 0..4.")
-
-
 def try_import_ants():
     try:
         import ants  # type: ignore
@@ -157,14 +117,12 @@ def try_import_ants():
 @torch.no_grad()
 def resample_with_ants_spacing(x: torch.Tensor,
                                native_spacing: Tuple[float, float],
-                               target_spacing: Tuple[float, float],
-                               interp: str | int = "linear") -> torch.Tensor:
+                               target_spacing: Tuple[float, float]) -> torch.Tensor:
     """
     Resample (N,C,H,W) to a target physical spacing using ANTsPy (use_voxels=False).
     If C>1, channels are resampled independently and stacked back.
     """
     ants = try_import_ants()
-    itp = parse_interp_to_int(interp)
     device, dtype = x.device, x.dtype
     N, C, H, W = x.shape
     outs = []
@@ -178,7 +136,7 @@ def resample_with_ants_spacing(x: torch.Tensor,
             except Exception:
                 img.spacing = (float(native_spacing[0]), float(native_spacing[1]))
             img_r = ants.resample_image(img, (float(target_spacing[0]), float(target_spacing[1])),
-                                        use_voxels=False, interp_type=int(itp))
+                                        use_voxels=False, interp_type=0)
             xs.append(torch.from_numpy(img_r.numpy()).to(device=device, dtype=dtype))
         outs.append(torch.stack(xs, dim=0))
     y = torch.stack(outs, dim=1)  # (N,C,h,w)
@@ -187,14 +145,12 @@ def resample_with_ants_spacing(x: torch.Tensor,
 @torch.no_grad()
 def resample_with_ants_size(x: torch.Tensor,
                             target_size: Tuple[int, int],
-                            native_spacing: Optional[Tuple[float, float]] = None,
-                            interp: str | int = "linear") -> torch.Tensor:
+                            native_spacing: Optional[Tuple[float, float]] = None) -> torch.Tensor:
     """
     Resample (N,C,H,W) to a target voxel size (H,W) using ANTsPy (use_voxels=True).
     If native_spacing is provided, attaches it before resampling (helpful for certain ANTs backends).
     """
     ants = try_import_ants()
-    itp = parse_interp_to_int(interp)
     device, dtype = x.device, x.dtype
     N, C, H, W = x.shape
     outs = []
@@ -209,7 +165,7 @@ def resample_with_ants_size(x: torch.Tensor,
                 except Exception:
                     img.spacing = (float(native_spacing[0]), float(native_spacing[1]))
             img_r = ants.resample_image(img, (int(target_size[0]), int(target_size[1])),
-                                        use_voxels=True, interp_type=int(itp))
+                                        use_voxels=True, interp_type=0)
             xs.append(torch.from_numpy(img_r.numpy()).to(device=device, dtype=dtype))
         outs.append(torch.stack(xs, dim=0))
     y = torch.stack(outs, dim=1)  # (N,C,h,w)
@@ -434,9 +390,6 @@ def _read_image_any(path: Path, slice_axis: int, slice_index: int) -> torch.Tens
             if idx < 0: idx = 0
             if idx >= shp[ax]: idx = shp[ax] // 2  # middle if out of range
         try:
-            print("ax=", ax)
-            print("idx=", idx)
-            print("img: ", img.shape)
             img2d = ants.slice_image(img, axis=ax, idx=idx, collapse_strategy=0)
         except Exception:
             # Fallback: try middle slice along axis 0
@@ -582,12 +535,17 @@ def make_recon_panel(x: torch.Tensor, xh: torch.Tensor) -> torch.Tensor:
     x = _coerce_nchw_4d(x, target_hw=(x.shape[-2], x.shape[-1]))
     xh = _coerce_nchw_4d(xh, target_hw=(x.shape[-2], x.shape[-1]))
     diff = torch.abs(x - xh)
+    diff_max = float(diff.max().item())
+
+    print(f"[info] recon: max |x - x_hat| = {diff_max:.6f}")
+
     diff = to01(diff)
     panels = []
     for i in range(x.shape[0]):
         panels.append(x[i:i+1])
         panels.append(xh[i:i+1])
         panels.append(diff[i:i+1])
+
     return torch.cat(panels, dim=0)
 
 
@@ -636,13 +594,13 @@ def main():
     ap.add_argument("--version", action="store_true", help="Print version and exit")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint file or directory")
     ap.add_argument("--view-index", type=int, default=0, help="Which view to sample (0-based)")
-    ap.add_argument("--grid-size", type=parse_mn, default="5x10", help="Grid as MxN (rows×cols), e.g., 6x8")
+    ap.add_argument("--sample-grid-size", type=parse_mn, default=None, help="Grid as MxN (rows×cols), e.g., 6x8")
     ap.add_argument("--image-size", type=parse_hw, default="128x128", help="Per-tile size HxW for saved PNG")
     ap.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature (prior noise scale)")
     ap.add_argument("--ema", action=argparse.BooleanOptionalAction, default=True, help="Prefer EMA weights if present")
     ap.add_argument("--seed", type=int, default=12345, help="Random seed for reproducible sampling")
     ap.add_argument("--devices", type=str, default="cuda:0", help='Device like "cuda:0" or "cpu"')
-    ap.add_argument("--out", type=str, default="", help="Output PNG filename (default auto next to ckpt)")
+    ap.add_argument("--sample-grid-out", type=str, default="", help="Output PNG filename (default auto next to ckpt)")
     ap.add_argument("--slice-axis", type=int, default=0, help="Axis for NIfTI slicing with ANTs (default: 0)")
     ap.add_argument("--slice-index", type=int, default=120, help="Slice index for NIfTI slicing with ANTs (default: 120)")
     # Reconstruction sanity check options
@@ -659,8 +617,6 @@ def main():
                     help="Voxel size HxW (e.g., 192x192). Uses ANTs resample_image(use_voxels=True).")
     ap.add_argument("--native-spacing", type=parse_hw_float, default=None,
                     help="Override native spacing SxT (mm) if not present in checkpoint config.")
-    ap.add_argument("--interp", type=str, default="linear",
-                    help="Interpolation for ANTs resampling. Accepts names {linear, nearest, gaussian, sinc, bspline} or integers {0..4}.")
 
     args = ap.parse_args()
     if args.version:
@@ -763,76 +719,78 @@ def main():
             recon_out = out_dir / f"recon_view{int(args.view_index)}_N{panel.shape[0]//3}_{Hc}x{Wc}.png"
         save_grid(panel, recon_out, nrow=3, target_hw=(Hc, Wc))
         print(f"[ok] recon panel saved: {recon_out}")
+
     # Sample
-    M, N = args.grid_size
-    total = int(M) * int(N)
-    print(f"[info] sampling {total} images @ temp={args.temperature} as {M}x{N}")
+    if args.sample_grid_size is not None:
 
-    try:
-        s = sample_with_temperature(model, total, float(args.temperature))
-        x = s[0] if isinstance(s, (list, tuple)) else s
-    except Exception as e:
-        raise RuntimeError(f"sampling failed: {e}")
+        M, N = args.sample_grid_size
+        total = int(M) * int(N)
+        print(f"[info] sampling {total} images @ temp={args.temperature} as {M}x{N}")
 
-    # Optional ANTs resampling
-    if args.resample_spacing is not None:
-        target_spacing = (float(args.resample_spacing[0]), float(args.resample_spacing[1]))
-        if tuple(round(s, 6) for s in target_spacing) != tuple(round(s, 6) for s in native_spacing):
-            print(f"[info] ANTs resample by spacing: {native_spacing} -> {target_spacing} (interp={args.interp})")
-            x = resample_with_ants_spacing(x, native_spacing=native_spacing,
-                                           target_spacing=target_spacing, interp=args.interp)
+        try:
+            s = sample_with_temperature(model, total, float(args.temperature))
+            x = s[0] if isinstance(s, (list, tuple)) else s
+        except Exception as e:
+            raise RuntimeError(f"sampling failed: {e}")
+
+        # Optional ANTs resampling
+        if args.resample_spacing is not None:
+            target_spacing = (float(args.resample_spacing[0]), float(args.resample_spacing[1]))
+            if tuple(round(s, 6) for s in target_spacing) != tuple(round(s, 6) for s in native_spacing):
+                print(f"[info] ANTs resample by spacing: {native_spacing} -> {target_spacing}")
+                x = resample_with_ants_spacing(x, native_spacing=native_spacing,
+                                            target_spacing=target_spacing)
+            else:
+                print("[info] Requested spacing equals native spacing; skipping ANTs resampling.")
+        elif args.resample_size is not None:
+            target_size = (int(args.resample_size[0]), int(args.resample_size[1]))
+            if tuple(target_size) != (int(x.shape[-2]), int(x.shape[-1])):
+                print(f"[info] ANTs resample by voxel size: {(int(x.shape[-2]), int(x.shape[-1]))} -> {target_size}")
+                x = resample_with_ants_size(x, target_size=target_size, native_spacing=native_spacing)
+            else:
+                print("[info] Requested voxel size equals current; skipping ANTs resampling.")
+
+        # Compose and save grid
+        if args.sample_grid_out:
+            out_path = Path(args.sample_grid_out)
+            if not out_path.is_absolute():
+                out_path = out_dir / out_path
         else:
-            print("[info] Requested spacing equals native spacing; skipping ANTs resampling.")
-    elif args.resample_size is not None:
-        target_size = (int(args.resample_size[0]), int(args.resample_size[1]))
-        if tuple(target_size) != (int(x.shape[-2]), int(x.shape[-1])):
-            print(f"[info] ANTs resample by voxel size: {(int(x.shape[-2]), int(x.shape[-1]))} -> {target_size} (interp={args.interp})")
-            x = resample_with_ants_size(x, target_size=target_size, native_spacing=native_spacing, interp=args.interp)
-        else:
-            print("[info] Requested voxel size equals current; skipping ANTs resampling.")
+            it = blob.get("iter", None)
+            it_str = (f"_it{int(it)-1:06d}" if isinstance(it, int) and it > 0 else "")
+            out_name = (f"samples{it_str}_view{int(args.view_index)}_temp{float(args.temperature):.2f}_"
+                        f"{int(M)}x{int(N)}_{int(args.image_size[0])}x{int(args.image_size[1])}.png")
+            out_path = out_dir / out_name
 
-    # Compose and save grid
-    if args.out:
-        out_path = Path(args.out)
-        if not out_path.is_absolute():
-            out_path = out_dir / out_path
-    else:
-        it = blob.get("iter", None)
-        it_str = (f"_it{int(it)-1:06d}" if isinstance(it, int) and it > 0 else "")
-        out_name = (f"samples{it_str}_view{int(args.view_index)}_temp{float(args.temperature):.2f}_"
-                    f"{int(M)}x{int(N)}_{int(args.image_size[0])}x{int(args.image_size[1])}.png")
-        out_path = out_dir / out_name
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        save_grid(x, out_path, nrow=int(N), target_hw=(int(args.image_size[0]), int(args.image_size[1])))
+        print(f"[ok] wrote: {out_path}")
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    save_grid(x, out_path, nrow=int(N), target_hw=(int(args.image_size[0]), int(args.image_size[1])))
-    print(f"[ok] wrote: {out_path}")
-
-    # Metadata JSON
-    meta = {
-        "version": __version__,
-        "ckpt": str(ckpt_path),
-        "weights_source": which_src,
-        "view_index": int(args.view_index),
-        "grid_size": [int(M), int(N)],
-        "image_size_saved": [int(args.image_size[0]), int(args.image_size[1])],
-        "ckpt_native_size": [int(Hc), int(Wc)],
-        "temperature": float(args.temperature),
-        "seed": int(args.seed),
-        "devices": args.devices,
-        "out": str(out_path),
-        "iter": int(blob.get("iter", -1)) if isinstance(blob.get("iter", None), int) else None,
-        "config": cfg if isinstance(cfg, dict) else None,
-        "native_spacing": list(native_spacing) if native_spacing is not None else None,
-        "resample_spacing": list(args.resample_spacing) if args.resample_spacing is not None else None,
-        "resample_size": list(args.resample_size) if args.resample_size is not None else None,
-        "interp": args.interp,
-    }
-    try:
-        with open(out_path.with_suffix(".json"), "w") as f:
-            json.dump(meta, f, indent=2)
-        print(f"[ok] wrote: {out_path.with_suffix('.json')}")
-    except Exception as e:
-        print(f"[warn] could not write metadata json: {e}")
+        # Metadata JSON
+        meta = {
+            "version": __version__,
+            "ckpt": str(ckpt_path),
+            "weights_source": which_src,
+            "view_index": int(args.view_index),
+            "sample_grid_size": [int(M), int(N)],
+            "image_size_saved": [int(args.image_size[0]), int(args.image_size[1])],
+            "ckpt_native_size": [int(Hc), int(Wc)],
+            "temperature": float(args.temperature),
+            "seed": int(args.seed),
+            "devices": args.devices,
+            "out": str(out_path),
+            "iter": int(blob.get("iter", -1)) if isinstance(blob.get("iter", None), int) else None,
+            "config": cfg if isinstance(cfg, dict) else None,
+            "native_spacing": list(native_spacing) if native_spacing is not None else None,
+            "resample_spacing": list(args.resample_spacing) if args.resample_spacing is not None else None,
+            "resample_size": list(args.resample_size) if args.resample_size is not None else None
+        }
+        try:
+            with open(out_path.with_suffix(".json"), "w") as f:
+                json.dump(meta, f, indent=2)
+            print(f"[ok] wrote: {out_path.with_suffix('.json')}")
+        except Exception as e:
+            print(f"[warn] could not write metadata json: {e}")
 
 if __name__ == "__main__":
     main()
