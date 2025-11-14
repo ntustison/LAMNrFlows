@@ -85,8 +85,22 @@ matplotlib.use("Agg")
 
 __version__ = "0.3.8"
 
+
+SUBCOMMAND_HELP: Dict[str, str] = {
+    "sample": "Sample grids or recon sanity panels from a checkpoint.",
+    "recon": "Reconstruct a single view into [x|x_hat|diff] panels from a manifest.",
+    "gauss-fit": "Fit latent Gaussian(s) from a manifest and checkpoint.",
+    "gauss-impute": "Impute target views from observed views using a Gaussian model.",
+}
+
+
+def log(msg: str, level: str = "info") -> None:
+    """
+    Lightweight logging helper.
+    """
+    print(f"[{level}] {msg}")
+
 # ---------------- antstorch / model factory -----------------
-import antstorch  # provided by env
 from antstorch import create_glow_normalizing_flow_model_2d
 
 # ------------------------- utils ----------------------------
@@ -530,9 +544,6 @@ def build_model_from_config(cfg: dict, device: torch.device):
         m.input_shape = input_shape
     return m
 
-
-# ---------------------- reconstruction sanity check ----------------------
-
 # ---------------------- reconstruction sanity check ----------------------
 @torch.no_grad()
 def reconstruct_batch(model, xb: torch.Tensor):
@@ -574,7 +585,7 @@ def make_recon_panel(x: torch.Tensor, xh: torch.Tensor) -> torch.Tensor:
     diff = torch.abs(x - xh)
     diff_max = float(diff.max().item())
 
-    print(f"[info] recon: max |x - x_hat| = {diff_max:.6f}")
+    log(f"recon: max |x - x_hat| = {diff_max:.6f}")
 
     diff = to01(diff)
     panels = []
@@ -599,6 +610,7 @@ def resolve_ckpt_path(p: Path) -> Path:
 
 # --------------------------- main ---------------------------
 def main_sample():
+    """Sample M×N image grids and optional recon sanity checks from a LAM-Flow checkpoint."""
     ap = argparse.ArgumentParser("LAM‑Flow sample grid tool")
     ap.add_argument("--version", action="store_true", help="Print version and exit")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint file or directory")
@@ -642,8 +654,8 @@ def main_sample():
     device = torch.device("cpu") if args.devices.lower() == "cpu" else torch.device(args.devices.split(",")[0])
     set_deterministic(args.seed)
 
-    print(f"[info] lam_flow_tool {__version__}")
-    print(f"[info] loading checkpoint: {ckpt_path}")
+    log(f"lam_flow_tool {__version__}")
+    log(f"loading checkpoint: {ckpt_path}")
 
     # torch.load with safe default when possible
     try:
@@ -680,7 +692,7 @@ def main_sample():
     which_src, note = src_note
     if note:
         print(f"[warn] weight load note: {note}")
-    print(f"[info] weights loaded from: {which_src} (view {args.view_index})")
+    log(f"weights loaded from: {which_src} (view {args.view_index})")
 
     # Prime using ckpt-native spatial size
     Hc, Wc = model.input_shape[-2], model.input_shape[-1]
@@ -698,7 +710,7 @@ def main_sample():
         val_paths = _gather_val_paths(getattr(args, "val_list", None), limit=int(args.recon))
         if not val_paths:
             raise SystemExit("Recon requested but no validation images found. Use --val-list or --val-dir/--val-glob.")
-        print(f"[info] recon: loading {len(val_paths)} image(s) for round-trip test")
+        log(f"recon: loading {len(val_paths)} image(s) for round-trip test")
         xs = []
         for pth in val_paths:
             try:
@@ -734,7 +746,7 @@ def main_sample():
 
         M, N = args.sample_grid_size
         total = int(M) * int(N)
-        print(f"[info] sampling {total} images @ temp={args.temperature} as {M}x{N}")
+        log(f"sampling {total} images @ temp={args.temperature} as {M}x{N}")
 
         try:
             s = sample_with_temperature(model, total, float(args.temperature))
@@ -746,18 +758,18 @@ def main_sample():
         if args.resample_spacing is not None:
             target_spacing = (float(args.resample_spacing[0]), float(args.resample_spacing[1]))
             if tuple(round(s, 6) for s in target_spacing) != tuple(round(s, 6) for s in native_spacing):
-                print(f"[info] ANTs resample by spacing: {native_spacing} -> {target_spacing}")
+                log(f"ANTs resample by spacing: {native_spacing} -> {target_spacing}")
                 x = resample_with_ants_spacing(x, native_spacing=native_spacing,
                                             target_spacing=target_spacing)
             else:
-                print("[info] Requested spacing equals native spacing; skipping ANTs resampling.")
+                log("Requested spacing equals native spacing; skipping ANTs resampling.")
         elif args.resample_size is not None:
             target_size = (int(args.resample_size[0]), int(args.resample_size[1]))
             if tuple(target_size) != (int(x.shape[-2]), int(x.shape[-1])):
-                print(f"[info] ANTs resample by voxel size: {(int(x.shape[-2]), int(x.shape[-1]))} -> {target_size}")
+                log(f"ANTs resample by voxel size: {(int(x.shape[-2]), int(x.shape[-1]))} -> {target_size}")
                 x = resample_with_ants_size(x, target_size=target_size, native_spacing=native_spacing)
             else:
-                print("[info] Requested voxel size equals current; skipping ANTs resampling.")
+                log("Requested voxel size equals current; skipping ANTs resampling.")
 
         # Compose and save grid
         if args.sample_grid_out:
@@ -803,15 +815,19 @@ def main_sample():
 
 
 def main_recon(argv=None):
+    """Reconstruct a single view into [x | x_hat | |x−x_hat|] panels from a manifest."""
     ap = argparse.ArgumentParser("LAM‑Flow reconstruction tool (recon)")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint file or directory")
     ap.add_argument("--manifest", type=str, required=True, help="CSV with per-view file paths")
     ap.add_argument("--views", type=str, required=True, help="Comma list of views to reconstruct (e.g., T1,T2,FA)")
     ap.add_argument("--view-index", type=int, default=0, help="Which single view's weights to load (0-based)")
-    ap.add_argument("--slice-axis", type=int, required=True)
-    ap.add_argument("--slice-index", type=int, required=True)
+    ap.add_argument("--slice-axis", type=int, required=True,
+                        help="Axis index for slicing volumetric inputs (consistent with gauss-fit).")
+    ap.add_argument("--slice-index", type=int, required=True,
+                        help="Slice index for slicing volumetric inputs (consistent with gauss-fit).")
     ap.add_argument("--batch", type=int, default=32)
-    ap.add_argument("--devices", type=str, default="cuda:0")
+    ap.add_argument("--devices", type=str, default="cuda:0",
+                        help="Device string, e.g. 'cuda:0' or 'cpu'.")
     ap.add_argument("--out", type=str, required=True, help="Output PNG panel")
     args = ap.parse_args(argv)
 
@@ -861,6 +877,30 @@ def main_recon(argv=None):
     panel = make_recon_panel(xb, xh)
     outp = Path(args.out)
     save_grid(panel, outp, nrow=3, target_hw=(Hc, Wc))
+    # Compute max absolute reconstruction error for metadata
+    max_abs_diff = float(torch.abs(xb - xh).max().item())
+    meta = {
+        "tool": "lam_flow_tool",
+        "version": __version__,
+        "mode": "recon",
+        "ckpt": str(ckpt_path),
+        "manifest": str(manifest_path),
+        "view": str(vname),
+        "view_index": int(args.view_index),
+        "slice_axis": int(args.slice_axis),
+        "slice_index": int(args.slice_index),
+        "batch": int(len(xs)),
+        "Hc": int(Hc),
+        "Wc": int(Wc),
+        "max_abs_diff": max_abs_diff,
+    }
+    try:
+        meta_path = outp.with_suffix(".json")
+        with open(meta_path, "w") as f:
+            json.dump(meta, f, indent=2)
+        print(f"[recon] wrote metadata {meta_path}")
+    except Exception as e:
+        print(f"[warn] could not write recon metadata json: {e}")
     print(f"[recon] wrote {outp}")
     return 0
 
@@ -1165,6 +1205,7 @@ def load_weights_into_model(model, blob, view_idx: int, prefer_ema: bool = True,
     return False, ("none", "no recognizable weights in blob")
 
 def main_gauss_fit(argv: List[str] | None = None):
+    """Fit Gaussian latent model(s) over multiview latents extracted from a manifest."""
 
     def _sanitize_latents_array(X, cap_quantile=99.9, hard_cap=None):
         """
@@ -1248,27 +1289,43 @@ def main_gauss_fit(argv: List[str] | None = None):
 
 
     ap = argparse.ArgumentParser("LAM-Flow conditional Gaussian fitter (gauss-fit)")
-    ap.add_argument("--ckpt", type=str, required=True)
-    ap.add_argument("--manifest", type=str, required=True)
+    ap.add_argument("--ckpt", type=str, required=True,
+                        help="Checkpoint file or directory for the trained LAM-Flow model.")
+    ap.add_argument("--manifest", type=str, required=True,
+                        help="CSV manifest with per-view image paths (same format used in gauss-fit).")
     ap.add_argument("--views", type=str, default=None)
-    ap.add_argument("--slice-axis", type=int, required=True)
-    ap.add_argument("--slice-index", type=int, required=True)
-    ap.add_argument("--batch", type=int, default=64)
-    ap.add_argument("--devices", type=str, default="cuda:0")
+    ap.add_argument("--slice-axis", type=int, required=True,
+                        help="Axis index for slicing volumetric inputs (consistent with gauss-fit).")
+    ap.add_argument("--slice-index", type=int, required=True,
+                        help="Slice index for slicing volumetric inputs (consistent with gauss-fit).")
+    ap.add_argument("--batch", type=int, default=64,
+                        help="Number of manifest rows to process in one imputation batch.")
+    ap.add_argument("--devices", type=str, default="cuda:0",
+                        help="Device string, e.g. 'cuda:0' or 'cpu'.")
 
     # Gaussian options
-    ap.add_argument("--cov-mode", type=str, choices=["perlevel","merged"], default="perlevel")
-    ap.add_argument("--cov-estimator", type=str, choices=["full","diag","oas","lw","lowrank"], default="full")
-    ap.add_argument("--rank", type=int, default=64)
-    ap.add_argument("--sigma2", type=str, default="auto")
-    ap.add_argument("--shrinkage", type=str, default="1e-6")
-    ap.add_argument("--cov-lam", type=float, default=1e-6)
-    ap.add_argument("--jitter", type=float, default=1e-4)  # stored for impute
+    ap.add_argument("--cov-mode", type=str, choices=["perlevel","merged"], default="perlevel",
+                        help="How to store covariances: perlevel (separate by flow level) or merged (single block).")
+    ap.add_argument("--cov-estimator", type=str, choices=["full","diag","oas","lw","lowrank"], default="full",
+                        help="Covariance estimator: full sample, diagonal, shrinkage (oas/lw), or lowrank factorization.")
+    ap.add_argument("--rank", type=int, default=64,
+                        help="Rank r for lowrank covariance (only used when --cov-estimator=lowrank).")
+    ap.add_argument("--sigma2", type=str, default="auto",
+                        help="Isotropic noise term for lowrank covariances; float or 'auto' to pick from spectrum.")
+    ap.add_argument("--shrinkage", type=str, default="1e-6",
+                        help="Base ridge / shrinkage strength; 'auto' picks a scale based on the data.")
+    ap.add_argument("--cov-lam", type=float, default=1e-6,
+                        help="Additional ridge term added to all covariance estimators before inversion.")
+    ap.add_argument("--jitter", type=float, default=1e-4,
+                        help="Diagonal jitter stored in the Gaussian file and used during imputation.")  # stored for impute
 
     # Outputs
-    ap.add_argument("--gauss-out", type=str, required=True)
-    ap.add_argument("--gauss-summary", type=str, default="")
-    ap.add_argument("--save-fp", type=int, default=64)
+    ap.add_argument("--gauss-out", type=str, required=True,
+                        help="Output path for the fitted Gaussian model (.npz or .pt).")
+    ap.add_argument("--gauss-summary", type=str, default="",
+                        help="Optional JSON summary with per-level eigen statistics and clamp diagnostics.")
+    ap.add_argument("--save-fp", type=int,
+                        help="If >0, save a floating-point latents cache for debugging (per view).", default=64)
     args = ap.parse_args(argv)
 
     @torch.no_grad()
@@ -1290,8 +1347,8 @@ def main_gauss_fit(argv: List[str] | None = None):
     ckpt_path = resolve_ckpt_path(Path(args.ckpt))
     manifest_path = Path(args.manifest).resolve()
     manifest_dir = manifest_path.parent
-    print(f"[info] gauss-fit: checkpoint: {ckpt_path}")
-    print(f"[info] gauss-fit: manifest:   {manifest_path}")
+    log(f"gauss-fit: checkpoint: {ckpt_path}")
+    log(f"gauss-fit: manifest:   {manifest_path}")
 
     # Load checkpoint
     try:
@@ -1313,7 +1370,7 @@ def main_gauss_fit(argv: List[str] | None = None):
     N = len(per_view_paths[0])
     assert all(len(pp) == N for pp in per_view_paths), "All views must have the same number of subjects"
     N_original = int(N)
-    print(f"[info] views: {view_names} (V={V}); subjects: N={N}")
+    log(f"views: {view_names} (V={V}); subjects: N={N}")
 
 
     # Extract latents per view/level (x->z)
@@ -1338,7 +1395,7 @@ def main_gauss_fit(argv: List[str] | None = None):
                 src, msg = note
             except Exception:
                 src, msg = str(note), None
-            print(f"[info] view {v_idx} ({vname}) weights source: {src}{(' | ' + str(msg)) if msg else ''}")
+            log(f"view {v_idx} ({vname}) weights source: {src}{(' | ' + str(msg)) if msg else ''}")
 
         paths = per_view_paths[v_idx]
         bs = max(1, int(args.batch))
@@ -1908,24 +1965,42 @@ def main_gauss_impute(argv=None):
     # ---------------------------------- args ----------------------------------
     import argparse
     ap = argparse.ArgumentParser("LAM-Flow Gaussian imputation (gauss-impute)")
-    ap.add_argument("--ckpt", type=str, required=True)
-    ap.add_argument("--gauss", type=str, required=True)
-    ap.add_argument("--manifest", type=str, required=True)
-    ap.add_argument("--views", type=str, required=True)
-    ap.add_argument("--observed", type=str, required=True)
-    ap.add_argument("--target", type=str, required=True)
-    ap.add_argument("--slice-axis", type=int, required=True)
-    ap.add_argument("--slice-index", type=int, required=True)
-    ap.add_argument("--devices", type=str, default="cuda:0")
-    ap.add_argument("--batch", type=int, default=64)
-    ap.add_argument("--strategy", type=str, choices=["mean", "sample"], default="mean")
-    ap.add_argument("--samples", type=int, default=1)
-    ap.add_argument("--temperature", type=float, default=1.0)
-    ap.add_argument("--outdir", type=str, required=True)
-    ap.add_argument("--pairs-csv", type=str, default=None)
-    ap.add_argument("--seed", type=int, default=1234)
-    ap.add_argument("--safe-latent", type=str, choices=["none","clamp"], default="none")
-    ap.add_argument("--safe-k", type=float, default=2.0)
+    ap.add_argument("--ckpt", type=str, required=True,
+                        help="Checkpoint file or directory for the trained LAM-Flow model.")
+    ap.add_argument("--gauss", type=str, required=True,
+                        help="Gaussian latent model produced by gauss-fit (.npz or .pt).")
+    ap.add_argument("--manifest", type=str, required=True,
+                        help="CSV manifest with per-view image paths (same format used in gauss-fit).")
+    ap.add_argument("--views", type=str, required=True,
+                        help="Comma list of all views in the order used during training (e.g., T1,T2,FA).")
+    ap.add_argument("--observed", type=str, required=True,
+                        help="Comma list of subset of --views to condition on (observed modalities).")
+    ap.add_argument("--target", type=str, required=True,
+                        help="Comma list of subset of --views to impute (must be disjoint from --observed).")
+    ap.add_argument("--slice-axis", type=int, required=True,
+                        help="Axis index for slicing volumetric inputs (consistent with gauss-fit).")
+    ap.add_argument("--slice-index", type=int, required=True,
+                        help="Slice index for slicing volumetric inputs (consistent with gauss-fit).")
+    ap.add_argument("--devices", type=str, default="cuda:0",
+                        help="Device string, e.g. 'cuda:0' or 'cpu'.")
+    ap.add_argument("--batch", type=int, default=64,
+                        help="Number of manifest rows to process in one imputation batch.")
+    ap.add_argument("--strategy", type=str, choices=["mean", "sample"], default="mean",
+                        help="Conditioning strategy: decode posterior mean or draw latent samples.")
+    ap.add_argument("--samples", type=int, default=1,
+                        help="Number of latent samples per subject when --strategy=sample.")
+    ap.add_argument("--temperature", type=float, default=1.0,
+                        help="Temperature scaling for sampling in latent space (>=1.0 increases variability).")
+    ap.add_argument("--outdir", type=str, required=True,
+                        help="Output directory where imputed PNGs (per target view) are written.")
+    ap.add_argument("--pairs-csv", type=str, default=None,
+                        help="Optional CSV describing custom observed/target pairings (not yet used).")
+    ap.add_argument("--seed", type=int, default=1234,
+                        help="Random seed for sampling-based strategies.")
+    ap.add_argument("--safe-latent", type=str, choices=["none","clamp"], default="none",
+                        help="If 'clamp', restrict sampled latents to μ ± k·σ for numerical safety.")
+    ap.add_argument("--safe-k", type=float, default=2.0,
+                        help="k for μ ± k·σ latent clamping when --safe-latent=clamp.")
     args = ap.parse_args(argv)
 
     views = [v.strip() for v in args.views.split(",") if v.strip()]
@@ -2268,6 +2343,7 @@ def main_gauss_impute(argv=None):
 
 
 
+
 if __name__ == "__main__":
     import sys, inspect
 
@@ -2278,9 +2354,23 @@ if __name__ == "__main__":
         if name.startswith("main_") and callable(obj)
     }
 
+    # Global version flag: python lam_flow_tool.py --version
+    if len(sys.argv) >= 2 and sys.argv[1] in ("--version", "-V"):
+        print(__version__)
+        raise SystemExit(0)
+
+    # Help: no subcommand or -h/--help
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
-        print("Subcommands:", ", ".join(sorted(table)))
-        sys.exit(0)
+        print(f"lam_flow_tool {__version__}")
+        print("Usage: lam_flow_tool.py <subcommand> [options]\n")
+        print("Subcommands:")
+        for name in sorted(table):
+            desc = SUBCOMMAND_HELP.get(name, "")
+            if desc:
+                print(f"  {name:12s} {desc}")
+            else:
+                print(f"  {name}")
+        raise SystemExit(0)
 
     sub = sys.argv.pop(1)
     fn = table.get(sub)
