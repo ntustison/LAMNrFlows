@@ -7,7 +7,6 @@ manifest=/home/ntustison/Desktop/deep_simr_glow/manifest_t1_t2_fa.csv
 gaussian_lr=${out_dir}/t1_t2_fa_lowrank.npz
 gaussian_lr_summary=${out_dir}/t1_t2_fa_lowrank_summary.json
 
-# OAS, per-level
 python lam_flow_tool.py gauss-fit \
   --ckpt ${ckpt} \
   --manifest ${manifest} \

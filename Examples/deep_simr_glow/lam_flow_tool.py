@@ -83,22 +83,7 @@ import ants
 import matplotlib
 matplotlib.use("Agg")
 
-__version__ = "0.3.8"
-
-
-SUBCOMMAND_HELP: Dict[str, str] = {
-    "sample": "Sample grids or recon sanity panels from a checkpoint.",
-    "recon": "Reconstruct a single view into [x|x_hat|diff] panels from a manifest.",
-    "gauss-fit": "Fit latent Gaussian(s) from a manifest and checkpoint.",
-    "gauss-impute": "Impute target views from observed views using a Gaussian model.",
-}
-
-
-def log(msg: str, level: str = "info") -> None:
-    """
-    Lightweight logging helper.
-    """
-    print(f"[{level}] {msg}")
+__version__ = "0.3.9"
 
 # ---------------- antstorch / model factory -----------------
 from antstorch import create_glow_normalizing_flow_model_2d
@@ -544,6 +529,9 @@ def build_model_from_config(cfg: dict, device: torch.device):
         m.input_shape = input_shape
     return m
 
+
+# ---------------------- reconstruction sanity check ----------------------
+
 # ---------------------- reconstruction sanity check ----------------------
 @torch.no_grad()
 def reconstruct_batch(model, xb: torch.Tensor):
@@ -585,7 +573,7 @@ def make_recon_panel(x: torch.Tensor, xh: torch.Tensor) -> torch.Tensor:
     diff = torch.abs(x - xh)
     diff_max = float(diff.max().item())
 
-    log(f"recon: max |x - x_hat| = {diff_max:.6f}")
+    print(f"[info] recon: max |x - x_hat| = {diff_max:.6f}")
 
     diff = to01(diff)
     panels = []
@@ -596,6 +584,288 @@ def make_recon_panel(x: torch.Tensor, xh: torch.Tensor) -> torch.Tensor:
 
     return torch.cat(panels, dim=0)
 
+
+
+def _encode_latents(model, xb: torch.Tensor) -> List[torch.Tensor]:
+    """
+    Push batch x -> multiscale latents z_list using the flow inverse.
+    Returns a list of per-level tensors.
+    """
+    xb = _coerce_nchw_4d(xb, target_hw=(xb.shape[-2], xb.shape[-1]))
+    device_type = xb.device.type
+    with torch.no_grad(), torch.amp.autocast(device_type=device_type, enabled=False):
+        if hasattr(model, "inverse_and_log_det"):
+            z, _ = model.inverse_and_log_det(xb)
+        elif hasattr(model, "inverse"):
+            z, _ = model.inverse(xb)
+        else:
+            raise RuntimeError("Model lacks inverse mapping (inverse_and_log_det / inverse).")
+    return z if isinstance(z, (list, tuple)) else [z]
+
+
+def _decode_latents(model, z_list: List[torch.Tensor], target_hw: Tuple[int, int]) -> torch.Tensor:
+    """
+    Decode list of multiscale latents back to image space using the flow forward.
+    """
+    if not isinstance(z_list, (list, tuple)):
+        z_list = [z_list]
+    device = z_list[0].device
+    with torch.no_grad(), torch.amp.autocast(device_type=device.type, enabled=False):
+        if hasattr(model, "forward_and_log_det"):
+            xh, _ = model.forward_and_log_det(z_list)
+        else:
+            raise RuntimeError("Model does not expose forward_and_log_det(z_list); cannot decode latents.")
+    return _coerce_nchw_4d(xh, target_hw=target_hw)
+
+
+def _edit_latents_to_mean_for_view(
+    z_list: List[torch.Tensor],
+    gauss_blob: Dict[str, Any],
+    view_name: str,
+    levels_to_edit: List[int],
+    mode: str = "mean",
+) -> List[torch.Tensor]:
+    """
+    For a given view, replace specified levels' latents with either the per-level
+    Gaussian mean for that view (mode='mean') or zeros (mode='zero').
+    """
+    import numpy as np
+
+    if not levels_to_edit:
+        return z_list
+
+    # Validate Gaussian metadata and get canonical fields
+    views, dims_tbl, shapes_by_view, L = _validate_gauss_blob(gauss_blob)
+
+    try:
+        v_idx = views.index(view_name)
+    except ValueError:
+        raise RuntimeError(
+            f"[recon] View '{view_name}' not found in Gaussian 'views' header {views}."
+        )
+
+    if str(gauss_blob.get("mode", "perlevel")).lower() != "perlevel":
+        raise RuntimeError(
+            "[recon] Latent editing currently requires a perlevel Gaussian ('--cov-mode perlevel')."
+        )
+
+    mu_list = gauss_blob["mu"]  # list over levels
+
+    # Build per-level slice offsets for each view.
+    # Prefer stored level_view_slices if present, but normalize keys to ints.
+    raw_slices = gauss_blob.get("level_view_slices", None)
+    level_view_slices: List[Dict[int, Tuple[int, int]]] = []
+
+    V = len(views)
+    if raw_slices is not None:
+        for l in range(L):
+            row = raw_slices[l]
+            if isinstance(row, dict):
+                # JSON round-trip typically stringifies keys
+                row_int = {int(k): tuple(v) for k, v in row.items()}
+            else:
+                # Fallback: list-of-tuples in header order
+                row_int = {vi: tuple(row[vi]) for vi in range(V)}
+            level_view_slices.append(row_int)
+    else:
+        # Rebuild from dims_tbl (same logic as in gauss-impute)
+        for l in range(L):
+            off = 0
+            row_int = {}
+            for vi in range(V):
+                d_raw = dims_tbl[vi][l]
+                d = int(np.asarray(d_raw).item() if hasattr(d_raw, "item") else d_raw)
+                row_int[vi] = (off, off + d)
+                off += d
+            level_view_slices.append(row_int)
+
+    if len(z_list) != L:
+        raise RuntimeError(
+            f"[recon] Model has {len(z_list)} latent levels but Gaussian reports L={L}."
+        )
+
+    levels_set = {int(l) for l in levels_to_edit}
+    z_out: List[torch.Tensor] = []
+
+    for l, z_l in enumerate(z_list):
+        if l not in levels_set:
+            z_out.append(z_l)
+            continue
+
+        if z_l.ndim != 4:
+            raise RuntimeError(
+                f"[recon] Expected 4D latent at level {l}, got shape {tuple(z_l.shape)}."
+            )
+
+        B, C, H, W = z_l.shape
+        Cg, Hg, Wg = shapes_by_view[v_idx][l]
+        if (C, H, W) != (Cg, Hg, Wg):
+            raise RuntimeError(
+                f"[recon] Latent shape mismatch for view '{view_name}', level {l}: "
+                f"model (C,H,W)=({C},{H},{W}) vs Gaussian ({Cg},{Hg},{Wg})."
+            )
+
+        a, b = level_view_slices[l][v_idx]
+        mu_level = np.asarray(mu_list[l], dtype=np.float64).ravel()
+        if b > mu_level.shape[0]:
+            raise RuntimeError(
+                f"[recon] Gaussian mean for level {l} is too short (len={mu_level.shape[0]}), "
+                f"expected at least {b}."
+            )
+
+        mu_view_flat = mu_level[a:b]
+        mu_view = torch.as_tensor(
+            mu_view_flat, dtype=z_l.dtype, device=z_l.device
+        ).view(1, C, H, W)
+
+        if mode == "mean":
+            z_l_edit = mu_view.expand(B, C, H, W)
+        elif mode == "zero":
+            z_l_edit = torch.zeros_like(z_l)
+        else:
+            raise ValueError(
+                f"[recon] Unknown edit mode '{mode}', expected 'mean' or 'zero'."
+            )
+
+        z_out.append(z_l_edit)
+
+    return z_out
+
+def _validate_gauss_blob(g: dict):
+    """
+    Validate required fields in the serialized Gaussian blob from gauss-fit.
+    Returns (views, dims_tbl, shapes_by_view, L) if valid, else raises RuntimeError
+    with a detailed, actionable message.
+    """
+    import numpy as _np
+
+    def _shape_of(x):
+        try:
+            return f"{len(x)}" if hasattr(x, "__len__") else "n/a"
+        except Exception:
+            return "n/a"
+
+    def _prod3(t):
+        try:
+            c, h, w = int(t[0]), int(t[1]), int(t[2])
+            return c * h * w
+        except Exception:
+            return None
+
+    errors = []
+    views = g.get("views", None)
+    dims_tbl = g.get("dims_per_level_per_view", None)  # V × L
+    shapes_by_view = g.get("shapes_by_view", None)     # V × L × (C,H,W)
+    L_raw = g.get("L", None)
+
+    # 1) Presence / types
+    if not isinstance(views, (list, tuple)) or len(views) == 0 or not all(isinstance(v, str) for v in views):
+        errors.append(f"- 'views' missing or invalid; expected non-empty list[str], got: {type(views).__name__} with len={_shape_of(views)}")
+
+    if dims_tbl is None or not isinstance(dims_tbl, (list, tuple)):
+        errors.append(f"- 'dims_per_level_per_view' missing or invalid; expected list[list[int]], got: {type(dims_tbl).__name__}")
+    if shapes_by_view is None or not isinstance(shapes_by_view, (list, tuple)):
+        errors.append(f"- 'shapes_by_view' missing or invalid; expected list[list[tuple(C,H,W)]], got: {type(shapes_by_view).__name__}")
+
+    # L must be a positive integer
+    try:
+        L = int(L_raw)
+        if L <= 0:
+            errors.append(f"- 'L' present but non-positive; expected integer > 0, got: {L_raw!r}")
+    except Exception:
+        errors.append(f"- 'L' missing or not an int; got: {L_raw!r}")
+
+    # If any structural errors so far, raise early with context
+    if errors:
+        raise RuntimeError(
+            "[gauss] Invalid gaussian file structure:\n"
+            + "\n".join(errors)
+        )
+
+    # 2) Dimensions across views
+    V = len(views)
+    if len(dims_tbl) != V:
+        errors.append(f"- dims_per_level_per_view has V={len(dims_tbl)} rows but views has V={V}")
+    if len(shapes_by_view) != V:
+        errors.append(f"- shapes_by_view has V={len(shapes_by_view)} rows but views has V={V}")
+
+    # Ensure each view has L entries
+    bad_dims_rows = [vi for vi in range(V) if not isinstance(dims_tbl[vi], (list, tuple)) or len(dims_tbl[vi]) != L]
+    bad_shapes_rows = [vi for vi in range(V) if not isinstance(shapes_by_view[vi], (list, tuple)) or len(shapes_by_view[vi]) != L]
+    if bad_dims_rows:
+        errors.append(f"- dims_per_level_per_view rows with wrong length L={L}: {bad_dims_rows[:10]} (showing first 10)")
+    if bad_shapes_rows:
+        errors.append(f"- shapes_by_view rows with wrong length L={L}: {bad_shapes_rows[:10]} (showing first 10)")
+
+    # 3) Per-level consistency: dims_tbl[v][ℓ] == C*H*W from shapes_by_view[v][ℓ]
+    mismatches = []
+    for vi in range(V):
+        if vi in bad_dims_rows or vi in bad_shapes_rows:
+            continue
+        for l in range(L):
+            try:
+                d_tbl = int(_np.asarray(dims_tbl[vi][l]).item() if hasattr(dims_tbl[vi][l], "item") else dims_tbl[vi][l])
+            except Exception:
+                d_tbl = None
+            d_shp = _prod3(shapes_by_view[vi][l])
+            if d_tbl is None or d_shp is None or d_tbl != d_shp:
+                mismatches.append((vi, l, d_tbl, d_shp))
+                if len(mismatches) >= 20:
+                    break
+        if len(mismatches) >= 20:
+            break
+    if mismatches:
+        msg = "\n".join([f"  - view[{vi}]='{views[vi]}', level {l}: dims_tbl={dt} vs C*H*W={ds}"
+                        for (vi, l, dt, ds) in mismatches])
+        errors.append(f"- dims_per_level_per_view does not match shapes_by_view for some entries (showing up to 20):\n{msg}")
+
+    if errors:
+        # Helpful footer with quick hints
+        footer = (
+            "\nHints:\n"
+            "  • Re-run gauss-fit to regenerate the file if you changed model config (H/W, K, levels).\n"
+            "  • Ensure --views in gauss-fit matches the manifest header order you expect to use in imputation.\n"
+            "  • Verify that your serialized file includes the new fields written by the updated gauss-fit."
+        )
+        raise RuntimeError("[gauss] Inconsistent gaussian metadata:\n" + "\n".join(errors) + footer)
+
+    # Normalize dims_tbl to pure Python ints (in case np types snuck in)
+    dims_tbl_py = [[int(_np.asarray(d).item() if hasattr(d, "item") else d) for d in row] for row in dims_tbl]
+
+    return views, dims_tbl_py, shapes_by_view, L
+
+
+def make_recon_panel_with_edit(x: torch.Tensor, xh: torch.Tensor, xh_edit: torch.Tensor) -> torch.Tensor:
+    """
+    Create a 5-column panel per sample:
+      [x | x_hat | x_hat_edit | abs(x-x_hat) | abs(x-x_hat_edit)].
+    Input: (N,1,H,W) in [0,1]
+    Output: (5N,1,H,W) suitable for save_grid with nrow=5
+    """
+    x = _coerce_nchw_4d(x, target_hw=(x.shape[-2], x.shape[-1]))
+    xh = _coerce_nchw_4d(xh, target_hw=(x.shape[-2], x.shape[-1]))
+    xh_edit = _coerce_nchw_4d(xh_edit, target_hw=(x.shape[-2], x.shape[-1]))
+
+    diff_orig = torch.abs(x - xh)
+    diff_edit = torch.abs(x - xh_edit)
+
+    diff_orig_max = float(diff_orig.max().item())
+    diff_edit_max = float(diff_edit.max().item())
+    print(f"[info] recon: max |x - x_hat| = {diff_orig_max:.6f} (orig)")
+    print(f"[info] recon: max |x - x_hat_edit| = {diff_edit_max:.6f} (edit)")
+
+    diff_orig = to01(diff_orig)
+    diff_edit = to01(diff_edit)
+
+    panels = []
+    for i in range(x.shape[0]):
+        panels.append(x[i:i+1])
+        panels.append(xh[i:i+1])
+        panels.append(xh_edit[i:i+1])
+        panels.append(diff_orig[i:i+1])
+        panels.append(diff_edit[i:i+1])
+
+    return torch.cat(panels, dim=0)
 
 def resolve_ckpt_path(p: Path) -> Path:
     if p.is_dir():
@@ -608,9 +878,10 @@ def resolve_ckpt_path(p: Path) -> Path:
         raise FileNotFoundError(f"Checkpoint not found: {p}")
     return p
 
+
+
 # --------------------------- main ---------------------------
 def main_sample():
-    """Sample M×N image grids and optional recon sanity checks from a LAM-Flow checkpoint."""
     ap = argparse.ArgumentParser("LAM‑Flow sample grid tool")
     ap.add_argument("--version", action="store_true", help="Print version and exit")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint file or directory")
@@ -654,8 +925,8 @@ def main_sample():
     device = torch.device("cpu") if args.devices.lower() == "cpu" else torch.device(args.devices.split(",")[0])
     set_deterministic(args.seed)
 
-    log(f"lam_flow_tool {__version__}")
-    log(f"loading checkpoint: {ckpt_path}")
+    print(f"[info] lam_flow_tool {__version__}")
+    print(f"[info] loading checkpoint: {ckpt_path}")
 
     # torch.load with safe default when possible
     try:
@@ -692,7 +963,7 @@ def main_sample():
     which_src, note = src_note
     if note:
         print(f"[warn] weight load note: {note}")
-    log(f"weights loaded from: {which_src} (view {args.view_index})")
+    print(f"[info] weights loaded from: {which_src} (view {args.view_index})")
 
     # Prime using ckpt-native spatial size
     Hc, Wc = model.input_shape[-2], model.input_shape[-1]
@@ -710,7 +981,7 @@ def main_sample():
         val_paths = _gather_val_paths(getattr(args, "val_list", None), limit=int(args.recon))
         if not val_paths:
             raise SystemExit("Recon requested but no validation images found. Use --val-list or --val-dir/--val-glob.")
-        log(f"recon: loading {len(val_paths)} image(s) for round-trip test")
+        print(f"[info] recon: loading {len(val_paths)} image(s) for round-trip test")
         xs = []
         for pth in val_paths:
             try:
@@ -746,7 +1017,7 @@ def main_sample():
 
         M, N = args.sample_grid_size
         total = int(M) * int(N)
-        log(f"sampling {total} images @ temp={args.temperature} as {M}x{N}")
+        print(f"[info] sampling {total} images @ temp={args.temperature} as {M}x{N}")
 
         try:
             s = sample_with_temperature(model, total, float(args.temperature))
@@ -758,18 +1029,18 @@ def main_sample():
         if args.resample_spacing is not None:
             target_spacing = (float(args.resample_spacing[0]), float(args.resample_spacing[1]))
             if tuple(round(s, 6) for s in target_spacing) != tuple(round(s, 6) for s in native_spacing):
-                log(f"ANTs resample by spacing: {native_spacing} -> {target_spacing}")
+                print(f"[info] ANTs resample by spacing: {native_spacing} -> {target_spacing}")
                 x = resample_with_ants_spacing(x, native_spacing=native_spacing,
                                             target_spacing=target_spacing)
             else:
-                log("Requested spacing equals native spacing; skipping ANTs resampling.")
+                print("[info] Requested spacing equals native spacing; skipping ANTs resampling.")
         elif args.resample_size is not None:
             target_size = (int(args.resample_size[0]), int(args.resample_size[1]))
             if tuple(target_size) != (int(x.shape[-2]), int(x.shape[-1])):
-                log(f"ANTs resample by voxel size: {(int(x.shape[-2]), int(x.shape[-1]))} -> {target_size}")
+                print(f"[info] ANTs resample by voxel size: {(int(x.shape[-2]), int(x.shape[-1]))} -> {target_size}")
                 x = resample_with_ants_size(x, target_size=target_size, native_spacing=native_spacing)
             else:
-                log("Requested voxel size equals current; skipping ANTs resampling.")
+                print("[info] Requested voxel size equals current; skipping ANTs resampling.")
 
         # Compose and save grid
         if args.sample_grid_out:
@@ -814,21 +1085,41 @@ def main_sample():
             print(f"[warn] could not write metadata json: {e}")
 
 
+
 def main_recon(argv=None):
-    """Reconstruct a single view into [x | x_hat | |x−x_hat|] panels from a manifest."""
     ap = argparse.ArgumentParser("LAM‑Flow reconstruction tool (recon)")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint file or directory")
     ap.add_argument("--manifest", type=str, required=True, help="CSV with per-view file paths")
     ap.add_argument("--views", type=str, required=True, help="Comma list of views to reconstruct (e.g., T1,T2,FA)")
     ap.add_argument("--view-index", type=int, default=0, help="Which single view's weights to load (0-based)")
-    ap.add_argument("--slice-axis", type=int, required=True,
-                        help="Axis index for slicing volumetric inputs (consistent with gauss-fit).")
-    ap.add_argument("--slice-index", type=int, required=True,
-                        help="Slice index for slicing volumetric inputs (consistent with gauss-fit).")
+    ap.add_argument("--slice-axis", type=int, required=True)
+    ap.add_argument("--slice-index", type=int, required=True)
     ap.add_argument("--batch", type=int, default=32)
-    ap.add_argument("--devices", type=str, default="cuda:0",
-                        help="Device string, e.g. 'cuda:0' or 'cpu'.")
+    ap.add_argument("--devices", type=str, default="cuda:0")
     ap.add_argument("--out", type=str, required=True, help="Output PNG panel")
+
+    # Optional latent editing using a Gaussian model from gauss-fit
+    ap.add_argument(
+        "--gauss",
+        type=str,
+        default=None,
+        help="Optional Gaussian model (.npz or .pt) from gauss-fit for latent editing.",
+    )
+    ap.add_argument(
+        "--edit-levels",
+        type=str,
+        default="none",
+        help="Levels to project to the Gaussian mean, e.g. '0', '0,1,2', '0-2,4', or 'all'. "
+             "'none' (default) disables latent editing.",
+    )
+    ap.add_argument(
+        "--edit-what",
+        type=str,
+        choices=["mean", "zero"],
+        default="mean",
+        help="What to insert at selected levels: Gaussian mean ('mean') or zeros ('zero').",
+    )
+
     args = ap.parse_args(argv)
 
     device = torch.device(args.devices)
@@ -839,7 +1130,8 @@ def main_recon(argv=None):
         blob = torch.load(ckpt_path, map_location=device)
 
     cfg = blob.get("config", {})
-    Hc = int(cfg.get("H", 128)); Wc = int(cfg.get("W", 128))
+    Hc = int(cfg.get("H", 128))
+    Wc = int(cfg.get("W", 128))
     model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc}, device=device)
     model.eval()
 
@@ -859,9 +1151,20 @@ def main_recon(argv=None):
             paths = [Path(parts[v_idx_map[v]]) for v in all_views]
             rows.append(paths)
 
+    if not rows:
+        raise RuntimeError(f"No valid rows found in manifest: {manifest_path}")
+
     vname = all_views[int(args.view_index)]
     vcol = [r[all_views.index(vname)] for r in rows]
-    ok, note = load_weights_into_model(model, blob, view_idx=all_views.index(vname), prefer_ema=True)
+
+    ok, note = load_weights_into_model(
+        model,
+        blob,
+        view_idx=all_views.index(vname),
+        prefer_ema=True,
+        view_name=vname,
+        cfg_views=all_views,
+    )
     if not ok:
         raise RuntimeError(f"Failed to load weights for view '{vname}': {note}")
 
@@ -869,42 +1172,120 @@ def main_recon(argv=None):
     bs = max(1, int(args.batch))
     for pth in vcol[:bs]:
         xi = _read_image_any(pth, int(args.slice_axis), int(args.slice_index))
-        xi = torch.nn.functional.interpolate(xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False).squeeze(0)
+        xi = torch.nn.functional.interpolate(
+            xi.unsqueeze(0),
+            size=(Hc, Wc),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0)
         xi = to01(xi.unsqueeze(0)).squeeze(0)
         xs.append(xi)
+
     xb = torch.stack(xs, dim=0).to(device=device, dtype=torch.float32)
-    xh = reconstruct_batch(model, xb)
-    panel = make_recon_panel(xb, xh)
+
+    # Base reconstruction (x -> z -> x_hat) for this view
+    z_list = _encode_latents(model, xb)
+    xh = _decode_latents(model, z_list, target_hw=(Hc, Wc))
+
+    # Optional Gaussian-based latent editing
+    xh_edit = None
+    edit_levels = None
+    edit_mode = None
+    gauss_path = None
+
+    if args.gauss:
+        gauss_path = Path(args.gauss)
+        gauss_blob = _load_gaussian_model(gauss_path)
+
+        # Parse level specification
+        spec = (args.edit_levels or "none").strip().lower()
+        if spec not in ("none", ""):
+            # Determine how many levels are available from the Gaussian blob
+            try:
+                _, _, _, L = _validate_gauss_blob(gauss_blob)
+            except Exception as e:
+                raise RuntimeError(f"[recon] Invalid Gaussian blob for editing: {e}")
+
+            if spec == "all":
+                levels = list(range(L))
+            else:
+                levels = []
+                for part in spec.split(","):
+                    part = part.strip()
+                    if not part:
+                        continue
+                    if "-" in part:
+                        a_str, b_str = part.split("-", 1)
+                        a = int(a_str)
+                        b = int(b_str)
+                        if a > b:
+                            a, b = b, a
+                        levels.extend(list(range(a, b + 1)))
+                    else:
+                        levels.append(int(part))
+                # Clamp to valid level range
+                levels = sorted({l for l in levels if 0 <= l < L})
+
+            if levels:
+                z_list_edit = _edit_latents_to_mean_for_view(
+                    z_list, gauss_blob, vname, levels_to_edit=levels, mode=args.edit_what
+                )
+                xh_edit = _decode_latents(model, z_list_edit, target_hw=(Hc, Wc))
+                edit_levels = levels
+                edit_mode = args.edit_what
+
     outp = Path(args.out)
-    save_grid(panel, outp, nrow=3, target_hw=(Hc, Wc))
-    # Compute max absolute reconstruction error for metadata
-    max_abs_diff = float(torch.abs(xb - xh).max().item())
-    meta = {
-        "tool": "lam_flow_tool",
-        "version": __version__,
-        "mode": "recon",
-        "ckpt": str(ckpt_path),
-        "manifest": str(manifest_path),
-        "view": str(vname),
-        "view_index": int(args.view_index),
-        "slice_axis": int(args.slice_axis),
-        "slice_index": int(args.slice_index),
-        "batch": int(len(xs)),
-        "Hc": int(Hc),
-        "Wc": int(Wc),
-        "max_abs_diff": max_abs_diff,
-    }
+    if xh_edit is None:
+        panel = make_recon_panel(xb, xh)
+        ncol = 3
+        diff = torch.abs(xb - xh)
+        max_abs_diff = float(diff.max().item())
+        meta_edit = None
+    else:
+        panel = make_recon_panel_with_edit(xb, xh, xh_edit)
+        ncol = 5
+        diff_orig = torch.abs(xb - xh)
+        diff_edit = torch.abs(xb - xh_edit)
+        max_abs_diff = float(diff_orig.max().item())
+        max_abs_diff_edit = float(diff_edit.max().item())
+        meta_edit = {
+            "gauss": str(gauss_path) if gauss_path is not None else None,
+            "edit_levels": edit_levels,
+            "edit_mode": edit_mode,
+            "max_abs_diff_edit": max_abs_diff_edit,
+        }
+
+    save_grid(panel, outp, nrow=ncol, target_hw=(Hc, Wc))
+    print(f"[recon] wrote {outp}")
+
+    # Metadata sidecar JSON
     try:
+        meta = {
+            "tool": "lam_flow_tool",
+            "mode": "recon",
+            "version": __version__,
+            "ckpt": str(ckpt_path),
+            "manifest": str(manifest_path),
+            "view": str(vname),
+            "view_index": int(args.view_index),
+            "slice_axis": int(args.slice_axis),
+            "slice_index": int(args.slice_index),
+            "batch": int(len(xs)),
+            "Hc": int(Hc),
+            "Wc": int(Wc),
+            "ncol": int(ncol),
+            "max_abs_diff": max_abs_diff,
+        }
+        if meta_edit is not None:
+            meta["latent_edit"] = meta_edit
         meta_path = outp.with_suffix(".json")
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
         print(f"[recon] wrote metadata {meta_path}")
     except Exception as e:
         print(f"[warn] could not write recon metadata json: {e}")
-    print(f"[recon] wrote {outp}")
+
     return 0
-
-
 # ---------------------- gauss-fit (conditional Gaussian) ----------------------
 def _read_manifest_csv(manifest_path: Path) -> Dict[str, List[str]]:
     """
@@ -1205,7 +1586,6 @@ def load_weights_into_model(model, blob, view_idx: int, prefer_ema: bool = True,
     return False, ("none", "no recognizable weights in blob")
 
 def main_gauss_fit(argv: List[str] | None = None):
-    """Fit Gaussian latent model(s) over multiview latents extracted from a manifest."""
 
     def _sanitize_latents_array(X, cap_quantile=99.9, hard_cap=None):
         """
@@ -1289,43 +1669,27 @@ def main_gauss_fit(argv: List[str] | None = None):
 
 
     ap = argparse.ArgumentParser("LAM-Flow conditional Gaussian fitter (gauss-fit)")
-    ap.add_argument("--ckpt", type=str, required=True,
-                        help="Checkpoint file or directory for the trained LAM-Flow model.")
-    ap.add_argument("--manifest", type=str, required=True,
-                        help="CSV manifest with per-view image paths (same format used in gauss-fit).")
+    ap.add_argument("--ckpt", type=str, required=True)
+    ap.add_argument("--manifest", type=str, required=True)
     ap.add_argument("--views", type=str, default=None)
-    ap.add_argument("--slice-axis", type=int, required=True,
-                        help="Axis index for slicing volumetric inputs (consistent with gauss-fit).")
-    ap.add_argument("--slice-index", type=int, required=True,
-                        help="Slice index for slicing volumetric inputs (consistent with gauss-fit).")
-    ap.add_argument("--batch", type=int, default=64,
-                        help="Number of manifest rows to process in one imputation batch.")
-    ap.add_argument("--devices", type=str, default="cuda:0",
-                        help="Device string, e.g. 'cuda:0' or 'cpu'.")
+    ap.add_argument("--slice-axis", type=int, required=True)
+    ap.add_argument("--slice-index", type=int, required=True)
+    ap.add_argument("--batch", type=int, default=64)
+    ap.add_argument("--devices", type=str, default="cuda:0")
 
     # Gaussian options
-    ap.add_argument("--cov-mode", type=str, choices=["perlevel","merged"], default="perlevel",
-                        help="How to store covariances: perlevel (separate by flow level) or merged (single block).")
-    ap.add_argument("--cov-estimator", type=str, choices=["full","diag","oas","lw","lowrank"], default="full",
-                        help="Covariance estimator: full sample, diagonal, shrinkage (oas/lw), or lowrank factorization.")
-    ap.add_argument("--rank", type=int, default=64,
-                        help="Rank r for lowrank covariance (only used when --cov-estimator=lowrank).")
-    ap.add_argument("--sigma2", type=str, default="auto",
-                        help="Isotropic noise term for lowrank covariances; float or 'auto' to pick from spectrum.")
-    ap.add_argument("--shrinkage", type=str, default="1e-6",
-                        help="Base ridge / shrinkage strength; 'auto' picks a scale based on the data.")
-    ap.add_argument("--cov-lam", type=float, default=1e-6,
-                        help="Additional ridge term added to all covariance estimators before inversion.")
-    ap.add_argument("--jitter", type=float, default=1e-4,
-                        help="Diagonal jitter stored in the Gaussian file and used during imputation.")  # stored for impute
+    ap.add_argument("--cov-mode", type=str, choices=["perlevel","merged"], default="perlevel")
+    ap.add_argument("--cov-estimator", type=str, choices=["full","diag","oas","lw","lowrank"], default="full")
+    ap.add_argument("--rank", type=int, default=64)
+    ap.add_argument("--sigma2", type=str, default="auto")
+    ap.add_argument("--shrinkage", type=str, default="1e-6")
+    ap.add_argument("--cov-lam", type=float, default=1e-6)
+    ap.add_argument("--jitter", type=float, default=1e-4)  # stored for impute
 
     # Outputs
-    ap.add_argument("--gauss-out", type=str, required=True,
-                        help="Output path for the fitted Gaussian model (.npz or .pt).")
-    ap.add_argument("--gauss-summary", type=str, default="",
-                        help="Optional JSON summary with per-level eigen statistics and clamp diagnostics.")
-    ap.add_argument("--save-fp", type=int,
-                        help="If >0, save a floating-point latents cache for debugging (per view).", default=64)
+    ap.add_argument("--gauss-out", type=str, required=True)
+    ap.add_argument("--gauss-summary", type=str, default="")
+    ap.add_argument("--save-fp", type=int, default=64)
     args = ap.parse_args(argv)
 
     @torch.no_grad()
@@ -1347,8 +1711,8 @@ def main_gauss_fit(argv: List[str] | None = None):
     ckpt_path = resolve_ckpt_path(Path(args.ckpt))
     manifest_path = Path(args.manifest).resolve()
     manifest_dir = manifest_path.parent
-    log(f"gauss-fit: checkpoint: {ckpt_path}")
-    log(f"gauss-fit: manifest:   {manifest_path}")
+    print(f"[info] gauss-fit: checkpoint: {ckpt_path}")
+    print(f"[info] gauss-fit: manifest:   {manifest_path}")
 
     # Load checkpoint
     try:
@@ -1370,7 +1734,7 @@ def main_gauss_fit(argv: List[str] | None = None):
     N = len(per_view_paths[0])
     assert all(len(pp) == N for pp in per_view_paths), "All views must have the same number of subjects"
     N_original = int(N)
-    log(f"views: {view_names} (V={V}); subjects: N={N}")
+    print(f"[info] views: {view_names} (V={V}); subjects: N={N}")
 
 
     # Extract latents per view/level (x->z)
@@ -1395,7 +1759,7 @@ def main_gauss_fit(argv: List[str] | None = None):
                 src, msg = note
             except Exception:
                 src, msg = str(note), None
-            log(f"view {v_idx} ({vname}) weights source: {src}{(' | ' + str(msg)) if msg else ''}")
+            print(f"[info] view {v_idx} ({vname}) weights source: {src}{(' | ' + str(msg)) if msg else ''}")
 
         paths = per_view_paths[v_idx]
         bs = max(1, int(args.batch))
@@ -1646,6 +2010,214 @@ def main_gauss_fit(argv: List[str] | None = None):
         print(f"[ok] wrote summary JSON: {js_path}")
 
 
+def _load_gaussian_model(gauss_path: Path) -> Dict[str, Any]:
+    """
+    Load Gaussian model saved by gauss-fit (.pt or .npz).
+    Returns a dict with keys:
+    - mode: "perlevel" or "merged"
+    - estimator: "full"|"diag"|"lw"|"oas"|"lowrank"
+    - views: list[str]
+    - N, H, W, L: ints
+    - dims_per_level_per_view: V x L list of ints
+    - shapes_by_view: optional V x L list of (C,H,W)
+    - level_view_slices: optional L x V list of (start,end) in level-flat space
+    - mu: list[(D_l,)] if perlevel else (D_total,)
+    - Sigma: list[np.ndarray or dict] if perlevel else np.ndarray or dict
+    """
+    gauss_path = Path(gauss_path)
+    if not gauss_path.exists():
+        raise FileNotFoundError(f"Gaussian file not found: {gauss_path}")
+
+    if str(gauss_path).endswith(".pt"):
+        try:
+            blob = torch.load(gauss_path, map_location="cpu", weights_only=True)
+        except Exception as e:  # UnpicklingError from weights_only lands here
+            print(f"[warn] weights_only load failed ({e.__class__.__name__}: {e}); retrying without weights_only")
+            blob = torch.load(gauss_path, map_location="cpu")
+        return blob
+
+    npz = np.load(str(gauss_path), allow_pickle=True)
+    keys = set(npz.files)
+    blob: Dict[str, Any] = {}
+
+    def _scalar(k, cast=int, default=None):
+        if k in keys:
+            try:
+                return cast(np.array(npz[k]).ravel()[0])
+            except Exception:
+                try:
+                    return cast(npz[k].tolist())
+                except Exception:
+                    return cast(npz[k])
+        return default
+
+    blob["mode"] = (np.array(npz["mode"]).tolist() if "mode" in keys else "perlevel")
+    blob["estimator"] = (np.array(npz["estimator"]).tolist() if "estimator" in keys else "full")
+    blob["N"] = _scalar("N", int, None)
+    blob["H"] = _scalar("H", int, None)
+    blob["W"] = _scalar("W", int, None)
+    blob["L"] = _scalar("L", int, None)
+
+    if "views" in keys:
+        vv = np.array(npz["views"]).tolist()
+        blob["views"] = [str(x) for x in (vv if isinstance(vv, list) else [vv])]
+
+    # dims and stats may be JSON strings inside NPZ
+    if "dims_json" in keys:
+        blob["dims_per_level_per_view"] = json.loads(str(np.array(npz["dims_json"]).tolist()))
+    if "stats_json" in keys:
+        blob["stats"] = json.loads(str(np.array(npz["stats_json"]).tolist()))
+
+    # shapes and slices (optional)
+    if "shapes_json" in keys:
+        blob["shapes_by_view"] = json.loads(str(np.array(npz["shapes_json"]).tolist()))
+    if "slices_json" in keys:
+        blob["level_view_slices"] = json.loads(str(np.array(npz["slices_json"]).tolist()))
+
+    # per-level preferred path
+    L = int(blob.get("L", 0) or 0)
+    if any(f.startswith("mu_") for f in keys):
+        mu_list, Sig_list = [], []
+        for i in range(L):
+            mu_list.append(np.array(npz[f"mu_{i}"]))
+            if f"Sigma_{i}_type" in keys and str(np.array(npz[f"Sigma_{i}_type"]).tolist()) == "lowrank":
+                Sig_list.append({
+                    "type": "lowrank",
+                    "U": np.array(npz[f"Sigma_{i}_U"]),
+                    "eig": np.array(npz[f"Sigma_{i}_eig"]),
+                    "sigma2": float(np.array(npz[f"Sigma_{i}_sigma2"]).ravel()[0]),
+                })
+            else:
+                Sig_list.append(np.array(npz.get(f"Sigma_{i}")))
+        blob["mu"] = mu_list
+        blob["Sigma"] = Sig_list
+        blob["mode"] = "perlevel"
+        return blob
+
+    # merged fallback
+    if "mu" in keys:
+        blob["mu"] = np.array(npz["mu"])
+        if "Sigma_type" in keys and str(np.array(npz["Sigma_type"]).tolist()) == "lowrank":
+            blob["Sigma"] = {
+                "type": "lowrank",
+                "U": np.array(npz["Sigma_U"]),
+                "eig": np.array(npz["Sigma_eig"]),
+                "sigma2": float(np.array(npz["Sigma_sigma2"]).ravel()[0]),
+            }
+        elif "Sigma" in keys:
+            blob["Sigma"] = np.array(npz["Sigma"])
+        return blob
+
+    # legacy object arrays
+    if "mu" in keys and np.array(npz["mu"]).dtype == object:
+        blob["mu"] = np.array(npz["mu"]).tolist()
+        if "Sigma" in keys:
+            blob["Sigma"] = np.array(npz["Sigma"]).tolist()
+        return blob
+
+    raise RuntimeError(f"Unrecognized NPZ contents in {gauss_path}; keys={sorted(keys)}")
+
+
+# ---------- helpers (lowrank + robust SPD solve + torch cov-space solver) ----------
+def _spd_solve_cholesky(SOO: np.ndarray, B: np.ndarray, base_ridge: float = 0.0, max_tries: int = 8):
+    SOO = np.asarray(SOO, dtype=np.float64)
+    B   = np.asarray(B,   dtype=np.float64)
+    SOO = 0.5 * (SOO + SOO.T)
+    D = SOO.shape[0]
+    I = np.eye(D, dtype=np.float64)
+    lam = max(float(base_ridge), 1e-8 * (np.trace(SOO) / max(D, 1)))
+    for _ in range(max_tries):
+        try:
+            L = np.linalg.cholesky(SOO + lam * I)
+            Y = np.linalg.solve(L, B)
+            X = np.linalg.solve(L.T, Y)
+            if np.all(np.isfinite(X)):
+                return X, lam
+        except np.linalg.LinAlgError:
+            pass
+        lam *= 10.0
+    X, *_ = np.linalg.lstsq(SOO + lam * I, B, rcond=None)
+    return X, lam
+
+def _cond_mean_block_lowrank(U: np.ndarray, eig: np.ndarray, sigma2: float,
+                             idx_U: list[int], idx_O: list[int],
+                             mu: np.ndarray, ZO: np.ndarray,
+                             base_ridge: float = 0.0, max_tries: int = 10):
+    U   = np.asarray(U,   dtype=np.float64)
+    eig = np.asarray(eig, dtype=np.float64)
+    mu  = np.asarray(mu,  dtype=np.float64).ravel()
+    ZO  = np.asarray(ZO,  dtype=np.float64)
+    U_O = U[idx_O, :]    # (D_O, r)
+    U_U = U[idx_U, :]    # (D_U, r)
+    Lam = np.diag(eig) if eig.ndim == 1 else eig
+    SOO = U_O @ Lam @ U_O.T
+    if sigma2 > 0.0:
+        SOO = SOO + float(sigma2) * np.eye(SOO.shape[0], dtype=np.float64)
+    dO = (ZO - mu[idx_O][None, :]).T  # (D_O, N)
+    X, lam = _spd_solve_cholesky(SOO, dO, base_ridge=base_ridge, max_tries=max_tries)
+    Y  = U_O.T @ X       # (r,N)
+    TY = Lam @ Y         # (r,N)
+    add = U_U @ TY       # (D_U,N)
+    zU = mu[idx_U][:, None] + add  # (D_U,N)
+    return zU.T, lam, SOO  # (N,D_U), lam, SOO
+
+@torch.no_grad()
+def _torch_conditional_gaussian_impute(
+    z_obs_np, idx_obs, idx_mis, mu_np, Sigma_np,
+    jitter: float = 1e-4, sample: bool = False, tau: float = 1.0, max_tries: int = 7,
+):
+    device = torch.device("cpu")
+    z_obs = torch.as_tensor(z_obs_np, dtype=torch.double, device=device)      # (B, d_O)
+    mu    = torch.as_tensor(mu_np,    dtype=torch.double, device=device).view(-1)
+    S     = torch.as_tensor(Sigma_np, dtype=torch.double, device=device)
+    idx_O = torch.as_tensor(idx_obs, dtype=torch.long, device=device)
+    idx_M = torch.as_tensor(idx_mis, dtype=torch.long, device=device)
+
+    mu_O, mu_M = mu[idx_O], mu[idx_M]
+    S_OO = 0.5*(S.index_select(0, idx_O).index_select(1, idx_O) +
+                S.index_select(0, idx_O).index_select(1, idx_O).T)
+    S_MO = S.index_select(0, idx_M).index_select(1, idx_O)
+    S_MM = 0.5*(S.index_select(0, idx_M).index_select(1, idx_M) +
+                S.index_select(0, idx_M).index_select(1, idx_M).T)
+
+    I = torch.eye(S_OO.shape[0], dtype=S_OO.dtype, device=device)
+    jj = float(jitter)
+    for _ in range(max_tries):
+        try:
+            L = torch.linalg.cholesky(S_OO + jj*I)
+            break
+        except RuntimeError:
+            jj *= 10.0
+
+    d = (z_obs - mu_O.unsqueeze(0)).T
+    y = torch.linalg.solve_triangular(L, d, upper=False)
+    alpha = torch.linalg.solve_triangular(L.T, y, upper=True).T  # (B, d_O)
+    mean_cond = mu_M.unsqueeze(0) + alpha @ S_MO.T               # (B, d_M)
+
+    if not sample:
+        return mean_cond.to(torch.float32).cpu().numpy()
+
+    S_OM = S_MO.T
+    yK = torch.linalg.solve_triangular(L, S_OM, upper=False)
+    K  = torch.linalg.solve_triangular(L.T, yK, upper=True)
+    S_cond = 0.5*((S_MM - S_MO @ K) + (S_MM - S_MO @ K).T)
+
+    Iu = torch.eye(S_cond.shape[0], dtype=S_cond.dtype, device=device)
+    jj2 = float(jitter)
+    for _ in range(max_tries):
+        try:
+            Lc = torch.linalg.cholesky(S_cond + jj2*Iu)
+            break
+        except RuntimeError:
+            jj2 *= 10.0
+
+    B = z_obs.shape[0]
+    eps = torch.randn((B, Lc.shape[0]), dtype=S_cond.dtype, device=device)
+    samples = mean_cond + (eps @ Lc.T)*float(tau)
+    return samples.to(torch.float32).cpu().numpy()
+
+
+
 def main_gauss_impute(argv=None):
     """
     Impute one or more target modalities given observed modalities, using a Gaussian
@@ -1858,149 +2430,27 @@ def main_gauss_impute(argv=None):
         samples = mean_cond + (eps @ Lc.T)*float(tau)
         return samples.to(torch.float32).cpu().numpy()
 
-    def _validate_gauss_blob(g: dict):
-        """
-        Validate required fields in the serialized Gaussian blob from gauss-fit.
-        Returns (views, dims_tbl, shapes_by_view, L) if valid, else raises RuntimeError
-        with a detailed, actionable message.
-        """
-        import numpy as _np
-
-        def _shape_of(x):
-            try:
-                return f"{len(x)}" if hasattr(x, "__len__") else "n/a"
-            except Exception:
-                return "n/a"
-
-        def _prod3(t):
-            try:
-                c, h, w = int(t[0]), int(t[1]), int(t[2])
-                return c * h * w
-            except Exception:
-                return None
-
-        errors = []
-        views = g.get("views", None)
-        dims_tbl = g.get("dims_per_level_per_view", None)  # V × L
-        shapes_by_view = g.get("shapes_by_view", None)     # V × L × (C,H,W)
-        L_raw = g.get("L", None)
-
-        # 1) Presence / types
-        if not isinstance(views, (list, tuple)) or len(views) == 0 or not all(isinstance(v, str) for v in views):
-            errors.append(f"- 'views' missing or invalid; expected non-empty list[str], got: {type(views).__name__} with len={_shape_of(views)}")
-
-        if dims_tbl is None or not isinstance(dims_tbl, (list, tuple)):
-            errors.append(f"- 'dims_per_level_per_view' missing or invalid; expected list[list[int]], got: {type(dims_tbl).__name__}")
-        if shapes_by_view is None or not isinstance(shapes_by_view, (list, tuple)):
-            errors.append(f"- 'shapes_by_view' missing or invalid; expected list[list[tuple(C,H,W)]], got: {type(shapes_by_view).__name__}")
-
-        # L must be a positive integer
-        try:
-            L = int(L_raw)
-            if L <= 0:
-                errors.append(f"- 'L' present but non-positive; expected integer > 0, got: {L_raw!r}")
-        except Exception:
-            errors.append(f"- 'L' missing or not an int; got: {L_raw!r}")
-
-        # If any structural errors so far, raise early with context
-        if errors:
-            raise RuntimeError(
-                "[gauss] Invalid gaussian file structure:\n"
-                + "\n".join(errors)
-            )
-
-        # 2) Dimensions across views
-        V = len(views)
-        if len(dims_tbl) != V:
-            errors.append(f"- dims_per_level_per_view has V={len(dims_tbl)} rows but views has V={V}")
-        if len(shapes_by_view) != V:
-            errors.append(f"- shapes_by_view has V={len(shapes_by_view)} rows but views has V={V}")
-
-        # Ensure each view has L entries
-        bad_dims_rows = [vi for vi in range(V) if not isinstance(dims_tbl[vi], (list, tuple)) or len(dims_tbl[vi]) != L]
-        bad_shapes_rows = [vi for vi in range(V) if not isinstance(shapes_by_view[vi], (list, tuple)) or len(shapes_by_view[vi]) != L]
-        if bad_dims_rows:
-            errors.append(f"- dims_per_level_per_view rows with wrong length L={L}: {bad_dims_rows[:10]} (showing first 10)")
-        if bad_shapes_rows:
-            errors.append(f"- shapes_by_view rows with wrong length L={L}: {bad_shapes_rows[:10]} (showing first 10)")
-
-        # 3) Per-level consistency: dims_tbl[v][ℓ] == C*H*W from shapes_by_view[v][ℓ]
-        mismatches = []
-        for vi in range(V):
-            if vi in bad_dims_rows or vi in bad_shapes_rows:
-                continue
-            for l in range(L):
-                try:
-                    d_tbl = int(_np.asarray(dims_tbl[vi][l]).item() if hasattr(dims_tbl[vi][l], "item") else dims_tbl[vi][l])
-                except Exception:
-                    d_tbl = None
-                d_shp = _prod3(shapes_by_view[vi][l])
-                if d_tbl is None or d_shp is None or d_tbl != d_shp:
-                    mismatches.append((vi, l, d_tbl, d_shp))
-                    if len(mismatches) >= 20:
-                        break
-            if len(mismatches) >= 20:
-                break
-        if mismatches:
-            msg = "\n".join([f"  - view[{vi}]='{views[vi]}', level {l}: dims_tbl={dt} vs C*H*W={ds}"
-                            for (vi, l, dt, ds) in mismatches])
-            errors.append(f"- dims_per_level_per_view does not match shapes_by_view for some entries (showing up to 20):\n{msg}")
-
-        if errors:
-            # Helpful footer with quick hints
-            footer = (
-                "\nHints:\n"
-                "  • Re-run gauss-fit to regenerate the file if you changed model config (H/W, K, levels).\n"
-                "  • Ensure --views in gauss-fit matches the manifest header order you expect to use in imputation.\n"
-                "  • Verify that your serialized file includes the new fields written by the updated gauss-fit."
-            )
-            raise RuntimeError("[gauss] Inconsistent gaussian metadata:\n" + "\n".join(errors) + footer)
-
-        # Normalize dims_tbl to pure Python ints (in case np types snuck in)
-        dims_tbl_py = [[int(_np.asarray(d).item() if hasattr(d, "item") else d) for d in row] for row in dims_tbl]
-
-        return views, dims_tbl_py, shapes_by_view, L
-
-
     # ---------------------------------- args ----------------------------------
     import argparse
     ap = argparse.ArgumentParser("LAM-Flow Gaussian imputation (gauss-impute)")
-    ap.add_argument("--ckpt", type=str, required=True,
-                        help="Checkpoint file or directory for the trained LAM-Flow model.")
-    ap.add_argument("--gauss", type=str, required=True,
-                        help="Gaussian latent model produced by gauss-fit (.npz or .pt).")
-    ap.add_argument("--manifest", type=str, required=True,
-                        help="CSV manifest with per-view image paths (same format used in gauss-fit).")
-    ap.add_argument("--views", type=str, required=True,
-                        help="Comma list of all views in the order used during training (e.g., T1,T2,FA).")
-    ap.add_argument("--observed", type=str, required=True,
-                        help="Comma list of subset of --views to condition on (observed modalities).")
-    ap.add_argument("--target", type=str, required=True,
-                        help="Comma list of subset of --views to impute (must be disjoint from --observed).")
-    ap.add_argument("--slice-axis", type=int, required=True,
-                        help="Axis index for slicing volumetric inputs (consistent with gauss-fit).")
-    ap.add_argument("--slice-index", type=int, required=True,
-                        help="Slice index for slicing volumetric inputs (consistent with gauss-fit).")
-    ap.add_argument("--devices", type=str, default="cuda:0",
-                        help="Device string, e.g. 'cuda:0' or 'cpu'.")
-    ap.add_argument("--batch", type=int, default=64,
-                        help="Number of manifest rows to process in one imputation batch.")
-    ap.add_argument("--strategy", type=str, choices=["mean", "sample"], default="mean",
-                        help="Conditioning strategy: decode posterior mean or draw latent samples.")
-    ap.add_argument("--samples", type=int, default=1,
-                        help="Number of latent samples per subject when --strategy=sample.")
-    ap.add_argument("--temperature", type=float, default=1.0,
-                        help="Temperature scaling for sampling in latent space (>=1.0 increases variability).")
-    ap.add_argument("--outdir", type=str, required=True,
-                        help="Output directory where imputed PNGs (per target view) are written.")
-    ap.add_argument("--pairs-csv", type=str, default=None,
-                        help="Optional CSV describing custom observed/target pairings (not yet used).")
-    ap.add_argument("--seed", type=int, default=1234,
-                        help="Random seed for sampling-based strategies.")
-    ap.add_argument("--safe-latent", type=str, choices=["none","clamp"], default="none",
-                        help="If 'clamp', restrict sampled latents to μ ± k·σ for numerical safety.")
-    ap.add_argument("--safe-k", type=float, default=2.0,
-                        help="k for μ ± k·σ latent clamping when --safe-latent=clamp.")
+    ap.add_argument("--ckpt", type=str, required=True)
+    ap.add_argument("--gauss", type=str, required=True)
+    ap.add_argument("--manifest", type=str, required=True)
+    ap.add_argument("--views", type=str, required=True)
+    ap.add_argument("--observed", type=str, required=True)
+    ap.add_argument("--target", type=str, required=True)
+    ap.add_argument("--slice-axis", type=int, required=True)
+    ap.add_argument("--slice-index", type=int, required=True)
+    ap.add_argument("--devices", type=str, default="cuda:0")
+    ap.add_argument("--batch", type=int, default=64)
+    ap.add_argument("--strategy", type=str, choices=["mean", "sample"], default="mean")
+    ap.add_argument("--samples", type=int, default=1)
+    ap.add_argument("--temperature", type=float, default=1.0)
+    ap.add_argument("--outdir", type=str, required=True)
+    ap.add_argument("--pairs-csv", type=str, default=None)
+    ap.add_argument("--seed", type=int, default=1234)
+    ap.add_argument("--safe-latent", type=str, choices=["none","clamp"], default="none")
+    ap.add_argument("--safe-k", type=float, default=2.0)
     args = ap.parse_args(argv)
 
     views = [v.strip() for v in args.views.split(",") if v.strip()]
@@ -2343,7 +2793,6 @@ def main_gauss_impute(argv=None):
 
 
 
-
 if __name__ == "__main__":
     import sys, inspect
 
@@ -2354,23 +2803,9 @@ if __name__ == "__main__":
         if name.startswith("main_") and callable(obj)
     }
 
-    # Global version flag: python lam_flow_tool.py --version
-    if len(sys.argv) >= 2 and sys.argv[1] in ("--version", "-V"):
-        print(__version__)
-        raise SystemExit(0)
-
-    # Help: no subcommand or -h/--help
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
-        print(f"lam_flow_tool {__version__}")
-        print("Usage: lam_flow_tool.py <subcommand> [options]\n")
-        print("Subcommands:")
-        for name in sorted(table):
-            desc = SUBCOMMAND_HELP.get(name, "")
-            if desc:
-                print(f"  {name:12s} {desc}")
-            else:
-                print(f"  {name}")
-        raise SystemExit(0)
+        print("Subcommands:", ", ".join(sorted(table)))
+        sys.exit(0)
 
     sub = sys.argv.pop(1)
     fn = table.get(sub)
