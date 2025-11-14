@@ -146,10 +146,36 @@ def warmup_actnorm_with_real_batch(model, x_real: torch.Tensor):
             except Exception:
                 continue
 
-def to01(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+def to01(
+    x: torch.Tensor,
+    eps: float = 1e-8,
+    winsorize: bool = False,
+    upper_q: float = 0.99,
+) -> torch.Tensor:
+    """
+    Per-image/channel normalization to [0, 1] over spatial dims (H,W).
+
+    If winsorize=True, values above the per-image/channel upper_q quantile
+    are clipped before min-max normalization, so a few spikes do not
+    dominate the scaling.
+
+    Expects x shaped (N, C, H, W) or anything that can be viewed that way.
+    """
+    if not torch.is_floating_point(x):
+        x = x.float()
+
+    if winsorize:
+        # Flatten spatial dims, compute quantile per (N,C), then reshape
+        N, C, H, W = x.shape
+        flat = x.view(N, C, -1)                              # (N,C,HW)
+        hi = torch.quantile(flat, upper_q, dim=-1, keepdim=True)  # (N,C,1)
+        hi = hi.view(N, C, 1, 1)                             # (N,C,1,1)
+        x = torch.minimum(x, hi)
+
     x_min = x.amin(dim=(2, 3), keepdim=True)
     x_max = x.amax(dim=(2, 3), keepdim=True)
     return (x - x_min) / (x_max - x_min + eps)
+
 
 @torch.no_grad()
 def resample_with_ants_spacing(x: torch.Tensor,
@@ -624,10 +650,25 @@ def _edit_latents_to_mean_for_view(
     view_name: str,
     levels_to_edit: List[int],
     mode: str = "mean",
+    pc_index: int = 0,
+    pc_scale: float = 2.0,
+    pc_center: str = "sample",
 ) -> List[torch.Tensor]:
     """
-    For a given view, replace specified levels' latents with either the per-level
-    Gaussian mean for that view (mode='mean') or zeros (mode='zero').
+    For a given view, modify specified levels' latents.
+
+    mode:
+      - "mean":  replace with per-level Gaussian mean for that view.
+      - "zero":  replace with zeros.
+      - "pc":    add a shift along a principal component of the per-level, per-view covariance.
+
+    PC editing:
+      • Extract Σ_{ℓ,v} block for this view at each level ℓ.
+      • Eigendecompose Σ_{ℓ,v} and take PC index `pc_index` (0 = largest variance).
+      • Step size is pc_scale * sqrt(lambda_k).
+      • Center:
+          - "sample": z_edit = z + step * q_k
+          - "mean":   z_edit = μ + step * q_k
     """
     import numpy as np
 
@@ -650,9 +691,9 @@ def _edit_latents_to_mean_for_view(
         )
 
     mu_list = gauss_blob["mu"]  # list over levels
+    Sigma_list = gauss_blob.get("Sigma", None)
 
     # Build per-level slice offsets for each view.
-    # Prefer stored level_view_slices if present, but normalize keys to ints.
     raw_slices = gauss_blob.get("level_view_slices", None)
     level_view_slices: List[Dict[int, Tuple[int, int]]] = []
 
@@ -706,6 +747,8 @@ def _edit_latents_to_mean_for_view(
             )
 
         a, b = level_view_slices[l][v_idx]
+
+        # Per-level, per-view mean in flattened order
         mu_level = np.asarray(mu_list[l], dtype=np.float64).ravel()
         if b > mu_level.shape[0]:
             raise RuntimeError(
@@ -719,12 +762,87 @@ def _edit_latents_to_mean_for_view(
         ).view(1, C, H, W)
 
         if mode == "mean":
+            # Replace with Gaussian mean
             z_l_edit = mu_view.expand(B, C, H, W)
+
         elif mode == "zero":
+            # Replace with zeros
             z_l_edit = torch.zeros_like(z_l)
+
+        elif mode == "pc":
+            if Sigma_list is None:
+                raise RuntimeError(
+                    "[recon] Gaussian blob has no 'Sigma' field; cannot perform PC editing."
+                )
+
+            # Select Σ_l (per-level)
+            Sigma_l = Sigma_list[l] if isinstance(Sigma_list, (list, tuple)) else Sigma_list
+
+            # Build per-view covariance block Σ_{ℓ,v}
+            Dv = C * H * W
+            if isinstance(Sigma_l, dict) and Sigma_l.get("type") == "lowrank":
+                U = np.asarray(Sigma_l["U"], dtype=np.float64)    # (D_total, r)
+                eig = np.asarray(Sigma_l["eig"], dtype=np.float64)  # (r,)
+                sigma2 = float(Sigma_l.get("sigma2", 0.0))
+
+                U_v = U[a:b, :]  # (D_v, r)
+                if U_v.shape[0] != Dv:
+                    raise RuntimeError(
+                        f"[recon] lowrank U slice has wrong length at level {l}, view '{view_name}'. "
+                        f"expected {Dv}, got {U_v.shape[0]}"
+                    )
+                # Σ_{ℓ,v} = U_v diag(eig) U_v^T + σ² I  (computed without forming full Σ_l)
+                Sv = (U_v * eig[np.newaxis, :]) @ U_v.T
+                if sigma2 > 0.0:
+                    Sv = Sv + sigma2 * np.eye(Dv, dtype=np.float64)
+            else:
+                S = np.asarray(Sigma_l, dtype=np.float64)
+                if S.ndim == 1:
+                    # Diagonal covariance: block is simply diag of the relevant entries
+                    diag_v = S[a:b]
+                    Sv = np.diag(diag_v)
+                else:
+                    Sv = S[a:b, a:b]
+
+            # Symmetrize for numerical safety
+            Sv = 0.5 * (Sv + Sv.T)
+
+            # Eigendecomposition of per-view block
+            w, V = np.linalg.eigh(Sv)  # ascending eigenvalues
+            if w.size == 0:
+                raise RuntimeError(f"[recon] Empty covariance block at level {l}, view '{view_name}'.")
+
+            # pc_index = 0 => largest eigenvalue
+            k = int(pc_index)
+            if k < 0 or k >= w.size:
+                raise RuntimeError(
+                    f"[recon] pc_index={pc_index} out of range for level {l}, "
+                    f"view '{view_name}' (dim={w.size})."
+                )
+            col = -1 - k  # 0 -> last, 1 -> second last, etc.
+            direction_np = V[:, col]
+            lam = float(max(w[col], 0.0))
+            step = float(pc_scale) * (lam ** 0.5 if lam > 0.0 else 0.0)
+
+            direction_t = torch.from_numpy(direction_np.astype(np.float32)).view(
+                1, C, H, W
+            ).to(z_l.device, z_l.dtype)
+
+            if pc_center.lower() == "mean":
+                base = mu_view.expand(B, C, H, W)
+            else:  # "sample"
+                base = z_l
+
+            z_l_edit = base + step * direction_t
+
+            print(
+                f"[recon] level {l}, view '{view_name}': PC{pc_index} "
+                f"lambda={lam:.3e}, step={step:.3e}, center={pc_center}"
+            )
+
         else:
             raise ValueError(
-                f"[recon] Unknown edit mode '{mode}', expected 'mean' or 'zero'."
+                f"[recon] Unknown edit mode '{mode}', expected 'mean', 'zero', or 'pc'."
             )
 
         z_out.append(z_l_edit)
@@ -1097,29 +1215,21 @@ def main_recon(argv=None):
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--devices", type=str, default="cuda:0")
     ap.add_argument("--out", type=str, required=True, help="Output PNG panel")
-
-    # Optional latent editing using a Gaussian model from gauss-fit
-    ap.add_argument(
-        "--gauss",
-        type=str,
-        default=None,
-        help="Optional Gaussian model (.npz or .pt) from gauss-fit for latent editing.",
-    )
-    ap.add_argument(
-        "--edit-levels",
-        type=str,
-        default="none",
-        help="Levels to project to the Gaussian mean, e.g. '0', '0,1,2', '0-2,4', or 'all'. "
-             "'none' (default) disables latent editing.",
-    )
-    ap.add_argument(
-        "--edit-what",
-        type=str,
-        choices=["mean", "zero"],
-        default="mean",
-        help="What to insert at selected levels: Gaussian mean ('mean') or zeros ('zero').",
-    )
-
+    ap.add_argument("--gauss", type=str, default=None,
+                    help="Optional Gaussian model (.npz or .pt) from gauss-fit for latent editing.")
+    ap.add_argument("--edit-levels", type=str, default="none",
+                    help="Levels to project to the Gaussian mean, e.g. '0', '0,1,2', '0-2,4', or 'all'. "
+                         "'none' (default) disables latent editing.")
+    ap.add_argument("--edit-what", type=str, choices=["mean", "zero", "pc"], default="mean",
+                    help=("What to insert at selected levels: Gaussian mean ('mean'), zeros ('zero'), "
+                          "or a principal-component shift ('pc')."))
+    ap.add_argument("--edit-pc-index", type=int, default=0, 
+                    help="Principal component index (0 = largest variance) within the selected view/level (for --edit-what pc).")
+    ap.add_argument("--edit-pc-scale", type=float, default=2.0,
+                    help="Scale k in ±k·σ along the chosen PC (for --edit-what pc). Use a negative value for the opposite direction.")
+    ap.add_argument("--edit-pc-center", type=str, choices=["sample", "mean"], default="sample",
+                    help=("Center for PC editing: 'sample' adds the PC shift to each sample's latent; "
+                          "'mean' starts from the Gaussian mean."))
     args = ap.parse_args(argv)
 
     device = torch.device(args.devices)
@@ -1224,11 +1334,20 @@ def main_recon(argv=None):
                     else:
                         levels.append(int(part))
                 # Clamp to valid level range
+                if max(levels) >= L:
+                    raise ValueError(f"edit-level exceeded max number of levels L={L}")
                 levels = sorted({l for l in levels if 0 <= l < L})
 
             if levels:
                 z_list_edit = _edit_latents_to_mean_for_view(
-                    z_list, gauss_blob, vname, levels_to_edit=levels, mode=args.edit_what
+                    z_list,
+                    gauss_blob,
+                    vname,
+                    levels_to_edit=levels,
+                    mode=args.edit_what,
+                    pc_index=getattr(args, "edit_pc_index", 0),
+                    pc_scale=getattr(args, "edit_pc_scale", 2.0),
+                    pc_center=getattr(args, "edit_pc_center", "sample"),
                 )
                 xh_edit = _decode_latents(model, z_list_edit, target_hw=(Hc, Wc))
                 edit_levels = levels
@@ -1254,6 +1373,10 @@ def main_recon(argv=None):
             "edit_mode": edit_mode,
             "max_abs_diff_edit": max_abs_diff_edit,
         }
+        if edit_mode == "pc":
+            meta_edit["edit_pc_index"] = getattr(args, "edit_pc_index", 0)
+            meta_edit["edit_pc_scale"] = getattr(args, "edit_pc_scale", 2.0)
+            meta_edit["edit_pc_center"] = getattr(args, "edit_pc_center", "sample")
 
     save_grid(panel, outp, nrow=ncol, target_hw=(Hc, Wc))
     print(f"[recon] wrote {outp}")
