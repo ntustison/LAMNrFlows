@@ -597,59 +597,6 @@ def resolve_ckpt_path(p: Path) -> Path:
         raise FileNotFoundError(f"Checkpoint not found: {p}")
     return p
 
-
-def load_weights_into_model(model, blob, view_idx: int, prefer_ema: bool = True):
-    def try_load(sd):
-        try:
-            model.load_state_dict(sd, strict=True)
-            return True, None
-        except Exception as e:
-            try:
-                model.load_state_dict(sd, strict=False)
-                return True, f"non-strict: {e}"
-            except Exception as e2:
-                return False, f"failed: {e2}"
-
-    def extract_sd(candidate):
-        if isinstance(candidate, dict):
-            if "state_dict" in candidate and isinstance(candidate["state_dict"], dict):
-                return candidate["state_dict"]
-            return candidate
-        return None
-
-    # Prefer EMA if present and valid; otherwise fall back automatically
-    if prefer_ema:
-        ema = blob.get("ema", None)
-        if isinstance(ema, (list, tuple)) and len(ema) > 0:
-            vidx = max(0, min(view_idx, len(ema) - 1))
-            sd = extract_sd(ema[vidx])
-            if sd is not None:
-                ok, note = try_load(sd)
-                if ok:
-                    return True, ("ema", note)
-            # else fall through
-
-    models_list = blob.get("models", None)
-    if isinstance(models_list, (list, tuple)) and len(models_list) > 0:
-        vidx = max(0, min(view_idx, len(models_list) - 1))
-        sd = extract_sd(models_list[vidx])
-        if sd is not None:
-            ok, note = try_load(sd)
-            if ok:
-                return True, ("models", note)
-
-    if isinstance(blob.get("state_dict"), dict):
-        ok, note = try_load(blob["state_dict"])
-        if ok:
-            return True, ("state_dict", note)
-
-    if isinstance(blob, dict) and all(isinstance(k, str) for k in blob.keys()) and any("." in k for k in blob.keys()):
-        ok, note = try_load(blob)
-        if ok:
-            return True, ("raw", note)
-
-    return False, ("none", "no recognizable weights in blob")
-
 # --------------------------- main ---------------------------
 def main_sample():
     ap = argparse.ArgumentParser("LAM‑Flow sample grid tool")
@@ -853,6 +800,69 @@ def main_sample():
             print(f"[ok] wrote: {out_path.with_suffix('.json')}")
         except Exception as e:
             print(f"[warn] could not write metadata json: {e}")
+
+
+def main_recon(argv=None):
+    ap = argparse.ArgumentParser("LAM‑Flow reconstruction tool (recon)")
+    ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint file or directory")
+    ap.add_argument("--manifest", type=str, required=True, help="CSV with per-view file paths")
+    ap.add_argument("--views", type=str, required=True, help="Comma list of views to reconstruct (e.g., T1,T2,FA)")
+    ap.add_argument("--view-index", type=int, default=0, help="Which single view's weights to load (0-based)")
+    ap.add_argument("--slice-axis", type=int, required=True)
+    ap.add_argument("--slice-index", type=int, required=True)
+    ap.add_argument("--batch", type=int, default=32)
+    ap.add_argument("--devices", type=str, default="cuda:0")
+    ap.add_argument("--out", type=str, required=True, help="Output PNG panel")
+    args = ap.parse_args(argv)
+
+    device = torch.device(args.devices)
+    ckpt_path = resolve_ckpt_path(Path(args.ckpt))
+    try:
+        blob = torch.load(ckpt_path, map_location=device, weights_only=True)
+    except TypeError:
+        blob = torch.load(ckpt_path, map_location=device)
+
+    cfg = blob.get("config", {})
+    Hc = int(cfg.get("H", 128)); Wc = int(cfg.get("W", 128))
+    model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc}, device=device)
+    model.eval()
+
+    manifest_path = Path(args.manifest)
+    with open(manifest_path, "r") as f:
+        header = [h.strip() for h in f.readline().strip().split(",")]
+        all_views = [v.strip() for v in args.views.split(",") if v.strip()]
+        if not set(all_views).issubset(set(header)):
+            missing = [v for v in all_views if v not in header]
+            raise RuntimeError(f"Views {missing} not found in manifest header: {header}")
+        v_idx_map = {v: header.index(v) for v in all_views}
+        rows = []
+        for line in f:
+            parts = [s.strip() for s in line.strip().split(",")]
+            if not parts or all(p == "" for p in parts):
+                continue
+            paths = [Path(parts[v_idx_map[v]]) for v in all_views]
+            rows.append(paths)
+
+    vname = all_views[int(args.view_index)]
+    vcol = [r[all_views.index(vname)] for r in rows]
+    ok, note = load_weights_into_model(model, blob, view_idx=all_views.index(vname), prefer_ema=True)
+    if not ok:
+        raise RuntimeError(f"Failed to load weights for view '{vname}': {note}")
+
+    xs = []
+    bs = max(1, int(args.batch))
+    for pth in vcol[:bs]:
+        xi = _read_image_any(pth, int(args.slice_axis), int(args.slice_index))
+        xi = torch.nn.functional.interpolate(xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False).squeeze(0)
+        xi = to01(xi.unsqueeze(0)).squeeze(0)
+        xs.append(xi)
+    xb = torch.stack(xs, dim=0).to(device=device, dtype=torch.float32)
+    xh = reconstruct_batch(model, xb)
+    panel = make_recon_panel(xb, xh)
+    outp = Path(args.out)
+    save_grid(panel, outp, nrow=3, target_hw=(Hc, Wc))
+    print(f"[recon] wrote {outp}")
+    return 0
 
 
 # ---------------------- gauss-fit (conditional Gaussian) ----------------------
@@ -1087,6 +1097,73 @@ def _save_gauss_npz(blob: Dict[str, Any], out_path: Path):
 
     np.savez_compressed(out_path, **pack)
 
+def load_weights_into_model(model, blob, view_idx: int, prefer_ema: bool = True,
+                            view_name: str | None = None, cfg_views: list[str] | None = None):
+    """
+    Robustly load weights for a given view into `model`.
+
+    Selection order:
+      (a) if prefer_ema: blob["ema"][slot]
+      (b) blob["models"][slot]
+      (c) blob["state_dict"]
+      (d) raw dict of param tensors
+    The `slot` comes from `cfg_views` name mapping if available, else `view_idx`.
+    """
+    def try_load(sd):
+        try:
+            model.load_state_dict(sd, strict=True)
+            return True, None
+        except Exception as e:
+            try:
+                model.load_state_dict(sd, strict=False)
+                return True, f"non-strict: {e}"
+            except Exception as e2:
+                return False, f"failed: {e2}"
+
+    def extract_sd(candidate):
+        if isinstance(candidate, dict):
+            if "state_dict" in candidate and isinstance(candidate["state_dict"], dict):
+                return candidate["state_dict"]
+            return candidate
+        return None
+
+    # map manifest name -> checkpoint slot if we know the training order
+    vidx_eff = int(view_idx)
+    if cfg_views and view_name in cfg_views:
+        vidx_eff = cfg_views.index(view_name)
+
+    # (a) EMA list
+    if prefer_ema and isinstance(blob.get("ema"), (list, tuple)) and len(blob["ema"]) > 0:
+        k = max(0, min(vidx_eff, len(blob["ema"]) - 1))
+        sd = extract_sd(blob["ema"][k])
+        if sd is not None:
+            ok, note = try_load(sd)
+            if ok:
+                return True, ("ema", f"slot={k}")
+
+    # (b) models list
+    if isinstance(blob.get("models"), (list, tuple)) and len(blob["models"]) > 0:
+        k = max(0, min(vidx_eff, len(blob["models"]) - 1))
+        sd = extract_sd(blob["models"][k])
+        if sd is not None:
+            ok, note = try_load(sd)
+            if ok:
+                return True, ("models", f"slot={k}")
+
+    # (c) single state_dict
+    if isinstance(blob.get("state_dict"), dict):
+        ok, note = try_load(blob["state_dict"])
+        if ok:
+            return True, ("state_dict", None)
+
+    # (d) raw dict with param keys
+    if isinstance(blob, dict) and all(isinstance(k, str) for k in blob.keys()) and any("." in k for k in blob.keys()):
+        ok, note = try_load(blob)
+        if ok:
+            return True, ("raw", None)
+
+    return False, ("none", "no recognizable weights in blob")
+
 def main_gauss_fit(argv: List[str] | None = None):
 
     def _sanitize_latents_array(X, cap_quantile=99.9, hard_cap=None):
@@ -1145,66 +1222,6 @@ def main_gauss_fit(argv: List[str] | None = None):
         if S.ndim == 1:
             return np.diag(S)
         return S
-
-    def load_weights_into_model(model, blob, view_idx: int, prefer_ema: bool = True,
-                                view_name: str | None = None, cfg_views: list[str] | None = None):
-        def try_load(sd):
-            try:
-                model.load_state_dict(sd, strict=True)
-                return True, None
-            except Exception as e:
-                try:
-                    model.load_state_dict(sd, strict=False)
-                    return True, f"non-strict: {e}"
-                except Exception as e2:
-                    return False, f"failed: {e2}"
-
-        def extract_sd(candidate):
-            if isinstance(candidate, dict):
-                if "state_dict" in candidate and isinstance(candidate["state_dict"], dict):
-                    return candidate["state_dict"]
-                return candidate
-            return None
-
-        # Map manifest view -> checkpoint slot by name if possible
-        vidx = int(view_idx)
-        if cfg_views and view_name in cfg_views:
-            vidx = cfg_views.index(view_name)
-
-        # 1) EMA (optional)
-        if prefer_ema:
-            ema = blob.get("ema", None)
-            if isinstance(ema, (list, tuple)) and len(ema) > 0:
-                vidx_eff = max(0, min(vidx, len(ema) - 1))
-                sd = extract_sd(ema[vidx_eff])
-                if sd is not None:
-                    ok, note = try_load(sd)
-                    if ok:
-                        return True, ("ema", f"slot={vidx_eff}")
-
-        # 2) Per-view models list
-        models_list = blob.get("models", None)
-        if isinstance(models_list, (list, tuple)) and len(models_list) > 0:
-            vidx_eff = max(0, min(vidx, len(models_list) - 1))
-            sd = extract_sd(models_list[vidx_eff])
-            if sd is not None:
-                ok, note = try_load(sd)
-                if ok:
-                    return True, ("models", f"slot={vidx_eff}")
-
-        # 3) Single state_dict
-        if isinstance(blob.get("state_dict"), dict):
-            ok, note = try_load(blob["state_dict"])
-            if ok:
-                return True, ("state_dict", None)
-
-        # 4) Raw dict with param keys
-        if isinstance(blob, dict) and all(isinstance(k, str) for k in blob.keys()) and any("." in k for k in blob.keys()):
-            ok, note = try_load(blob)
-            if ok:
-                return True, ("raw", None)
-
-        return False, ("none", "no recognizable weights in blob")
 
     def _scrub_row_outliers(z_per_view_per_level, per_view_paths, view_names, thresh=1e6):
         N = z_per_view_per_level[0][0].shape[0]
@@ -1460,6 +1477,10 @@ def main_gauss_fit(argv: List[str] | None = None):
                     Xc_clean, rank=int(args.rank),
                     sigma2=args.sigma2, extra_ridge=float(args.cov_lam)
                 )
+                if isinstance(Sigma, dict) and Sigma.get("type") == "lowrank":
+                    U = Sigma["U"]; eig = Sigma["eig"]; sigma2 = float(Sigma.get("sigma2", 0.0))
+                    print(f"[lowrank L{l}] eff_rank={U.shape[1]}  sum_eig={np.sum(eig):.3g}  sigma2={sigma2:.3g}")
+
             else:
                 _mu_unused, Sigma, _stats_unused = _fit_gaussian_blocks(
                     [Xc_clean],
@@ -1566,9 +1587,6 @@ def main_gauss_fit(argv: List[str] | None = None):
         with open(js_path, "w") as f:
             json.dump(js, f, indent=2)
         print(f"[ok] wrote summary JSON: {js_path}")
-
-
-
 
 
 def main_gauss_impute(argv=None):
@@ -1934,6 +1952,8 @@ def main_gauss_impute(argv=None):
     model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc}, device=device)
     _prime_if_needed(model, Hc, Wc, device=device)
 
+    cfg_views = list(cfg.get("views", [])) if isinstance(cfg.get("views"), (list, tuple)) else None
+
     # ------------------------------- gaussian ---------------------------------
     gauss_path = Path(args.gauss)
     g = _load_gaussian_model(gauss_path)                   # <-- ACTUALLY LOAD IT
@@ -2015,40 +2035,72 @@ def main_gauss_impute(argv=None):
     @torch.no_grad()
     def encode_view(vname: str):
         v_idx = view_index[vname]
-        ok, note = load_weights_into_model(model, blob, view_idx=v_idx, prefer_ema=False, view_name=vname, cfg_views=cfg_views)
+
+        # Fresh model instance for THIS view (mirrors gauss-fit)
+        mdl = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc}, device=device)
+        mdl.eval()
+        _prime_if_needed(mdl, Hc, Wc, device=device)
+
+        ok, note = load_weights_into_model(
+            mdl, blob, view_idx=v_idx, prefer_ema=True, view_name=vname, cfg_views=cfg_views
+        )
         if not ok:
             raise RuntimeError(f"Failed to load weights for view {v_idx} ({vname}): {note}")
+
         bs = max(1, int(args.batch))
-        acc = []
-        first = True
+
+        # Real-batch ActNorm warmup (safe no-op if helper missing)
+        try:
+            warm_n = min(bs, len(per_view_paths[v_idx]))
+            warm_xs = []
+            for pth in per_view_paths[v_idx][:warm_n]:
+                xi = _read_image_any(pth, int(args.slice_axis), int(args.slice_index))  # (1,h,w) in [0,1]
+                xi = torch.nn.functional.interpolate(
+                    xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False
+                ).squeeze(0)
+                xi = to01(xi.unsqueeze(0)).squeeze(0)  # match gauss-fit/train preprocessing
+                warm_xs.append(xi)
+            if warm_xs and "warmup_actnorm_with_real_batch" in globals():
+                xb_warm = torch.stack(warm_xs, dim=0).to(device=device, dtype=torch.float32)
+                warmup_actnorm_with_real_batch(mdl, xb_warm)
+        except Exception as _e:
+            print(f"[warn] warmup failed for view {v_idx} ({vname}): {_e}")
+
+        acc = None
         batch = []
+
         def flush():
-            nonlocal acc, batch, first
-            xb = torch.stack(batch, dim=0).to(device=device, dtype=torch.float32)  # already [0,1]
+            nonlocal acc, batch
+            xb = torch.stack(batch, dim=0).to(device=device, dtype=torch.float32)
             batch = []
-            if hasattr(model, "inverse_and_log_det"):
-                z, _ = model.inverse_and_log_det(xb)   # x->z
-            elif hasattr(model, "inverse"):
-                z, _ = model.inverse(xb)
-            else:
-                raise RuntimeError("Model lacks inverse mapping")
+            with torch.no_grad(), torch.amp.autocast(
+                device_type=("cuda" if device.type == "cuda" else "cpu"), enabled=False
+            ):
+                if hasattr(mdl, "inverse_and_log_det"):
+                    z, _ = mdl.inverse_and_log_det(xb)  # x->z
+                elif hasattr(mdl, "inverse"):
+                    z, _ = mdl.inverse(xb)
+                else:
+                    raise RuntimeError("Model lacks inverse mapping")
             zl = _flatten_latents_by_level(z)  # list of (B, D_l)
-            if first:
+            if acc is None:
                 acc = [[] for _ in range(len(zl))]
-                first = False
             for li, arr in enumerate(zl):
                 acc[li].append(arr.detach().cpu())
+
         for pth in per_view_paths[v_idx]:
             xi = _read_image_any(pth, int(args.slice_axis), int(args.slice_index))  # (1,h,w) in [0,1]
             xi = torch.nn.functional.interpolate(
                 xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False
             ).squeeze(0)
+            xi = to01(xi.unsqueeze(0)).squeeze(0)  # explicit, like gauss-fit
             batch.append(xi)
             if len(batch) >= bs:
                 flush()
         if batch:
             flush()
-        return [torch.cat(chunks, dim=0) for chunks in acc]  # per-level (N, D_l(v))
+        return [torch.cat(chunks, dim=0) for chunks in acc]
+
 
     obs_latents = {v: encode_view(v) for v in obs}
 
@@ -2068,9 +2120,6 @@ def main_gauss_impute(argv=None):
 
     for tname in tgt:
         t_vidx = view_index[tname]
-        ok, note = load_weights_into_model(model, blob, view_idx=t_vidx, prefer_ema=True)
-        if not ok:
-            raise RuntimeError(f"Failed to load weights for target view {t_vidx} ({tname}): {note}")
 
         per_level_U = []
         for l in range(L):
@@ -2178,7 +2227,20 @@ def main_gauss_impute(argv=None):
             per_level_U.append(torch.from_numpy(zU).float())
 
         # ----------------------------- decode (z->x) ---------------------------
-        mdl_dev = next(model.parameters()).device
+        # Build a fresh target model to avoid ActNorm contamination from prior loads
+        t_vidx = view_index[tname]
+        mdl_t = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc}, device=device)
+        mdl_t.eval()
+        _prime_if_needed(mdl_t, Hc, Wc, device=device)
+
+        # name-aware loading aligned with gauss-fit
+        ok, note = load_weights_into_model(
+            mdl_t, blob, view_idx=t_vidx, prefer_ema=True, view_name=tname, cfg_views=cfg_views
+        )
+        if not ok:
+            raise RuntimeError(f"Failed to load weights for target view {t_vidx} ({tname}): {note}")
+
+        mdl_dev = next(mdl_t.parameters()).device
         zU_tensors = []
         for l, flat in enumerate(per_level_U):
             C, H, W = shapes_by_view[view_index[tname]][l]
@@ -2188,10 +2250,10 @@ def main_gauss_impute(argv=None):
             zU_tensors.append(zL)
         z_pack = zU_tensors if len(zU_tensors) > 1 else zU_tensors[0]
 
-        if hasattr(model, "forward_and_log_det"):
-            xh, _ = model.forward_and_log_det(z_pack)
-        elif hasattr(model, "forward"):
-            xh, _ = model.forward(z_pack)
+        if hasattr(mdl_t, "forward_and_log_det"):
+            xh, _ = mdl_t.forward_and_log_det(z_pack)
+        elif hasattr(mdl_t, "forward"):
+            xh, _ = mdl_t.forward(z_pack)
         else:
             raise RuntimeError("Model lacks forward mapping")
 
@@ -2205,67 +2267,6 @@ def main_gauss_impute(argv=None):
         print(f"[gauss-impute] wrote {N} images for target={tname} -> {out_dir}")
 
 
-def main_recon(argv=None):
-    ap = argparse.ArgumentParser("LAM‑Flow reconstruction tool (recon)")
-    ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint file or directory")
-    ap.add_argument("--manifest", type=str, required=True, help="CSV with per-view file paths")
-    ap.add_argument("--views", type=str, required=True, help="Comma list of views to reconstruct (e.g., T1,T2,FA)")
-    ap.add_argument("--view-index", type=int, default=0, help="Which single view's weights to load (0-based)")
-    ap.add_argument("--slice-axis", type=int, required=True)
-    ap.add_argument("--slice-index", type=int, required=True)
-    ap.add_argument("--batch", type=int, default=32)
-    ap.add_argument("--devices", type=str, default="cuda:0")
-    ap.add_argument("--out", type=str, required=True, help="Output PNG panel")
-    args = ap.parse_args(argv)
-
-    device = torch.device(args.devices)
-    ckpt_path = resolve_ckpt_path(Path(args.ckpt))
-    try:
-        blob = torch.load(ckpt_path, map_location=device, weights_only=True)
-    except TypeError:
-        blob = torch.load(ckpt_path, map_location=device)
-
-    cfg = blob.get("config", {})
-    Hc = int(cfg.get("H", 128)); Wc = int(cfg.get("W", 128))
-    model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc}, device=device)
-    model.eval()
-
-    manifest_path = Path(args.manifest)
-    with open(manifest_path, "r") as f:
-        header = [h.strip() for h in f.readline().strip().split(",")]
-        all_views = [v.strip() for v in args.views.split(",") if v.strip()]
-        if not set(all_views).issubset(set(header)):
-            missing = [v for v in all_views if v not in header]
-            raise RuntimeError(f"Views {missing} not found in manifest header: {header}")
-        v_idx_map = {v: header.index(v) for v in all_views}
-        rows = []
-        for line in f:
-            parts = [s.strip() for s in line.strip().split(",")]
-            if not parts or all(p == "" for p in parts):
-                continue
-            paths = [Path(parts[v_idx_map[v]]) for v in all_views]
-            rows.append(paths)
-
-    vname = all_views[int(args.view_index)]
-    vcol = [r[all_views.index(vname)] for r in rows]
-    ok, note = load_weights_into_model(model, blob, view_idx=all_views.index(vname), prefer_ema=True)
-    if not ok:
-        raise RuntimeError(f"Failed to load weights for view '{vname}': {note}")
-
-    xs = []
-    bs = max(1, int(args.batch))
-    for pth in vcol[:bs]:
-        xi = _read_image_any(pth, int(args.slice_axis), int(args.slice_index))
-        xi = torch.nn.functional.interpolate(xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False).squeeze(0)
-        xi = to01(xi.unsqueeze(0)).squeeze(0)
-        xs.append(xi)
-    xb = torch.stack(xs, dim=0).to(device=device, dtype=torch.float32)
-    xh = reconstruct_batch(model, xb)
-    panel = make_recon_panel(xb, xh)
-    outp = Path(args.out)
-    save_grid(panel, outp, nrow=3, target_hw=(Hc, Wc))
-    print(f"[recon] wrote {outp}")
-    return 0
 
 if __name__ == "__main__":
     import sys, inspect
