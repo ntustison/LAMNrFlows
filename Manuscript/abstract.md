@@ -3,26 +3,25 @@
 
 # Abstract {-}
 
-Normalizing flows are invertible, exact-likelihood generative models whose
-multiscale latent representations are well suited to multimodal medical imaging
-applications. While diffusion models have dominated recent research efforts in
-image synthesis, the developmental trajectory of normalizing flows from
-reversible networks through NICE/RealNVP to Glow and beyond offers a
-complementary path that provides a tractable, exact bijective mapping between
-images and their representative latent spaces. Building on this foundational
-work, we propose the use of single multiflow, multiscale latent systems for
-medical image imputation and synthesis. Specifically, using Glow architectures
-with explicit per-level latent access, we fit per-level Gaussian statistics
-across the multi-view cohort and, for any observed subset of modalities, compute
-a closed-form joint posterior over the missing latents that captures cross-modal
-covariance.  The exact inverse then yields joint imputations that are
-coherent across outputs while preserving estimated likelihoods for
-comparison and uncertainty analyses. We further introduce per-level latent
-alignment across modalities under alignment constraints provided by a family of
-possible objectives: Pearson, Barlow Twins, VICReg, InfoNCE, and HSIC.  Optional
-features include CCA-guided subspaces and uncertainty-aware weighting to account
-for aleatoric variability. Together, these components provide a flexible
-framework for multimodal image modeling that scales to medical volumes and
-emphasizes exactness, interpretability, and reproducibility. We provide
-open-source implementations and demonstrate cross-modal synthesis and imputation
-in various medical imaging contexts.
+Normalizing flows provide exact-likelihood, bijective mappings between images
+and latents, making them highly suitable for multimodal representation learning.
+We introduce a general framework, Latent-Aligned Multimodal Normalizing Flows,
+that learns per-level shared and private latent structure across modalities
+while retaining Glow-style, multiscale latent access for analysis and editing.
+Given subject-matched batches, we impose latent-alignment constraints (e.g., Pearson,
+Barlow Twins, VICReg, InfoNCE, HSIC) to learn shared multiscale latent spaces
+and optionally discover shared subspaces via CCA/HSIC screening. On top of
+maximum-likelihood training, we provide a conditional Gaussian inference framework 
+that estimates per-level moments and yields closed-form posteriors over arbitrary
+subsets of latents. This enables principled cross-view imputation and, more
+generally, latent manipulations that preserve anatomy while modulating
+modality-specific contrast or confounders. A practical consequence is the
+construction of shared-latent images (SLIs), i.e., reconstructions in which private
+latents are replaced by their conditional means.  This provides contrast-robust
+surrogates for downstream tasks such as cross-modal registration where transforms
+are estimated on SLIs and then applied to the original data. The same machinery
+supports synthesis, harmonization, uncertainty analysis, and interventional
+latent edits (i.e., model-based counterfactuals) within a single, exact, and
+interpretable model. We release open-source implementations and illustrate the
+framework on multimodal MRI cohorts, highlighting how latent alignment enables
+general-purpose reasoning and editing across views.

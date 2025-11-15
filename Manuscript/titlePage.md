@@ -11,7 +11,7 @@ $ $
 
 \LARGE
 
-{\bf Latent-Aligned Normalizing Flows for Multimodal Medical Image Imputation and Synthesis}
+{\bf Latent-Aligned Multimodal Normalizing Flows}
 
 \vspace{1.0 cm}
 

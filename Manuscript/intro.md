@@ -5,128 +5,185 @@
 
 Medical imaging data and their representative latent spaces are essential for
 insight into biological structure and function. Deep learning workflows have
-become foundational for learning and leveraging such spaces. Yet many common
-approaches are opaque to data likelihoods and lack invertibility, complicating
-access between image space and latent space. Consideration of these issues
-is crucial in multimodal medical imaging studies, where contrasts are often
-missing and downstream analyses depend on calibrated comparisons and coherent
-cross-modal reconstructions. Normalizing flows [@papamakarios2021nfreview]
-provide potential modeling approaches to address these needs by coupling
-expressive latents with exact likelihoods and single-pass inversion. Certain
-normalizing flow variants also yield accessible multiscale latents that can be
-aligned across modalities and precisely decoded back to image space for 
-further research queries.
+become foundational for learning and leveraging such spaces. Many common
+approaches, however, are opaque to data likelihoods.  They also lack
+invertibility, complicating access between image space and latent space. These
+limitations become acute in multimodal studies, where contrasts are potentially
+missing or heterogeneous and downstream analyses depend on calibrated
+comparisons and coherent cross-modal reconstructions.
 
-## Medical image imputation / cross-modal synthesis
+## Normalizing flows as a foundation
 
-Early approaches pre-dating deep learning framed cross-modal synthesis (e.g.,
-MR$\rightarrow$CT) and attenuation-correction as either
-segmentation-/atlas-based mapping or patch-based learning from paired MR/CT
-exemplars. Typical pipelines registered a subject to one or more atlases,
-transferred tissue labels or Hounsfield surrogates, and then refined with local
-patch regressors or random forests to better handle bone/air ambiguity and
-intensity/tissue mismatch
-[@andreasen2015patchpct;@torrado2016fastpatchpct;@yang2017rfpatchpct;@wu2016localdiffeo].
-These methods set important baselines and established evaluation practices in
-radiotherapy planning and PET/MR, but accuracy depended on registration quality,
-hand-tuned features, and limited modeling flexibility for non-linear cross-modal
-relationships.
+Normalizing flows furnish exact-likelihood, bijective mappings between images
+and latent variables, together with single-pass inversion and per-level access
+to multiscale latents [@papamakarios2021nfreview; @kobyzev2020nfsurvey].
+Among these, Glow-style architectures expose latent variables at each scale that
+can be probed, constrained, and edited before precise decoding to image space
+[@kingma2018glow]. This makes flows a natural substrate for multimodal
+representation learning in which image- and latent-space reasoning remain
+tightly coupled. Recent large-scale results further demonstrate that flows can
+scale in likelihood and sample quality at resolutions relevant to modern
+imaging, strengthening their role as first-class generative models rather than
+mere surrogates [@croitoru2023diffusion_vision_survey; @zhai2024tarflow; @gu2025starflow].
 
-With the advent of deep learning, supervised CNNs (typically U-Net) became the
-default for synthetic CT generation and related imputation tasks, showing
-improved performance with paired MR/CT data [@han2017dcnn;@florkow2020mrm].
-Unpaired image-translation emerged via adversarial learning (CycleGAN and
-structural-consistency variants) for MR$\leftrightarrow$CT and other modality
-pairs, improving realism while explicitly encouraging anatomy preservation
-[@lei2019densecyclegan;@yang2018structurecyclegan]. In parallel, proposed
-workflows that accept missing modalities at inference without explicit synthesis
-(e.g., HeMIS's latent ``mean-of-modalities'' fusion) provided robust
-alternatives [@havaei2016hemis]. Comprehensive reviews summarize these deep
-learning-based methods and their clinical contexts [@wang2021medimgsynth].
+## The LAM-Flow framework: learning shared multiscale latent spaces
 
-Most recently, diffusion models have been adapted to medical imputation
-settings, offering strong generative priors and uncertainty handling. For
-example, ReMiND (Recovery of Missing Neuroimaging using Diffusion Models)
-targets longitudinal MRI recovery of missing visits via conditional diffusion
-[@yuan2024remind].  Domain reviews in reconstruction discuss how diffusion-based
-priors can mitigate domain shift and quantify uncertainty which are also
-relevant to translation/imputation [@webber2024bjrai].
+We develop a general systems view—*Latent-Aligned Multimodal Normalizing
+Flows (LAM-Flow)*—that leverages the multiscale structure of flows to learn
+*shared* and *private* latent components across modalities for matched
+subjects. A subject’s multiscale latents are treated as structured random
+variables: some channels encode anatomy/geometry that are expected to be common
+across modalities, while others capture modality-specific factors (contrast,
+site, artifacts, or pathology-driven appearance). Using matched subjects, we
+impose latent-alignment constraints (e.g., Barlow Twins, VICReg, InfoNCE, HSIC)
+on designated shared latent channels at each scale and optionally discover
+shared subspaces via CCA/HSIC screening
+[@zbontar2021barlow; @bardes2021vicreg; @oord2018cpc; @gretton2005hsic]. Because
+flows are exactly bijective, alignment acts where it matters most—directly on
+the latents that will be decoded back to images—rather than on proxy embeddings
+that require separate decoders or heuristics.
 
-## Normalizing flows 
+Beyond maximum-likelihood training, we introduce a *conditional Gaussian
+inference* layer that estimates per-level moments and yields closed-form
+posteriors over arbitrary latent subsets
+[@Murphy2012ML; @bishop2006prml]. This layer enables subject-specific latent
+manipulations that preserve anatomy (by holding shared latents fixed) while
+modulating modality-specific factors (by editing private latents). A concrete
+instantiation is the construction of *shared-latent images (SLIs)*:
+reconstructions in which private latents are replaced by their conditional means
+given the shared latents. SLIs function as *contrast-robust surrogates* that
+can simplify downstream tasks—most notably cross-modal registration—after which
+the estimated transforms are faithfully applied to the original data to
+preserve native intensities. The same machinery supports cross-view imputation
+as a special case, scanner/site harmonization, uncertainty analysis via exact
+log-likelihoods, and controlled “what-if” interventional latent edits
+(counterfactuals in the model sense), all within a single, exact, and
+interpretable framework that scales to 3-D volumes.
 
-Normalizing flows emerged as a practical class of invertible generative models
-approximately a decade ago.  Although other classes of invertible (or
-approximately invertible) architectures were developed in parallel
-[@gomez2017revnet;@jacobsen2018irevnet], such networks were not designed for
-density modeling with exact likelihoods.  An early pioneer, Non-linear
-Independent Components Estimation (NICE) [@dinh2014nice], demonstrated that
-features can be split into two parts with one half "nudging" the other with a
-learned shift.  This keeps density computation simple while guaranteeing an
-exact inverse. Variational flows broadened this idea by stacking small,
-invertible "warps" that are easy to compute [@rezende2015variational]. RealNVP
-added learned scaling in addition to shifting and arranged the model across
-multiple resolutions, improving modeling while keeping computations efficient
-[@dinh2016realnvp]. In parallel, Inverse Autoregressive Flow (IAF) and Masked
-Autoregressive Flow (MAF) explored flows which explored the trade-off between
-fast sampling and fast likelihood evaluation
-[@kingma2016iaf;@papamakarios2017maf].
+## Related work and positioning
 
-The original Glow architecture consolidated these ideas for large images with
-data-dependent ActNorm, invertible $1\times1$ convolutions, and a clean
-multiscale design, yielding strong likelihoods and single-pass inversion
-[@kingma2018glow]. Subsequent work broadened this architectural family. Flow++
-improved sample quality via variational dequantization and richer coupling
-transforms [@ho2019flowpp], Neural Spline Flows replaced affine transforms with
-monotonic splines for greater flexibility [@durkan2019nsf], Residual Flows
-enforced Lipschitz constraints for stability in deep stacks
-[@behrmann2019resflow], and FFJORD introduced continuous-time flows with
-unbiased likelihood estimates via Hutchinson trace estimators
-[@grathwohl2019ffjord]. Continuous-time variants (e.g., continuous normalizing
-flows, flow-matching) are related but generally lack the same one-shot inverse
-and straightforward multiscale architectures that are leveraged for analytics
-and imputation.  Surveys synthesize these developments and map the trade-offs
-across density estimation, sampling, and invertibility
-[@kobyzev2020nfsurvey;@papamakarios2021nfreview].
+### Shared/private multimodal representations (primarily VAE- and GAN-based)
 
-More recent work proposes flow-based models that operate at the same resolution
-and scale that popularized diffusion models
-[@croitoru2023diffusion_vision_survey].  TarFlow (Transformer Autoregressive
-Flow) shows that normalizing flows can achieve state-of-the-art image
-likelihoods and diffusion-comparable sample quality using autoregressive
-transformers and a few key training protocols [@zhai2024tarflow]. STARFlow builds
-on this with a scalable latent-space design and guidance mechanisms, reporting
-competitive high-resolution synthesis (class-conditional and text-conditional)
-that explicitly benchmarks against diffusion while retaining exact likelihood
-training [@gu2025starflow].
+A substantial multimodal literature explicitly splits representations into
+*shared* versus *modality-specific* factors so that transferable information can
+be exploited while preserving view-unique content. In medical imaging,
+Chartsias *et al.* develop a modality-invariant latent fused from multiple MR
+sequences and demonstrate disentanglement between anatomy and modality factors,
+with downstream benefits to segmentation and cross-modality generation
+[@Chartsias2018MILR; @Chartsias2019SDNet]. More general multimodal VAE
+families, such as MMVAE (mixture-of-experts) and MoPoE-VAE (mixture-of-products
+of experts), formalize coherent joint and conditional generation across
+modalities—often with an implicit division between shared and private parts
+[@Shi2019MMVAE; @Sutter2021MoPoE]. These approaches are directly relevant
+conceptually, but they (i) are not *invertible* in pixel space, (ii) rely on
+approximate likelihoods, and (iii) do not expose clean, per-level multiscale
+latents that can be edited and then exactly decoded. LAM-Flow keeps the
+shared/private spirit but instantiates it in a bijective model with exact
+log-likelihoods and Glow-style multiscale access, which matters for per-level
+conditioning and surgical latent manipulations that invert precisely.
 
-## Contribution
+### Latent editing and counterfactual manipulation
 
-Prior published synthesis/imputation frameworks are configured as one-to-one or
-many-to-one mappings.  They typically generate a single target contrast even
-when trained for multiple targets and rarely model the joint conditional across
-all missing contrasts. We instead contextualize modalities within a single
-multiflow, multiscale latent system. Using the Glow architecture with multi-scale
-access, we fit per-level Gaussian statistics and, given any observed subset,
-compute a closed-form joint posterior over the missing latents that captures
-cross-modal covariance. For $M$ modalities, a single, exact inverse then yields 
-$\mathcal{O} \rightarrow \mathcal{U}$ imputations, where $\mathcal{O}$ is the 
-set of observed modalities and $\mathcal{U}$ is the set of missing modalities.
-These imputations are jointly coherent across all requested outputs, while
-preserving calibrated likelihoods for principled comparison and uncertainty
-reporting.
+A parallel line of work explores *editing* latent codes to obtain “cleaner”
+images or controlled semantic changes. StyleFlow, for instance, maps entangled
+StyleGAN codes through *conditional continuous normalizing flows* to achieve
+attribute-conditioned edits (pose, illumination, age), a concrete precedent for
+flow-based controlled latent traversal—even if the underlying generator is a
+GAN rather than a flow in pixel space [@Abdal2021StyleFlow]. Medical imaging has
+also investigated counterfactual or pathology-aware latent edits in GAN spaces,
+often for augmentation or interpretability; however, exact invertibility of the
+full image model is typically absent. LAM-Flow differs in that edits occur
+*inside* a fully invertible model whose latents are tied to exact likelihoods,
+and edits can be per-scale and per-subspace (shared vs private), enabling SLIs
+and uncertainty-aware manipulations via closed-form conditional Gaussians.
 
-We adopt a Glow-style discrete flow [@kingma2018glow] because our setting
-prioritizes exact inversion, explicit log-likelihoods, and analyzable multiscale
-latents for medical images, in contrast to alternatives that typically forgo one
-or more of these properties in the interest of alternative objectives.
-Concretely, we provide a robust open-source implementation (2-D/3-D) with
-ActNorm, invertible $1\times1(\times1)$ convolutions, corrected reshape
-orderings, stable log determinant bookkeeping, and a comprehensive command-line
-interface. We also enable per-level latent alignment across modalities via
-multiple possible alignment modeling objectives (Pearson, Barlow Twins, VICReg,
-InfoNCE, HSIC) with an optional CCA-guided subspace. Learned relative weighting
-of the individual terms within the multimodal imputation objective is used  to
-account for aleatoric variability. The result is a flexible, robust, and
-open-source framework for within-subject multimodal modeling that scales
-predictably to 2-D/3-D data and emphasizes exactness, interpretability, and
-reproducibility.
+### Flow-based cross-modal relations
+
+Flow-based conditional modeling has been used for cross-modality transfer.
+DUAL-GLOW couples two flows (e.g., MR and PET) with an auxiliary relation
+network to model conditional distributions in latent space [@sun2019dualglow].
+This is an architectural cousin to conditional reasoning in flows, but it does
+not perform per-level alignment across modalities nor the shared/private
+decomposition operationalized here for registration via SLIs. More broadly,
+modern flow families (e.g., Flow++, Neural Spline Flows, residual and
+continuous-time flows) have improved flexibility and stability
+[@ho2019flowpp; @durkan2019nsf; @behrmann2019resflow; @grathwohl2019ffjord], and
+recent scaling results (TarFlow, STARFlow) reinforce flows as viable foundations
+when invertibility, exact likelihoods, and latent access are central
+[@zhai2024tarflow; @gu2025starflow].
+
+### Cross-modal synthesis and missing-modality robustness (outside flows)
+
+Historically, cross-modality synthesis progressed from atlas/patch pipelines to
+supervised U-Nets and then to unpaired adversarial methods (CycleGAN variants)
+with structure-consistency constraints to preserve anatomy
+[@han2017dcnn; @florkow2020mrm; @yang2018structurecyclegan; @lei2019densecyclegan].
+HeMIS is notable for operating with any subset of inputs at test time via a
+learned “mean-of-modalities” fusion rather than explicit synthesis
+[@havaei2016hemis]. Diffusion models add uncertainty-aware sampling for
+imputation and reconstruction, though they typically forgo one-shot inversion
+and per-level latent access
+[@croitoru2023diffusion_vision_survey; @yuan2024remind; @webber2024bjrai].
+LAM-Flow keeps the “reason across available views” philosophy but supplies a
+*closed-form* conditional posterior for unobserved latents *at each scale*, a
+capability specific to the multiscale flow setting with alignment.
+
+### Registration via modality-invariant spaces and synthesis-aided alignment
+
+Several works aim to simplify multimodal registration by (i) learning contrast-
+invariant structural representations and registering *in that space*, or (ii)
+synthesizing a target-like image and registering *there*. For (i), recent work
+learns modality-agnostic structural image representations to reduce cross-modal
+registration to a near-monomodal problem—resonant with the SLI idea, but
+implemented as a forward encoder rather than an invertible multiscale flow
+[@Mok2024ModalityAgnosticRep]. Other approaches enforce diffeomorphic,
+modality-invariant objectives in learned feature spaces
+[@Qiu2021ModalityInvariantReg]. For (ii), many pipelines synthesize CT from MR
+(or vice versa) and then run conventional registration; others rely on
+contrast-agnostic metrics (e.g., mutual information). LAM-Flow’s shared-latent
+images sharpen the representation route: instead of a learned *descriptor*
+space, we generate an *image-space* surrogate reconstructed *from only the
+shared subspace* (replacing private latents by conditional means). This
+preserves anatomical geometry while dampening modality-specific contrast or
+confounders—exactly what one wants for robust cross-modal registration—yet
+remains fully invertible with calibrated likelihoods.
+
+## Flow modeling background in brief
+
+The broader evolution of invertible models situates our foundation. Early
+invertible networks (RevNets, i-RevNets) demonstrated reversibility but did not
+target exact density modeling [@Gomez2017RevNet; @Jacobsen2018iRevNet]. NICE
+introduced additive coupling with a tractable Jacobian [@dinh2014nice],
+variational flows stacked simple invertible transformations
+[@rezende2015variational], and RealNVP added affine coupling in a multiscale
+architecture to improve expressivity while retaining computational efficiency
+[@dinh2016realnvp]. IAF and MAF explored trade-offs between fast sampling and
+fast likelihood evaluation [@kingma2016iaf; @papamakarios2017maf]. Glow
+consolidated a practical design for large images using data-dependent ActNorm,
+invertible $1{\times}1$ convolutions, and a clean multiscale layout
+[@kingma2018glow]. Subsequent work augmented flexibility and stability
+(Flow++ [@ho2019flowpp], Neural Spline Flows [@durkan2019nsf], Residual Flows
+[@behrmann2019resflow], FFJORD [@grathwohl2019ffjord]); surveys provide broader
+context [@papamakarios2021nfreview; @kobyzev2020nfsurvey]. In this landscape,
+flows remain distinctive in offering exact likelihoods, a one-shot inverse, and
+analyzable multiscale latents—properties we exploit not only for generation but
+for multimodal reasoning and editing on shared multiscale latent spaces.
+
+## Practical scope of this work
+
+We present an application-agnostic system in which latent alignment is
+first-class: a multiscale flow learns shared and private structure across
+modalities for matched subjects; per-level moments are estimated to enable
+closed-form, subject-specific latent inference; and edits in latent space are
+decoded exactly back to images. Registration, harmonization, and imputation are
+treated as uses of the same mechanism rather than separate models or objectives.
+We provide an open-source implementation for 2-D and 3-D medical volumes with
+Glow-style components (ActNorm, invertible $1{\times}1(\times1)$ convolutions),
+corrected reshape orderings, and stable log-determinant bookkeeping, together
+with evaluation protocols that emphasize exactness, interpretability, and
+reproducibility. In doing so, the proposed *Latent-Aligned Multimodal
+Normalizing Flows* framework positions normalizing flows not merely as
+generators, but as systems for learning, exposing, and manipulating shared
+multiscale latent spaces across modalities—thereby simplifying downstream
+multimodal tasks while preserving a calibrated, invertible link to the
+underlying data.
