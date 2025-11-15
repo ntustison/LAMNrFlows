@@ -158,6 +158,56 @@ as a latent-space deviation from the learned normal manifold and move it back
 toward typical configurations, yielding lesion-suppressed surrogates without
 training a separate inpainting network.
 
+### Latent-space templates and relation to Fréchet means in computational anatomy
+
+Classical computational anatomy defines a population “template” as a Fréchet mean in a nonlinear shape–intensity space. Given a set of images \(\{x_i\}\) and a diffeomorphism group \(\mathcal{G}\) acting on them, template estimation proceeds by finding a reference \(T\) and subject-specific deformations \(\{\phi_i\in\mathcal{G}\}\) that minimize an energy of the form  
+\[
+T^\star \approx \arg\min_T \sum_i d\big(x_i, T\circ\phi_i\big)^2,
+\]
+where \(d(\cdot,\cdot)\) is an image similarity metric (e.g., cross-correlation) and \(\mathcal{G}\) is endowed with a Riemannian structure. Algorithms such as SyGN/ANTs iteratively update both the current template and diffeomorphic transforms, yielding an estimator of the Fréchet mean in a quotient space of images modulo deformations. This template lives on the orbit of the data under \(\mathcal{G}\) and is interpreted as a mean shape with mean intensity in the chosen atlas space.
+
+While this construction is geometrically natural, it depends on the choice of metric and group action, and the Fréchet mean in quotient spaces can exhibit bias and inconsistency when variability is high or the template is strongly folded by the group action. These issues have motivated alternative formulations, including Bayesian template estimation and explicit modeling of shape and intensity variability around the template.
+
+In our framework, we propose an alternative but complementary notion of a template based on a generative latent representation. For each modality, we train a multiscale normalizing flow that provides a bijection between images and latents,  
+\[
+f^{(m)}: x^{(m)} \leftrightarrow z^{(m)},
+\]
+and we fit a Gaussian model to the multilevel latents across subjects,
+\[
+z = [z^{(1)};\dots;z^{(M)}] \sim \mathcal{N}(\mu,\Sigma),
+\]
+with parameters estimated from held-out training latents. This construction endows the cohort with an explicit Euclidean latent coordinate system in which the distribution is approximately Gaussian by design.
+
+A **latent-space template** for modality \(m\) is then obtained by taking the Gaussian mean for that modality and decoding it through the flow,
+\[
+T_{\text{lat}}^{(m)} \;=\; \big(f^{(m)}\big)^{-1}\!\big(\mu^{(m)}\big).
+\]
+Here \(\mu^{(m)}\) is the concatenation of the mean latent blocks for modality \(m\) across all scales. This template can be viewed as a Fréchet mean with respect to the *Euclidean* metric in latent space, transported back to image space by the learned generative map. It differs from the classical Fréchet mean in image/shape space in two important ways:
+
+1. **Geometry**: the averaging is performed in a linear latent space where distances reflect the inductive biases of the flow (e.g., multiscale structure, alignment constraints) rather than in the nonlinear quotient space of images modulo deformations.
+2. **Population alignment**: if the training data are already mapped into a common atlas space (e.g., via ANTs), the template \(T_{\text{lat}}^{(m)}\) can be interpreted as a “mean atlas image” whose geometry is implicitly regularized by the flow’s likelihood and inductive structure, rather than by an explicit group action.
+
+Because the flow is nonlinear, \(T_{\text{lat}}^{(m)} = f^{(m)-1}(\mu^{(m)})\) is **not** equal in general to the pixel-wise mean image \(\mathbb{E}[x^{(m)}]\). To bridge this gap, we also consider a **Monte Carlo template** defined by sampling latents from the fitted Gaussian and averaging their reconstructions:
+\[
+\tilde{T}_{\text{MC}}^{(m)} \;=\; \frac{1}{K}\sum_{k=1}^{K} \big(f^{(m)}\big)^{-1}\!\big(z_k^{(m)}\big), \quad z_k \sim \mathcal{N}(\mu,\Sigma).
+\]
+This estimator approximates \(\mathbb{E}[x^{(m)}]\) under the generative model and is invariant to the particular choice of latent coordinate system as long as the Gaussian fit is fixed. Comparing \(T_{\text{lat}}^{(m)}\) and \(\tilde{T}_{\text{MC}}^{(m)}\) provides a direct measure of how strongly nonlinear the decoder is in regions of high probability mass: if the model is close to linear around \(\mu\), the two templates are nearly indistinguishable; large discrepancies highlight directions where curvature in the decoder or heavy-tailed latent structure matter.
+
+This latent view also naturally recovers **template modes of variation**. The eigen-decomposition of the Gaussian covariance yields principal directions \(\{q_k\}\) with eigenvalues \(\{\lambda_k\}\). For a chosen modality \(m\), we can construct deformations of the latent template
+\[
+z^{(m)}(\alpha,k) = \mu^{(m)} + \alpha \sqrt{\lambda_k}\, q_k^{(m)}, \quad \alpha \in \mathbb{R},
+\]
+and visualize \(\big(f^{(m)}\big)^{-1}\big(z^{(m)}(\alpha,k)\big)\) for \(\alpha=\pm 1,\pm 2\). These correspond to “±standard deviation” perturbations of the template along dominant directions of population variability, analogous to PCA-based modes in classical shape analysis or statistical atlases, but now operating in a generative latent coordinate system coupled across modalities via the joint Gaussian.
+
+Placed in the broader context of template building, our approach does not replace diffeomorphic Fréchet means; rather, it offers a complementary, model-based notion of a template:
+
+- When the input images are first mapped into a common atlas space using a traditional SyGN-style pipeline, the latent-space and Monte Carlo templates can be viewed as *statistical refinements* of that atlas, summarizing intensity and multiscale structure learned by the flow.
+- Because the Gaussian is joint across modalities, the resulting templates and modes of variation for a single modality implicitly encode cross-modal covariances, which is difficult to achieve with purely image-space Fréchet means.
+- The same Gaussian layer used for cross-view imputation and conditional editing thus also provides a principled mechanism for template construction and visualization of population variability.
+
+In this sense, LAM-Flow leverages established ideas from computational anatomy—population templates as Fréchet means in atlas space—while re-casting them in a learned latent geometry where Euclidean operations (means, modes, Monte Carlo expectations) correspond to nonlinear, anatomically coherent templates in image space.
+
+
 ### Registration via modality-invariant spaces and synthesis-aided alignment
 
 Several works aim to simplify multimodal registration by learning contrast-
