@@ -782,7 +782,10 @@ def main():
         else:
             amp_dtype = torch.float16
 
-    scaler = torch.amp.GradScaler(enabled=(amp_enabled and amp_dtype == torch.float16))
+    scaler = torch.amp.GradScaler(
+        enabled=(amp_enabled and amp_dtype == torch.float16),
+        init_scale=2.0**12, growth_factor=2.0, backoff_factor=0.5, growth_interval=200
+    )
 
     if not args.disable_aug_anneal:
         schedules = list(antstorch.parse_schedules(args.aug_schedules))
@@ -949,6 +952,17 @@ def main():
                             g[k] = g0[k]
             except Exception:
                 pass
+
+        if scaler is not None:
+            if "scaler" in blob:
+                try:
+                    scaler.load_state_dict(blob["scaler"])
+                    print("[resume] restored GradScaler state")
+                except Exception as e:
+                    print(f"[resume] GradScaler not loaded ({e}); starting fresh")
+            else:
+                print("[resume] no GradScaler state in checkpoint; starting fresh")
+                
         if warm and blob.get("warm") is not None:
             warm.load_state_dict(blob["warm"])
         if blob.get("models") is not None:
@@ -1019,6 +1033,17 @@ def main():
 
     if args.extra_iters > 0:
         args.max_iter = (start_iter - 1) + args.extra_iters
+
+    if hasattr(train_loader, "dataset") and hasattr(train_loader.dataset, "global_step_ref"):
+        try:
+            train_loader.dataset.global_step_ref.value = start_iter
+        except Exception:
+            pass
+    if hasattr(val_loader, "dataset") and hasattr(val_loader.dataset, "global_step_ref"):
+        try:
+            val_loader.dataset.global_step_ref.value = start_iter
+        except Exception:
+            pass
 
     try:
         dataset_info = {
@@ -1296,6 +1321,7 @@ def main():
                     "s_align": float(s_align.detach().cpu()) if s_align is not None else None,
                 }),
                 "config": vars(args),
+                "scaler": (scaler.state_dict() if scaler is not None and scaler.is_enabled() else None),
             }
             torch.save(blob, state_path)
             tqdm.write(f"[ckpt] saved: {str(state_path)}")
