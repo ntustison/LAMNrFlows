@@ -58,3 +58,11 @@ __Ground truth:__ T1 + FA given T2
 
 __Prediction:__ T1 + FA given T2
 <img width="1042" height="522" alt="hat_T1+FA_given_T2" src="https://github.com/user-attachments/assets/737637a2-5271-41a9-8862-af0caca50534" />
+
+<details>
+<summary>Funding support</summary>
+
+We gratefully acknowledge the grant support of the Office of Naval Research (N0014-23-1-2317).  
+  
+</details>
+
