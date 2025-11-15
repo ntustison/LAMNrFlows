@@ -73,50 +73,73 @@ with downstream benefits to segmentation and cross-modality generation
 [@Chartsias2018MILR; @Chartsias2019SDNet]. More general multimodal VAE
 families, such as MMVAE (mixture-of-experts) and MoPoE-VAE (mixture-of-products
 of experts), formalize coherent joint and conditional generation across
-modalities—often with an implicit division between shared and private parts
+modalities, often with an implicit division between shared and private parts
 [@Shi2019MMVAE; @Sutter2021MoPoE]. These approaches are directly relevant
 conceptually, but they (i) are not *invertible* in pixel space, (ii) rely on
 approximate likelihoods, and (iii) do not expose clean, per-level multiscale
 latents that can be edited and then exactly decoded. LAM-Flow keeps the
 shared/private spirit but instantiates it in a bijective model with exact
 log-likelihoods and Glow-style multiscale access, which matters for per-level
-conditioning and surgical latent manipulations that invert precisely.
+conditioning and surgical latent manipulations that invert precisely. In
+practice, we fit our Gaussian latent layer on *normals-only* cohorts, so that
+“shared” structure is shaped jointly by all modalities and defines a normative
+multiscale latent space that later edits can project back onto.
 
 ### Latent editing and counterfactual manipulation
 
 A parallel line of work explores *editing* latent codes to obtain “cleaner”
 images or controlled semantic changes. StyleFlow, for instance, maps entangled
-StyleGAN codes through *conditional continuous normalizing flows* to achieve
+StyleGAN codes through conditional continuous normalizing flows to achieve
 attribute-conditioned edits (pose, illumination, age), a concrete precedent for
-flow-based controlled latent traversal—even if the underlying generator is a
+flow-based controlled latent traversal, even if the underlying generator is a
 GAN rather than a flow in pixel space [@Abdal2021StyleFlow]. Medical imaging has
 also investigated counterfactual or pathology-aware latent edits in GAN spaces,
-often for augmentation or interpretability; however, exact invertibility of the
-full image model is typically absent. LAM-Flow differs in that edits occur
-*inside* a fully invertible model whose latents are tied to exact likelihoods,
-and edits can be per-scale and per-subspace (shared vs private), enabling SLIs
-and uncertainty-aware manipulations via closed-form conditional Gaussians.
+often for augmentation or interpretability, though exact invertibility of the
+full image model is typically absent.
+
+LAM-Flow differs in that edits occur *inside* a fully invertible model whose
+latents are tied to exact likelihoods, and edits can be per-scale and
+per-subspace (shared vs private), enabling SLIs and uncertainty-aware
+manipulations via closed-form conditional Gaussians. In the lesion setting, we
+fit the Gaussian layer only on normal subjects, treat the resulting multiscale
+Gaussian as a *normative prior*, and then encode lesion-bearing inputs through
+the same flow. Lesion latents appear as outliers in this normative space;
+PCA-based shrinkage of their coordinates back toward typical radii yields
+“normative reconstructions” that suppress abnormal structure while preserving
+subject-specific anatomy. Even when only a single modality (for example T1) is
+edited and visualized, its latent coordinates were shaped during training by
+multimodal alignment, so the notion of “normal” that guides edits implicitly
+reflects all available contrasts rather than that modality in isolation.
 
 ### Flow-based cross-modal relations
 
 Flow-based conditional modeling has been used for cross-modality transfer.
-DUAL-GLOW couples two flows (e.g., MR and PET) with an auxiliary relation
+DUAL-GLOW couples two flows (for example MR and PET) with an auxiliary relation
 network to model conditional distributions in latent space [@sun2019dualglow].
 This is an architectural cousin to conditional reasoning in flows, but it does
 not perform per-level alignment across modalities nor the shared/private
 decomposition operationalized here for registration via SLIs. More broadly,
-modern flow families (e.g., Flow++, Neural Spline Flows, residual and
+modern flow families (for example Flow++, Neural Spline Flows, residual and
 continuous-time flows) have improved flexibility and stability
 [@ho2019flowpp; @durkan2019nsf; @behrmann2019resflow; @grathwohl2019ffjord], and
 recent scaling results (TarFlow, STARFlow) reinforce flows as viable foundations
 when invertibility, exact likelihoods, and latent access are central
 [@zhai2024tarflow; @gu2025starflow].
 
+LAM-Flow sits between pure conditional flows and separate per-modality models:
+we learn a *joint* multiscale flow over all modalities, align its latents
+across views, and then fit a normals-only Gaussian layer over the resulting
+aligned latents. Cross-modal imputation and lesion “inpainting” are both
+handled as conditional Gaussian updates at each scale. Even if only one modality
+is ultimately decoded, its latent block has been regularized by the presence of
+the other modalities during training, so conditional edits respect a
+multimodal, rather than unimodal, notion of anatomical plausibility.
+
 ### Cross-modal synthesis and missing-modality robustness (outside flows)
 
-Historically, cross-modality synthesis progressed from atlas/patch pipelines to
-supervised U-Nets and then to unpaired adversarial methods (CycleGAN variants)
-with structure-consistency constraints to preserve anatomy
+Historically, cross-modality synthesis progressed from atlas and patch-based
+pipelines to supervised U-Nets and then to unpaired adversarial methods
+(CycleGAN variants) with structure-consistency constraints to preserve anatomy
 [@han2017dcnn; @florkow2020mrm; @yang2018structurecyclegan; @lei2019densecyclegan].
 HeMIS is notable for operating with any subset of inputs at test time via a
 learned “mean-of-modalities” fusion rather than explicit synthesis
@@ -124,29 +147,42 @@ learned “mean-of-modalities” fusion rather than explicit synthesis
 imputation and reconstruction, though they typically forgo one-shot inversion
 and per-level latent access
 [@croitoru2023diffusion_vision_survey; @yuan2024remind; @webber2024bjrai].
+
 LAM-Flow keeps the “reason across available views” philosophy but supplies a
-*closed-form* conditional posterior for unobserved latents *at each scale*, a
-capability specific to the multiscale flow setting with alignment.
+*closed-form* conditional posterior for unobserved latents at each scale, a
+capability specific to multiscale flows with alignment. Conditioning on observed
+views while drawing or shrinking unobserved latent blocks under a normals-only
+Gaussian supports both missing-modality imputation and pathology-aware edits in
+the same framework. In lesion applications, this lets us treat abnormal tissue
+as a latent-space deviation from the learned normal manifold and move it back
+toward typical configurations, yielding lesion-suppressed surrogates without
+training a separate inpainting network.
 
 ### Registration via modality-invariant spaces and synthesis-aided alignment
 
-Several works aim to simplify multimodal registration by (i) learning contrast-
-invariant structural representations and registering *in that space*, or (ii)
-synthesizing a target-like image and registering *there*. For (i), recent work
-learns modality-agnostic structural image representations to reduce cross-modal
-registration to a near-monomodal problem—resonant with the SLI idea, but
-implemented as a forward encoder rather than an invertible multiscale flow
-[@Mok2024ModalityAgnosticRep]. Other approaches enforce diffeomorphic,
-modality-invariant objectives in learned feature spaces
-[@Qiu2021ModalityInvariantReg]. For (ii), many pipelines synthesize CT from MR
-(or vice versa) and then run conventional registration; others rely on
-contrast-agnostic metrics (e.g., mutual information). LAM-Flow’s shared-latent
-images sharpen the representation route: instead of a learned *descriptor*
-space, we generate an *image-space* surrogate reconstructed *from only the
-shared subspace* (replacing private latents by conditional means). This
-preserves anatomical geometry while dampening modality-specific contrast or
-confounders—exactly what one wants for robust cross-modal registration—yet
-remains fully invertible with calibrated likelihoods.
+Several works aim to simplify multimodal registration by learning contrast-
+invariant structural representations and registering in that space, or by
+synthesizing a target-like image and registering there. For the first category,
+recent work learns modality-agnostic structural image representations that
+reduce cross-modal registration to a near-monomodal problem, which is resonant
+with the SLI idea but implemented as a forward encoder rather than an
+invertible multiscale flow [@Mok2024ModalityAgnosticRep]. Other approaches
+enforce diffeomorphic, modality-invariant objectives in learned feature spaces
+[@Qiu2021ModalityInvariantReg]. For the second category, many pipelines
+synthesize CT from MR (or the reverse) and then run conventional registration;
+others rely on contrast-agnostic metrics such as mutual information.
+
+LAM-Flow’s shared-latent images sharpen the representation route. Instead of a
+learned descriptor space, we generate an image-space surrogate reconstructed
+from only the shared subspace, replacing private latents by conditional means
+under a normals-only Gaussian. This preserves anatomical geometry while
+dampening modality-specific contrast, site effects, or lesion-driven appearance
+that might destabilize similarity metrics. Lesion-edited SLIs can be used as
+registration targets for structurally abnormal subjects, after which estimated
+transforms are applied back to the original data to preserve native
+intensities. The result is a single, invertible system that links registration,
+harmonization, missing-modality imputation, and lesion suppression through the
+same aligned multiscale latent space.
 
 ## Flow modeling background in brief
 
