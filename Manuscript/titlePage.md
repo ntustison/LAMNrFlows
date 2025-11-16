@@ -11,7 +11,7 @@ $ $
 
 \LARGE
 
-{\bf Latent-Aligned Multimodal Normalizing Flows}
+{\bf Latent-Aligned Multiview Normalizing Flows}
 
 \vspace{1.0 cm}
 
@@ -20,8 +20,8 @@ $ $
 Nicholas J. Tustison\textsuperscript{1,\textrm{\Letter}},
 Brian B. Avants\textsuperscript{1},
 \dots\textsuperscript{?},
-James R. Stone\textsuperscript{1},
-James C. Gee\textsuperscript{2}
+James C. Gee\textsuperscript{2},
+James R. Stone\textsuperscript{1}
 
 \small
 
