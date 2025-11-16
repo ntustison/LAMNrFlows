@@ -59,5 +59,24 @@ python lam_flow_tool.py recon \
   --out ${out_dir}/recon_t1_pc0_k2_sample_0.png
 
 
+python lam_flow_tool.py recon-template \
+  --ckpt runs/t1_t2_fa_128x128_vicreg_K12_H192_vicreg/training_state.pt \
+  --gauss /home/ntustison/Desktop/deep_simr_glow/output/t1_t2_fa_lowrank.npz \
+  --views T1,T2,FA \
+  --view-index 0 \
+  --devices cuda:0 \
+  --out ${out_dir}/template_T1_mu.png
+
+
+python lam_flow_tool.py recon-template \
+--ckpt runs/t1_t2_fa_128x128_vicreg_K12_H192_vicreg/training_state.pt \
+--gauss /home/ntustison/Desktop/deep_simr_glow/output/t1_t2_fa_lowrank.npz \
+--views T1,T2,FA \
+--view-index 0 \
+--devices cuda:0 \
+--mc-samples 32 \
+--mc-temp 0.25 \
+--seed 12345 \
+--out ${out_dir}/template_T1_mu_mc.png
 
 

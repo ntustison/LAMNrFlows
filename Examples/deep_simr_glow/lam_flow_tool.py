@@ -1708,6 +1708,313 @@ def load_weights_into_model(model, blob, view_idx: int, prefer_ema: bool = True,
 
     return False, ("none", "no recognizable weights in blob")
 
+
+def main_recon_template(argv=None):
+    """
+    Reconstruct a latent-space template for a single view using a Gaussian model
+    from `gauss-fit`. The base template is decode(mu) for that view. Optionally,
+    draw Monte Carlo samples in latent space and average their reconstructions.
+    """
+    ap = argparse.ArgumentParser("LAM-Flow latent template reconstruction (recon-template)")
+    ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint file or directory")
+    ap.add_argument("--gauss", type=str, required=True, help="Gaussian model (.npz or .pt) from gauss-fit")
+    ap.add_argument("--views", type=str, required=True,
+                    help="Comma list of views matching training (e.g., T1,T2,FA)")
+    ap.add_argument("--view-index", type=int, default=0,
+                    help="Which view to use (0-based index into --views)")
+    ap.add_argument("--devices", type=str, default="cuda:0",
+                    help='Device like "cuda:0" or "cpu"')
+    ap.add_argument("--out", type=str, required=True, help="Output PNG filename")
+    ap.add_argument("--mc-samples", type=int, default=0,
+                    help="If >0, draw this many Monte Carlo samples in latent space and "
+                         "average their reconstructions in image space.")
+    ap.add_argument("--mc-temp", type=float, default=1.0, help="Monte Carlo temperature.")
+    ap.add_argument("--seed", type=int, default=12345,
+                    help="Random seed used when --mc-samples > 0")
+    args = ap.parse_args(argv)
+
+    device = torch.device(args.devices)
+
+    # Optionally fix randomness for Monte Carlo sampling
+    mc_n = max(0, int(args.mc_samples))
+    if mc_n > 0:
+        set_deterministic(int(args.seed))
+
+    # ------------------------------- checkpoint --------------------------------
+    ckpt_path = resolve_ckpt_path(Path(args.ckpt))
+    try:
+        blob = torch.load(ckpt_path, map_location=device, weights_only=True)
+    except TypeError:
+        blob = torch.load(ckpt_path, map_location=device)
+
+    cfg = blob.get("config", {}) or {}
+    Hc = int(cfg.get("H", 128))
+    Wc = int(cfg.get("W", 128))
+
+    model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc}, device=device)
+    model.eval()
+    _prime_if_needed(model, Hc, Wc, device=device)
+
+    cfg_views = list(cfg.get("views", [])) if isinstance(cfg.get("views"), (list, tuple)) else None
+
+    views_cli = [v.strip() for v in str(args.views).split(",") if v.strip()]
+    if not views_cli:
+        raise RuntimeError("[recon-template] --views must list at least one view name.")
+
+    # Prefer config views if present and consistent in length
+    if cfg_views and len(cfg_views) == len(views_cli):
+        all_views = cfg_views
+    else:
+        all_views = views_cli
+
+    if not (0 <= int(args.view_index) < len(all_views)):
+        raise RuntimeError(
+            f"[recon-template] --view-index {args.view_index} is out of range for views {all_views}."
+        )
+    vname = all_views[int(args.view_index)]
+
+    ok, note = load_weights_into_model(
+        model,
+        blob,
+        view_idx=all_views.index(vname),
+        prefer_ema=True,
+        view_name=vname,
+        cfg_views=all_views,
+    )
+    if not ok:
+        raise RuntimeError(f"[recon-template] Failed to load weights for view '{vname}': {note}")
+
+    print(f"[recon-template] using view '{vname}' on device {device}")
+
+    # ------------------------------- Gaussian ----------------------------------
+    gauss_blob = _load_gaussian_model(Path(args.gauss))
+    views_g, dims_tbl, shapes_by_view, L = _validate_gauss_blob(gauss_blob)
+
+    if vname not in views_g:
+        raise RuntimeError(
+            f"[recon-template] View '{vname}' not present in Gaussian header views={views_g}."
+        )
+    v_idx = views_g.index(vname)
+
+    if str(gauss_blob.get("mode", "perlevel")).lower() != "perlevel":
+        raise RuntimeError(
+            "[recon-template] currently requires a per-level Gaussian ('--cov-mode perlevel')."
+        )
+
+    mu_list = gauss_blob.get("mu", None)
+    if mu_list is None:
+        raise RuntimeError("[recon-template] Gaussian blob has no 'mu' field.")
+
+    # Build per-level slice offsets for each view, matching gauss-fit logic
+    raw_slices = gauss_blob.get("level_view_slices", None)
+    level_view_slices: List[Dict[int, Tuple[int, int]]] = []
+
+    V = len(views_g)
+    if raw_slices is not None:
+        for l in range(L):
+            row = raw_slices[l]
+            if isinstance(row, dict):
+                # JSON round-trip typically stringifies keys
+                row_int = {int(k): tuple(v) for k, v in row.items()}
+            else:
+                # Fallback: list-of-tuples in header order
+                row_int = {vi: tuple(row[vi]) for vi in range(V)}
+            level_view_slices.append(row_int)
+    else:
+        # Rebuild from dims_tbl
+        for l in range(L):
+            off = 0
+            row_int = {}
+            for vi in range(V):
+                d_raw = dims_tbl[vi][l]
+                d = int(np.asarray(d_raw).item() if hasattr(d_raw, "item") else d_raw)
+                row_int[vi] = (off, off + d)
+                off += d
+            level_view_slices.append(row_int)
+
+    # ------------------------- construct mean latents --------------------------
+    z_mu_list: List[torch.Tensor] = []
+    for l in range(L):
+        Cg, Hg, Wg = shapes_by_view[v_idx][l]
+        a, b = level_view_slices[l][v_idx]
+
+        mu_level = np.asarray(mu_list[l], dtype=np.float64).ravel()
+        if b > mu_level.shape[0]:
+            raise RuntimeError(
+                f"[recon-template] Gaussian mean for level {l} is too short (len={mu_level.shape[0]}), "
+                f"expected at least {b}."
+            )
+        mu_view_flat = mu_level[a:b]
+        if mu_view_flat.shape[0] != Cg * Hg * Wg:
+            raise RuntimeError(
+                f"[recon-template] Level {l} mean slice for view '{vname}' has length {mu_view_flat.shape[0]}, "
+                f"expected {Cg * Hg * Wg} from shapes_by_view."
+            )
+
+        mu_view = torch.from_numpy(mu_view_flat.astype(np.float32)).to(device=device)
+        z_mu_list.append(mu_view.view(1, Cg, Hg, Wg))
+
+    # Decode mean template
+    x_mu = _decode_latents(model, z_mu_list, target_hw=(Hc, Wc))
+    x_mu = to01(x_mu)
+
+    # ----------------------- Monte Carlo latent sampling -----------------------
+    x_mc_mean = None
+    if mc_n > 0:
+        Sigma_list = gauss_blob.get("Sigma", None)
+        if Sigma_list is None:
+            raise RuntimeError(
+                "[recon-template] Gaussian blob has no 'Sigma' field; cannot run Monte Carlo sampling."
+            )
+
+        def _sample_gaussian_block(mu_flat: np.ndarray, Sigma_block, n: int, jitter: float = 1e-6, temperature: float=1.0) -> np.ndarray:
+            """
+            Sample z ~ N(mu_flat, Sigma_block) for a single view/level block.
+            Sigma_block may be:
+              - dict(type='lowrank', U (D×r), eig (r), sigma2)
+              - 1D diag vector
+              - 2D full covariance matrix
+            Returns array of shape (n, D).
+            """
+            mu = np.asarray(mu_flat, dtype=np.float64).reshape(-1)
+            D = mu.shape[0]
+            if D == 0:
+                return np.zeros((n, 0), dtype=np.float64)
+
+            # Low-rank parameterization
+            if isinstance(Sigma_block, dict) and Sigma_block.get("type") == "lowrank":
+                U = np.asarray(Sigma_block["U"], dtype=np.float64)   # (D, r)
+                eig = np.asarray(Sigma_block["eig"], dtype=np.float64).reshape(-1)  # (r,)
+                eig = eig * (temperature ** 2)
+                sigma2 = float(Sigma_block.get("sigma2", 0.0))
+                sigma2 = sigma2 * (temperature ** 2)
+                if U.shape[0] != D:
+                    raise RuntimeError(
+                        f"[recon-template] lowrank U has wrong number of rows (got {U.shape[0]}, expected {D})."
+                    )
+                r = U.shape[1]
+                if eig.shape[0] != r:
+                    raise RuntimeError(
+                        f"[recon-template] lowrank eig has length {eig.shape[0]}, expected {r}."
+                    )
+
+                # mu + U diag(sqrt(eig)) xi + sqrt(sigma2) eps
+                xi = np.random.randn(r, n)
+                A = U * np.sqrt(np.clip(eig, a_min=0.0, a_max=None))[np.newaxis, :]
+                z = mu[:, None] + A @ xi
+                if sigma2 > 0.0:
+                    eps = np.random.randn(D, n)
+                    z = z + math.sqrt(max(sigma2, 0.0)) * eps
+                return z.T
+
+            # Diagonal covariance
+            S = np.asarray(Sigma_block, dtype=np.float64)
+            if S.ndim == 1:
+                var = np.clip(S, a_min=0.0, a_max=None)
+                var = var * (temperature ** 2)
+                std = np.sqrt(var + float(jitter))
+                eps = np.random.randn(n, D)
+                return (mu[None, :] + eps * std[None, :])
+
+            # Full covariance
+            if S.ndim != 2:
+                raise RuntimeError(f"[recon-template] Sigma_block has unexpected ndim={S.ndim} (expected 1 or 2).")
+            if S.shape[0] != S.shape[1] or S.shape[0] != D:
+                raise RuntimeError(
+                    f"[recon-template] Sigma_block shape {S.shape} incompatible with D={D}."
+                )
+            S = 0.5 * (S + S.T)
+            S = S * (temperature ** 2)
+            I = np.eye(D, dtype=np.float64)
+            jj = float(jitter)
+            L = None
+            for _ in range(7):
+                try:
+                    L = np.linalg.cholesky(S + jj * I)
+                    break
+                except np.linalg.LinAlgError:
+                    jj *= 10.0
+            if L is None:
+                # Eigen fallback
+                w, V = np.linalg.eigh(S)
+                w_clamped = np.clip(w, a_min=1e-12, a_max=None)
+                L = (V * np.sqrt(w_clamped)[np.newaxis, :]) @ V.T
+            eps = np.random.randn(D, n)
+            z = mu[:, None] + L @ eps
+            return z.T
+
+        z_mc_list: List[torch.Tensor] = []
+        Sigma_mode = Sigma_list
+        for l in range(L):
+            Cg, Hg, Wg = shapes_by_view[v_idx][l]
+            Dv = Cg * Hg * Wg
+            a, b = level_view_slices[l][v_idx]
+
+            mu_level = np.asarray(mu_list[l], dtype=np.float64).ravel()
+            if b > mu_level.shape[0]:
+                raise RuntimeError(
+                    f"[recon-template] Gaussian mean for level {l} is too short (len={mu_level.shape[0]}), "
+                    f"expected at least {b}."
+                )
+            mu_view_flat = mu_level[a:b]
+            if mu_view_flat.shape[0] != Dv:
+                raise RuntimeError(
+                    f"[recon-template] Level {l} mean slice for view '{vname}' has length {mu_view_flat.shape[0]}, "
+                    f"expected {Dv}."
+                )
+
+            # Select per-level Sigma and restrict to this view block
+            Sigma_l = Sigma_mode[l] if isinstance(Sigma_mode, (list, tuple)) else Sigma_mode
+            if isinstance(Sigma_l, dict) and Sigma_l.get("type") == "lowrank":
+                U_full = np.asarray(Sigma_l["U"], dtype=np.float64)
+                eig = np.asarray(Sigma_l["eig"], dtype=np.float64)
+                sigma2 = float(Sigma_l.get("sigma2", 0.0))
+                U_v = U_full[a:b, :]
+                if U_v.shape[0] != Dv:
+                    raise RuntimeError(
+                        f"[recon-template] lowrank U slice has wrong length at level {l}, view '{vname}'. "
+                        f"expected {Dv}, got {U_v.shape[0]}"
+                    )
+                Sigma_block = {"type": "lowrank", "U": U_v, "eig": eig, "sigma2": sigma2}
+            else:
+                S_full = np.asarray(Sigma_l, dtype=np.float64)
+                if S_full.ndim == 1:
+                    Sigma_block = S_full[a:b]
+                else:
+                    Sigma_block = S_full[a:b, a:b]
+
+            z_samples_flat = _sample_gaussian_block(mu_view_flat, Sigma_block, mc_n, temperature=args.mc_temp)
+            if z_samples_flat.shape != (mc_n, Dv):
+                raise RuntimeError(
+                    f"[recon-template] sampled block has shape {z_samples_flat.shape}, expected ({mc_n}, {Dv})."
+                )
+
+            z_samples = torch.from_numpy(z_samples_flat.astype(np.float32)).to(device=device)
+            z_mc_list.append(z_samples.view(mc_n, Cg, Hg, Wg))
+
+        # Decode all Monte Carlo latents, then average in image space
+        x_mc_stack = _decode_latents(model, z_mc_list, target_hw=(Hc, Wc))  # (mc_n,1,H,W)
+        x_mc_stack = to01(x_mc_stack)
+        x_mc_mean = x_mc_stack.mean(dim=0, keepdim=True)  # (1,1,H,W)
+
+        print(f"[recon-template] Monte Carlo mean computed from {mc_n} samples.")
+
+    # ----------------------------- save panel -----------------------------
+    outp = Path(args.out)
+    outp.parent.mkdir(parents=True, exist_ok=True)
+
+    if x_mc_mean is not None:
+        # Panel: [decode(mu) | MC mean | abs difference]
+        panel = make_recon_panel(x_mu, x_mc_mean)
+        nrow = 3
+    else:
+        panel = x_mu
+        nrow = 1
+
+    save_grid(panel, outp, nrow=nrow, target_hw=(Hc, Wc))
+    print(f"[recon-template] wrote {outp}")
+
+
 def main_gauss_fit(argv: List[str] | None = None):
 
     def _sanitize_latents_array(X, cap_quantile=99.9, hard_cap=None):
