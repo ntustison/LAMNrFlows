@@ -3,8 +3,6 @@
 
 # Abstract {-}
 
-# Abstract {-}
-
 Normalizing flows provide exact-likelihood, bijective mappings between data and
 latents, making them well suited to multiview representation learning across
 images and tabular imaging-derived phenotypes. We introduce Latent-Aligned
