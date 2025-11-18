@@ -3,25 +3,32 @@
 
 # Abstract {-}
 
-Normalizing flows provide exact-likelihood, bijective mappings between images
-and latents, making them highly suitable for multimodal representation learning.
-We introduce a general framework, Latent-Aligned Multiview Normalizing Flows,
-that learns per-level shared and private latent structure across modalities
-while retaining Glow-style, multiscale latent access for analysis and editing.
-Given subject-matched batches, we impose latent-alignment constraints (e.g., Pearson,
-Barlow Twins, VICReg, InfoNCE, HSIC) to learn shared multiscale latent spaces
-and optionally discover shared subspaces via CCA/HSIC screening. On top of
-maximum-likelihood training, we provide a conditional Gaussian inference framework
-that estimates per-level moments and yields closed-form posteriors over arbitrary
-subsets of latents. This enables principled cross-view imputation and, more
-generally, latent manipulations that preserve anatomy while modulating
-modality-specific contrast or confounders. A practical consequence is the
-construction of shared-latent images (SLIs), i.e., reconstructions in which private
-latents are replaced by their conditional means.  This provides contrast-robust
-surrogates for downstream tasks such as cross-modal registration where transforms
-are estimated on SLIs and then applied to the original data. The same machinery
-supports synthesis, harmonization, uncertainty analysis, and interventional
-latent edits (i.e., model-based counterfactuals) within a single, exact, and
-interpretable model. We release open-source implementations and illustrate the
-framework on multimodal MRI cohorts, highlighting how latent alignment enables
-general-purpose reasoning and editing across views.
+# Abstract {-}
+
+Normalizing flows provide exact-likelihood, bijective mappings between data and
+latents, making them well suited to multiview representation learning across
+images and tabular imaging-derived phenotypes. We introduce Latent-Aligned
+Multiview Normalizing Flows, a framework that learns per-view shared and private
+latent structure while supporting precise analysis and editing. For image views
+we retain Glow-style, multiscale latent access; for tabular views we employ
+per-view flows with the same alignment machinery. Using subject-matched batches,
+we impose latent-alignment constraints (e.g., Pearson, Barlow Twins, VICReg,
+InfoNCE, HSIC) and optionally use CCA (linear) or HSIC (kernel) to identify
+per-level latent directions that are statistically shared across views,
+restricting alignment to those coordinates. On top of maximum-likelihood
+training, we add a conditional Gaussian layer that estimates per-level moments
+and yields closed-form posteriors over arbitrary subsets of latents. This
+enables principled cross-view imputation and, more generally, latent
+manipulations that preserve anatomy or identity while modulating modality or
+view-specific factors. For images, we construct shared-latent images
+(SLIs)—reconstructions in which private latents are replaced by their
+conditional means—providing contrast-robust surrogates for tasks such as
+cross-modal registration; transforms are estimated on SLIs and then applied to
+the original data. For tabular IDP blocks, the same conditional inference
+supports calibrated queries, harmonization, and counterfactual edits. We
+evaluate on multimodal MRI cohorts and multiview IDP datasets, comparing against
+strong linear multiview baselines, and report improvements in calibrated
+likelihoods, dependence structure, imputation accuracy, and downstream
+predictive transfer. We release open-source implementations and illustrate how
+latent alignment enables general-purpose reasoning and editing across
+heterogeneous views within a single, exact, and interpretable model.

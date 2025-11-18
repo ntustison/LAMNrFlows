@@ -1,286 +1,47 @@
-
-\clearpage
-
 # Methods
 
-Our proposed imputation and synthesis framework comprises two main components.
-First, we train per-modality Glow models under exact likelihood, adding
-per-level latent alignment with uncertainty-aware weighting. Second, we perform
-conditional Gaussian inference in latent space to impute any missing views by
-decoding to image space via the exact inverse. We also summarize implementation
-and open-source resources supporting all experiments.
+## Overview
 
-## Training
+LAM-Flow comprises two components. First, a set of per-view flows are trained by maximum likelihood with latent alignment on designated shared coordinates. Alignment can be applied across views directly or after an optional CCA or HSIC screen that selects directions with evidence of cross-view dependence. Second, a conditional Gaussian layer is fit over latents to enable closed-form posteriors and exact decoding for imputation, harmonization, counterfactual edits, and shared-latent reconstructions.
 
-### Architecture
+We denote a subject’s data by \( \{x^{(v)}\}_{v=1}^V \). Each view \(v\) has a flow \(f^{(v)}\) mapping \(x^{(v)}\) to latents \(z^{(v)}\) with density \(p(z^{(v)})\) and exact log-likelihood \(\log p(x^{(v)}) = \log p(z^{(v)}) + \log |\det \partial f^{(v)} / \partial x^{(v)}| \) [@papamakarios2021nfreview; @kingma2018glow]. We split latents into shared and private parts, \(z^{(v)} = [z^{(v)}_S, z^{(v)}_P]\), with selection defined by either a fixed allocation or by screening.
 
-Given $M$ modalities, we train one Glow model per modality, sharing
-architectural configuration but not parameters. Each model uses a multiscale
-design with \(L\) levels and \(K\) flow steps per level. Each step applies (i)
-ActNorm (i.e., per-channel affine transform) with data-dependent initialization
-on the first batch, (ii) an invertible \(1\times1(\times1)\) convolution
-parameterized via LU for stable log-det computation, and (iii) an affine
-coupling transform whose scale/shift predictor is a small ConvNet with internal
-width (i.e., the ``hidden'' parameter) that operates on the transformed half of
-the channels at that level. Between levels we apply squeeze (space-to-depth) and
-split operations, which expose multiscale latents for analysis, alignment, and
-conditional modeling [@kingma2018glow]. In contrast to Glow, transformer-based
-flow variants often rely on sequential (token-wise) decoding and typically lack
-explicit per-level latent access, making per-level alignment and
-conditional-Gaussian modeling less straightforward and further challenging 3-D
-scaling.
+## Per-view flow architectures
 
-### Single-flow optimization
+### Image views
 
-Given an image \(x\), a flow learns an invertible map \(f_\theta\) that
-transforms \(x\) to its representative latent \(z=f_\theta(x)\). We place a
-simple base density over latents, typically \(p_Z=\mathcal{N}(0,I)\), and
-minimize the negative log-likelihood (NLL) induced by the change-of-variables
-formula:
+For images we adopt Glow-style discrete flows with L levels and K steps per level. Each step comprises ActNorm, invertible 1×1 convolutions, and affine coupling with convolutional predictors. Squeeze and split operations provide multiscale access to per-level latents. LU parameterization is used for stable log-determinant computation, and data-dependent initialization is used for ActNorm [@kingma2018glow]. We also considered variants with richer coupling and spline transforms [@ho2019flowpp; @durkan2019nsf]. Continuous-time flows are related but we do not use them here due to the cost of unbiased likelihood estimates [@grathwohl2019ffjord].
 
+### IDP and CSV views
+
+For tabular blocks we use RealNVP or MAF stacks with affine couplings and masked MLPs [@dinh2016realnvp; @papamakarios2017maf]. Continuous variables are standardized. Positive skewed variables can be log or log1p transformed. Bounded variables can be mapped to the real line with a logit transform. Categorical variables are one-hot encoded when needed. Each per-view flow yields a single-scale latent vector, to which the same projector, screening, and alignment steps are applied.
+
+## Projector, alignment losses, and shared subspace screening
+
+Let \(\phi^{(v)}(z^{(v)}) \in \mathbb{R}^D\) be the output of a small projector head that produces features with matched dimension across views. Given subject-matched batches \(\{\phi^{(v)}_n\}_{n=1}^N\), we apply an alignment loss on the coordinates designated as shared. We support Barlow Twins, VICReg, InfoNCE, Pearson correlation, and HSIC losses, each with standard hyperparameters [@zbontar2021barlow; @bardes2021vicreg; @oord2018cpc; @gretton2005hsic].
+
+To identify shared coordinates automatically, we perform a short screening pass after an MLE warm-up. For CCA screening, we compute whitening matrices for two views and perform an SVD of the whitened cross-covariance \(X_a^\top X_b\). We retain the top r canonical directions per view and average pairwise subspaces across all view pairs to obtain per-view projectors \(P^{(v)} \in \mathbb{R}^{D \times r}\). For HSIC screening, we score coordinates by dependence using a two-stage procedure. First, a Pearson prefilter selects candidate dimensions. Second, an unbiased HSIC estimate with RBF kernels ranks dependence with the average of the other views. We then select the top r coordinates per view. The alignment loss is applied only to the projected or masked features. Screening can be performed once after warm-up or on a fixed refresh cadence [@Murphy2012ML; @bishop2006prml; @gretton2005hsic].
+
+## Conditional Gaussian inference over latents
+
+After training, we estimate per-level Gaussian statistics for latents. For images we collect \(z^{(v)}_\ell\) at each level \(\ell \in \{1,\dots,L\}\). For IDP blocks there is a single level. We model the joint latent vector across views as Gaussian with mean \(\mu\) and covariance \(\Sigma\). Given an observed subset \(O\) and an unobserved subset \(U\), the posterior \(p(z_U \mid z_O)\) is Gaussian with mean
 \[
-\mathcal{L}_{\text{NLL}}(\theta)
-= -\,\mathbb{E}_{x\sim\mathcal{D}}\!\Big[
-\log p_Z\!\big(f_\theta(x)\big)
-+ \sum_{k=1}^{K\cdot L}\log\!\big|\det J_{f_k}(h_{k-1})\big|
-\Big],
+\mu_{U \mid O} = \mu_U + \Sigma_{UO} \Sigma_{OO}^{-1} (z_O - \mu_O)
 \]
-
-where \(f=f_{K\cdot L}\circ\cdots\circ f_1\), \(h_0=x\), and
-\(h_k=f_k(h_{k-1})\). In the multi-view case, we sum the same form over the
-observed modalities. The first term is the log-probability of the latent under
-the base density, and the second is the log-determinant Jacobian that corrects
-for local volume change. Equivalently, minimizing NLL maximizes \(\log p_X(x)\),
-encouraging images to map to high-probability latents while keeping the induced
-image-space density consistent.
-
-
-### Multimodal latent alignment
-
-When trained separately, each flow’s latent coordinate system is arbitrary,
-i.e., it can be rotated, scaled, or permuted without changing the likelihood so
-different flows do not necessarily align post-optimization, thus necessitating
-explicit alignment. For multimodal imaging we seek a shared, multi-scale
-framework that captures common anatomy while simultaneously ignoring
-modality-specific variation. We therefore add per-level latent alignment between
-flows via lightweight projector heads[^projnote],
-which simplifies cross-modal relations
-and improves conditioning for our conditional-Gaussian inference.  This yields
-joint imputations that are coherent across outputs. Alignment is
-auxiliary and preserves exact likelihood training and invertibility. 
-Including alignment, \(\mathcal{A}\), the multi-view objective is
-
-
-[^projnote]: We compute alignment on light projector outputs rather than raw
-    per-level latents as the latter are only defined up to invertible changes of
-    coordinates.  A small projector head maps each modality’s latent into a shared,
-    scale-stabilized space so correlation/covariance losses are
-    well-conditioned. The head also absorbs alignment pressure (reducing
-    conflict with the likelihood objective) and is the natural place to apply
-    CCA, pooling, or uncertainty weighting.
-
-
+and covariance
 \[
-\mathcal{L}(\Theta,\Phi)
-= \mathcal{L}_\text{NLL}(\Theta)
-+ \sum_{\ell=1}^{L}\;\sum_{(m,n)\in\mathcal{P}}
-\lambda_{\ell}^{(m,n)}\;
-\mathcal{A}\!\left(
-g_{\phi_\ell}^{(m)}\!\big(z_\ell^{(m)}\big),\;
-g_{\phi_\ell}^{(n)}\!\big(z_\ell^{(n)}\big)
-\right),
+\Sigma_{U \mid O} = \Sigma_{UU} - \Sigma_{UO} \Sigma_{OO}^{-1} \Sigma_{OU}.
 \]
+We use shrinkage for numerical stability when needed and clip small eigenvalues to maintain positive definiteness [@schafer2005shrinkage; @ledoit2004well; @higham2002accuracy]. The posterior mean provides a calibrated point estimate. Samples from the posterior propagate uncertainty. Exact decoding through the inverse flows yields imputations, harmonized outputs, and latent edits with tractable likelihoods.
 
-with per-modality NLL
+## Shared-latent reconstructions and operational edits
 
-\[
-\mathcal{L}_{\text{NLL}}(\Theta)
-= -\,\mathbb{E}_{i\sim\mathcal{D}}
-\Bigg[\sum_{m\in\mathcal{O}(i)}
-\log p_{X^{(m)}}\!\big(x_i^{(m)};\,\theta^{(m)}\big)\Bigg].
-\]
+For image views we define shared-latent images by replacing private latents with their conditional means while holding shared latents fixed. This yields reconstructions that preserve geometry and suppress view-specific contrast. When a downstream task is sensitive to contrast or confounders, a transform can be estimated on these surrogates and then applied to the original images without further approximation. For IDP blocks, the same conditional layer provides calibrated imputation under missingness patterns, counterfactual queries with covariate edits, and harmonization across sites. We evaluate with likelihood calibration, imputation error, and predictive transfer in line with prior IDP analyses [@Tustison:2024aa].
 
-Here \(\mathcal{O}(i)\) is the set of observed modalities for sample \(i\);
-\(\Theta=\{\theta^{(m)}\}\) are flow parameters; \(\Phi=\{\phi_\ell^{(m)}\}\)
-are projector parameters; \(\mathcal{P}\) denotes the set of unordered modality
-pairs (e.g., all \(m<n\)); and \(\lambda_{\ell}^{(m,n)}\!\ge 0\) weights
-alignment strength (we do not weight the per-modality NLLs).
+## Relation to latent-space templates
 
-We support the following alignment objectives (operating on
-projector outputs \(u,v\)):
+Latent-space templates can be defined as means in latent space decoded back to image space, or as Monte Carlo expectations under the learned latent distribution. In the small-variance or locally linear regime the two constructions agree up to second order terms, which connects latent templates to Fréchet means in the induced metric. We present precise definitions, per-level composition, and conditions for agreement in the Supplementary Methods, and we use the constructs here as operational tools for surrogates and visualization.
 
-- **Pearson correlation.** \(\mathcal{A}_\text{Pearson}=1-\tfrac{1}{d}\sum_i \mathrm{corr}(u_i,v_i)\).
+## Practical training details
 
-- **Barlow Twins** [@zbontar2021barlow]. Cross-correlation \(C\) between \(u\) and \(v\); loss \(\sum_i (1-C_{ii})^2+\beta\sum_{i\ne j} C_{ij}^2\), with \(\beta>0\).
-
-- **VICReg** [@bardes2021vicreg]. Invariance–variance–covariance: \(\alpha\|u-v\|_2^2 + \mu\,\mathrm{VarPenalty}(u,v)+\nu\,\mathrm{OffDiagCov}(u,v)\).
-
-- **InfoNCE / CPC** [@oord2018cpc]. Temperature-scaled contrastive objective aligning positives across modalities and repelling in-batch negatives.
-
-- **HSIC (biased)** [@gretton2005hsic]. Kernel dependence measure (Gaussian or linear kernels; bandwidth via median heuristic or per-level scale).
-
-
-The choice of alignment objective depends on batch size, the expected cross-modal
-relationship (linear vs. nonlinear), and the ease of forming negatives (i.e.,
-non-matching pairs)[^coord]. Pearson serves as a lightweight baseline when
-largely linear shared structure is expected and minimal hyperparameters are
-preferred.  It is fast and works with very small batches. Barlow Twins is a
-strong default without negatives as agreement is maximized while features are
-decorrelated, which helps prevent collapse and promotes stability across batch
-sizes. VICReg is similar as Barlow Twins but separates invariance, variance, and
-covariance terms, providing explicit control over feature spread (variance
-floor) and redundancy (off-diagonal penalties). InfoNCE performs best when
-reliable positives and plentiful negatives can be formed (larger batches or a
-memory queue); sharper correspondences are often obtained, but sensitivity to
-false negatives and temperature tuning is higher. HSIC is kernel-based and
-captures nonlinear dependence without negatives.  In addition, relationships
-missed by linear objectives can be uncovered at the cost of additional
-computation and bandwidth selection.[^recom] 
-
-[^coord]: Alignment objectives require coordinated batches across views.  Each
-    minibatch indexes the same subjects across modalities and, for patches, the
-    same spatial coordinates. Subject-synchronized sampling with optional
-    spatial correspondence is enforced by the dataloader.
-
-[^recom]: In practice, Barlow Twins or VICReg are recommended as defaults.
-Pearson serves as a baseline and a quick check. InfoNCE is best reserved for
-large, well-curated batches.   HSIC is appropriate when nonlinear relations are
-suspected.
-
-### Modeling aleatoric uncertainty (Kendall–Gal weighting)
-
-Different modality pairs can exhibit different levels of measurement noise
-(e.g., FA vs. T2), so a fixed alignment weight can over- or under-penalize some
-pairs. Following Kendall & Gal [@kendall2017uncertainties;@kendall2018mtl], 
-we replace the fixed alignment weight with a
-learned log-variance per level and modality pair. Let \(s_{\ell}^{(m,n)}=\log
-(\sigma_{\ell}^{(m,n)})^{2}\) be unconstrained parameters. The total training
-objective becomes
-
-$$
-\begin{aligned}
-\mathcal{L}(\Theta,\Phi,\mathbf{s})
-=& -\,\mathbb{E}_{i\sim\mathcal{D}}\!\Bigg[\sum_{m\in\mathcal{O}(i)} \log p_{X^{(m)}}\!\big(x_i^{(m)};\theta^{(m)}\big)\Bigg] \\ \nonumber
-&+ \mathbb{E}_{i\sim\mathcal{D}}\!\Bigg[\sum_{\ell=1}^{L}\sum_{(m,n)\in \mathcal{P}\cap \mathcal{O}(i)^{2}}
-\underbrace{\Big(\tfrac{1}{2}e^{-s_{\ell}^{(m,n)}} \,\mathcal{A}_{\ell}^{(m,n)} + \tfrac{1}{2}s_{\ell}^{(m,n)}\Big)}_{\text{uncertainty-weighted alignment}}
-\Bigg].
-\end{aligned}
-$$
-
-Here the first term is the (unweighted) multi-view NLL.  The second
-term down-weights alignment for noisy pairs via \(e^{-s}\) while the
-\(\tfrac{1}{2}s\) term regularizes the scale to prevent trivial solutions. In
-practice, this is equivalent to using
-\(\lambda_{\ell}^{(m,n)}=\tfrac{1}{2}e^{-s_{\ell}^{(m,n)}}\) in the earlier
-alignment objective and adding the \(\tfrac{1}{2}s_{\ell}^{(m,n)}\) penalty.
-We parameterize \(s_{\ell}^{(m,n)}\) directly (no
-positivity constraint is needed) and initialize \(s{=}0\) (\(\sigma^2{=}1\)). For
-stability, we optionally clamp \(s\in[\log \sigma_{\min}^2,\log
-\sigma_{\max}^2]\) (e.g., \(\sigma_{\min}{=}0.3,\ \sigma_{\max}{=}3\)). Only
-alignment terms are uncertainty-weighted.  The likelihood remains unweighted
-across modalities. 
-
-
-### Optimization
-
-For scheduled data augmentation, we integrate ANTsTorch spatial and intensity
-transforms (e.g., small affine, elastic deformation, bias field, histogram
-warping, additive noise)[@Tustison:2024aa]. Each transform has a schedule
-\(s(t)\) over training steps \(t\) (e.g., linear, exponential or cosine anneal).
-We use Adam with typical settings (\(\beta_1{=}0.9,\;\beta_2{=}0.999\)),
-learning rate selected by validation (e.g.,
-\(1\mathrm{e}{-4}\)–\(2\mathrm{e}{-4}\)), and gradient clipping when needed. AMP
-is enabled via PyTorch GradScaler.  An EMA of weights (decay
-\(0.999\)–\(0.9999\)) is maintained for evaluation. Batch size is adapted to
-memory.  Training proceeds for a fixed number of iterations with early stopping
-on validation likelihood. 
-
-## Inference via Conditional Gaussian Modeling
-
-Let \(M\) denote the total number of modalities. Following the per-level
-multimodal training above, the concatenated latents at level \(\ell\) are
-modeled as approximately Gaussian across the training cohort:
-
-\[
-z_\ell = \big[z_\ell^{(1)};\dots; z_\ell^{(M)}\big] \sim \mathcal{N}\!\big(\mu_\ell,\; \Sigma_\ell\big).
-\]
-
-Moments \((\mu_\ell,\Sigma_\ell)\) are estimated from a held-out cache of training latents, with covariance shrinkage and a small diagonal jitter for numerical stability.
-
-For a subject with observed modalities \(\mathcal{O}\subseteq [M]\) and missing
-modalities \(\mathcal{U}=[M]\setminus\mathcal{O}\), partition the moments as
-
-\[
-\mu_\ell=\begin{bmatrix}\mu_{\ell,\mathcal{O}}\\ \mu_{\ell,\mathcal{U}}\end{bmatrix},\qquad
-\Sigma_\ell=\begin{bmatrix}\Sigma_{\ell,\mathcal{OO}} & \Sigma_{\ell,\mathcal{OU}}\\[2pt]
-\Sigma_{\ell,\mathcal{UO}} & \Sigma_{\ell,\mathcal{UU}}\end{bmatrix},
-\]
-
-and compute the conditional Gaussian \(p\!\left(z_{\ell,\mathcal{U}}\,\middle|\, z_{\ell,\mathcal{O}}\right)\) with
-
-\[
-\mathbb{E}\!\left[z_{\ell,\mathcal{U}}\mid z_{\ell,\mathcal{O}}\right]
-= \mu_{\ell,\mathcal{U}} + \Sigma_{\ell,\mathcal{UO}}\Sigma_{\ell,\mathcal{OO}}^{-1}\!\left(z_{\ell,\mathcal{O}}-\mu_{\ell,\mathcal{O}}\right),
-\]
-
-\[
-\mathrm{Cov}\!\left(z_{\ell,\mathcal{U}}\mid z_{\ell,\mathcal{O}}\right)
-= \Sigma_{\ell,\mathcal{UU}} - \Sigma_{\ell,\mathcal{UO}}\Sigma_{\ell,\mathcal{OO}}^{-1}\Sigma_{\ell,\mathcal{OU}}.
-\]
-
-Intuitively, observing one subset yields the minimum mean-squared-error estimate
-of the remaining subset.  The covariance above is the Schur complement of
-\(\Sigma_{\ell,\mathcal{OO}}\) in the joint covariance, so uncertainty shrinks
-most along directions best predicted by the observed subset [@bishop2006prml;
-@murphy2012mlpp]. Posterior means are used for deterministic reconstructions,
-while posterior samples support uncertainty visualization. In either case, a
-single exact inverse pass produces all requested image-space contrasts, enabling
-flexible \(|\mathcal{O}|\to|\mathcal{U}|\) imputation with cross-modal
-coherence. At each level, a CCA subspace may be fit on training latents and used
-for alignment and CGM.  Observed latents are projected, the conditional is
-computed in-subspace, and results are mapped back with \(U_\ell U_\ell^\top\).
-To avoid ill-conditioning, a small \(\varepsilon I\) is added to covariances and
-canonical correlations/eigenvalues are clipped to \([\epsilon,\gamma]\)
-\(U_\ell\). 
-
-
-
-## Open-source availability
-
-Code and documentation is found across the following GitHub repositories:
-
-**ANTsTorch** (``ANTsX/ANTsTorch``) As a PyTorch based extension of the ANTsPy
-library, it provides I/O and preprocessing (e.g., N4 bias correction,
-resampling/cropping, intensity standardization), volumetric dataloaders for
-multi-view studies, and spatial/intensity data augmentation with schedulable
-ranges. The family of alignment objectives (Pearson, Barlow Twins, VICReg,
-InfoNCE/CPC, HSIC) is also available in this toolkit.  This repository also
-contains unit tests that exercise alignment objectives and numerical sanity
-checks.
-
-**normalizing-flows** (``ntustison/normalizing-flows``) after surveying common
-PyTorch flow libraries we forked (``VincentStimper/normalizing-flows``)
-[@stimper2023normflows].  This original repository offered a clean design and
-probability-centric interfaces. Building on that foundation, we contributed
-various features such as canonical Glow step ordering with strict
-forward/inverse assertions; corrected multiscale squeeze/split/reshape
-orderings, ActNorm in 2-D/3-D with data-dependent initialization, invertible
-1×1(×1) convolutions parameterized via LU for stable log-det computation,
-2-D/3-D coupling networks, and exact numerically stable log-det accumulation. We
-added tests that catch shape-mismatch regressions and verify per-layer and
-cumulative log-dets.
-
-**MultimodalNormalizingFlows** (``ntustison/MultimodalNormalizingFlows``)
-contains the trainer and evaluation pipelines that orchestrate multi-flow
-training (one flow per modality), hooks to ANTsTorch augmentations and
-alignment, conditional-Gaussian modeling utilities for per-level moment fitting
-and M→N imputation, and scripts for likelihood, PSNR/SSIM, and
-imputation-coherence evaluations. It also includes example configurations,
-reproducible command lines for the evaluation studies, and the manuscript
-sources.
-
-The codebase provides a reproducible CLI with YAML/argparse configuration,
-deterministic seeds, saved checkpoints, and unit tests covering forward/inverse consistency
-(tolerance \(<10^{-6}\) in \(L_\infty\)), log‑det correctness (per‑layer and
-cumulative), and shape invariants across 2‑D/3‑D. Experiments can be resumed
-from checkpoints, and all metrics, schedules, and hyperparameters are stored. 
+For images we use multiscale Glow with data-dependent ActNorm initialization, LU factorization for invertible convolutions, and a fixed number of steps per level. For tabular blocks we use 8 to 12 coupling layers with width between 256 and 512 units. We train by maximum likelihood with mixed precision and exponential moving averages of weights. Augmentations are used for images as described in the experimental section. Alignment losses are weighted relative to likelihood and turned on after a short warm-up. Screening uses CCA with ridge regularization or HSIC with a Pearson prefilter. We monitor exact NLL and simple latent calibration diagnostics for both images and IDPs [@kingma2018glow; @papamakarios2021nfreview; @zbontar2021barlow; @bardes2021vicreg].
