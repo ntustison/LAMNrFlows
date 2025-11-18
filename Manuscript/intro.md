@@ -28,7 +28,7 @@ mere surrogates [@croitoru2023diffusion_vision_survey; @zhai2024tarflow; @gu2025
 
 ## The LAM-Flow framework: learning shared multiscale latent spaces
 
-We develop a general systems view—*Latent-Aligned Multimodal Normalizing
+We develop a general systems view—*Latent-Aligned Multiview Normalizing
 Flows (LAM-Flow)*—that leverages the multiscale structure of flows to learn
 *shared* and *private* latent components across modalities for matched
 subjects. A subject’s multiscale latents are treated as structured random

@@ -5,13 +5,13 @@
 
 Normalizing flows provide exact-likelihood, bijective mappings between images
 and latents, making them highly suitable for multimodal representation learning.
-We introduce a general framework, Latent-Aligned Multimodal Normalizing Flows,
+We introduce a general framework, Latent-Aligned Multiview Normalizing Flows,
 that learns per-level shared and private latent structure across modalities
 while retaining Glow-style, multiscale latent access for analysis and editing.
 Given subject-matched batches, we impose latent-alignment constraints (e.g., Pearson,
 Barlow Twins, VICReg, InfoNCE, HSIC) to learn shared multiscale latent spaces
 and optionally discover shared subspaces via CCA/HSIC screening. On top of
-maximum-likelihood training, we provide a conditional Gaussian inference framework 
+maximum-likelihood training, we provide a conditional Gaussian inference framework
 that estimates per-level moments and yields closed-form posteriors over arbitrary
 subsets of latents. This enables principled cross-view imputation and, more
 generally, latent manipulations that preserve anatomy while modulating
