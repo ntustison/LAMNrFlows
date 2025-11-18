@@ -653,6 +653,8 @@ def _edit_latents_to_mean_for_view(
     pc_index: int = 0,
     pc_scale: float = 2.0,
     pc_center: str = "sample",
+    pc_k: int = 64,
+    pc_beta: float = 0.0
 ) -> List[torch.Tensor]:
     """
     For a given view, modify specified levels' latents.
@@ -840,9 +842,85 @@ def _edit_latents_to_mean_for_view(
                 f"lambda={lam:.3e}, step={step:.3e}, center={pc_center}"
             )
 
+        elif mode == "pc_denoise":
+            if Sigma_list is None:
+                raise RuntimeError(
+                    "[recon] Gaussian blob has no 'Sigma' field; cannot perform PC denoising."
+                )
+
+            # Select Σ_l (per-level)
+            Sigma_l = Sigma_list[l] if isinstance(Sigma_list, (list, tuple)) else Sigma_list
+
+            # Build per-view covariance block Σ_{ℓ,v}
+            Dv = C * H * W
+            if isinstance(Sigma_l, dict) and Sigma_l.get("type") == "lowrank":
+                U = np.asarray(Sigma_l["U"], dtype=np.float64)    # (D_total, r)
+                eig = np.asarray(Sigma_l["eig"], dtype=np.float64)  # (r,)
+                sigma2 = float(Sigma_l.get("sigma2", 0.0))
+
+                U_v = U[a:b, :]  # (D_v, r)
+                if U_v.shape[0] != Dv:
+                    raise RuntimeError(
+                        f"[recon] lowrank U slice has wrong length at level {l}, view '{view_name}'. "
+                        f"expected {Dv}, got {U_v.shape[0]}"
+                    )
+                # Σ_{ℓ,v} = U_v diag(eig) U_v^T + σ² I  (computed without forming full Σ_l)
+                Sv = (U_v * eig[np.newaxis, :]) @ U_v.T
+                if sigma2 > 0.0:
+                    Sv = Sv + sigma2 * np.eye(Dv, dtype=np.float64)
+            else:
+                S = np.asarray(Sigma_l, dtype=np.float64)
+                if S.ndim == 1:
+                    # Diagonal covariance: block is simply diag of the relevant entries
+                    diag_v = S[a:b]
+                    Sv = np.diag(diag_v)
+                else:
+                    Sv = S[a:b, a:b]
+
+            # Symmetrize for numerical safety
+            Sv = 0.5 * (Sv + Sv.T)
+
+            # Eigendecomposition of per-view block
+            w, V = np.linalg.eigh(Sv)  # ascending eigenvalues
+            if w.size == 0:
+                raise RuntimeError(
+                    f"[recon] Empty covariance block at level {l}, view '{view_name}'."
+                )
+
+            # Work in descending-variance order
+            V_desc = V[:, ::-1]
+            w_desc = w[::-1]
+
+            # Number of PCs to preserve
+            k_keep = int(pc_k)
+            if k_keep < 0:
+                k_keep = 0
+            if k_keep > V_desc.shape[1]:
+                k_keep = V_desc.shape[1]
+
+            V_t = torch.from_numpy(V_desc.astype(np.float32)).to(z_l.device, z_l.dtype)  # (Dv, Dv)
+
+            z_flat = z_l.view(B, -1)
+            mu_flat = mu_view.view(1, -1)
+            y = torch.matmul(z_flat - mu_flat, V_t)  # (B, Dv) in PC coordinates
+
+            if k_keep < V_t.shape[1]:
+                tail = y[:, k_keep:]
+                if float(pc_beta) == 0.0:
+                    y[:, k_keep:] = 0.0
+                else:
+                    y[:, k_keep:] = float(pc_beta) * tail
+
+            z_flat_edit = mu_flat + torch.matmul(y, V_t.T)
+            z_l_edit = z_flat_edit.view(B, C, H, W)
+
+            print(
+                f"[recon] level {l}, view '{view_name}': pc_denoise k_keep={k_keep}, tail_beta={pc_beta:.3f}"
+            )
+
         else:
             raise ValueError(
-                f"[recon] Unknown edit mode '{mode}', expected 'mean', 'zero', or 'pc'."
+                f"[recon] Unknown edit mode '{mode}', expected 'mean', 'zero', 'pc', or 'pc_denoise'."
             )
 
         z_out.append(z_l_edit)
@@ -1220,7 +1298,7 @@ def main_recon(argv=None):
     ap.add_argument("--edit-levels", type=str, default="none",
                     help="Levels to project to the Gaussian mean, e.g. '0', '0,1,2', '0-2,4', or 'all'. "
                          "'none' (default) disables latent editing.")
-    ap.add_argument("--edit-what", type=str, choices=["mean", "zero", "pc"], default="mean",
+    ap.add_argument("--edit-what", type=str, choices=["mean", "zero", "pc", "pc_denoise"], default="mean",
                     help=("What to insert at selected levels: Gaussian mean ('mean'), zeros ('zero'), "
                           "or a principal-component shift ('pc')."))
     ap.add_argument("--edit-pc-index", type=int, default=0, 
@@ -1230,6 +1308,12 @@ def main_recon(argv=None):
     ap.add_argument("--edit-pc-center", type=str, choices=["sample", "mean"], default="sample",
                     help=("Center for PC editing: 'sample' adds the PC shift to each sample's latent; "
                           "'mean' starts from the Gaussian mean."))
+    ap.add_argument("--edit-pc-k", type=int, default=64,
+                    help=("For 'pc_denoise': number of top principal components to preserve; "
+                          "the remaining PCs will be shrunk."))
+    ap.add_argument("--edit-pc-beta", type=float, default=0.0,
+                    help=("For 'pc_denoise': shrink factor for tail PCs (0 = full projection, "
+                          "1 = no change in tail)."))
     args = ap.parse_args(argv)
 
     device = torch.device(args.devices)
@@ -1348,6 +1432,8 @@ def main_recon(argv=None):
                     pc_index=getattr(args, "edit_pc_index", 0),
                     pc_scale=getattr(args, "edit_pc_scale", 2.0),
                     pc_center=getattr(args, "edit_pc_center", "sample"),
+                    pc_k=getattr(args, "edit_pc_k", 64),
+                    pc_beta=getattr(args, "edit_pc_beta", 0.0),
                 )
                 xh_edit = _decode_latents(model, z_list_edit, target_hw=(Hc, Wc))
                 edit_levels = levels
