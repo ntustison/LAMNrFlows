@@ -8,8 +8,8 @@ rmdFiles <- c( "format.md",
                "abstract.md",
                "intro.md",
                "methods.md",
-               "references.md",
-               "acknowledgments.md"
+               "acknowledgments.md",
+               "references.md"
              )
 
 for( i in 1:length( rmdFiles ) )
