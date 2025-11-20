@@ -5,12 +5,99 @@
 
 Medical imaging data and their representative latent spaces are essential for
 insight into biological structure and function. Deep learning workflows have
-become foundational for learning and leveraging such spaces. Many common
-approaches, however, are opaque to data likelihoods. They also lack
-invertibility, which complicates movement between image space and latent space.
-These limitations become acute in multimodal and multiview settings, where
-contrasts or views may be missing or heterogeneous and downstream analyses
-depend on calibrated comparisons and coherent cross-view reconstructions.
+become foundational for learning and leveraging such spaces. Many widely used
+approaches either provide no tractable data likelihood, optimize only a
+surrogate bound, or lack an invertible latent mapping, which complicates
+calibration, comparison, and precise latent edits. GANs, for example, are
+implicit samplers trained with divergence surrogates rather than likelihoods,
+so calibration by exact probabilities is unavailable [@papamakarios2021nfreview];
+VAEs optimize an evidence lower bound rather than the exact log likelihood
+[@kobyzev2020nfsurvey]; and diffusion and score models train via denoising or
+score-matching objectives, with likelihoods obtained indirectly
+[@croitoru2023diffusion_vision_survey]. Although autoregressive decoders
+provide exact likelihoods, they do not yield a one-shot invertible latent
+representation [@papamakarios2021nfreview]. These limitations become acute in
+multimodal and multiview settings, where contrasts or views may be missing or
+heterogeneous and downstream analyses depend on calibrated comparisons and
+coherent cross-view reconstructions.
+
+## Related work in "multiview" learning
+
+A view is a set of measurements on the same subjects that arises from a distinct
+acquisition or feature space (for example, distinct image types or tabular
+blocks of imaging-derived phenotypes). Views typically differ in scale, noise,
+and confounders. Multiview analysis exploits two complementary notions. First,
+each view contributes view-specific information that should be retained. Second,
+the overlap of information across views can be distilled into lower-dimensional
+shared projections that improve calibration and cross-cohort comparability.
+These shared projections can be estimated with classical correlation-based
+methods such as CCA [@Hotelling1936CCA; @Hardoon2004CCAOverview]. Kernel
+dependence measures such as the Hilbert–Schmidt Independence Criterion (HSIC)
+[@gretton2005hsic] or learned alignment objectives such as Barlow Twins, VICReg,
+and InfoNCE [@zbontar2021barlow; @bardes2021vicreg; @oord2018cpc] can also be
+used for broader application to missing-data patterns [@bishop2006prml;
+@Murphy2012ML].
+
+
+_Edit below_
+
+
+### Shared and private representations
+
+Cross-modal image translation and imputation have been studied with supervised
+CNNs and with adversarial or cycle-consistent approaches [@han2017dcnn;
+@florkow2020mrm; @yang2018structurecyclegan; @lei2019densecyclegan]. Methods
+that accept missing modalities at inference without explicit synthesis, such as
+HeMIS, offered robust alternatives by averaging in a learned latent space
+[@havaei2016hemis]. Diffusion-based approaches have recently been adapted to
+imputation and reconstruction with strong priors and uncertainty summaries
+[@yuan2024remind; @webber2024bjrai]. Parallel efforts in medical representation
+learning targeted explicit shared and private factors with autoencoders and
+contrastive learning [@Chartsias2018MILR; @Chartsias2019SDNet]. Flow-based
+multimodal modeling has also been explored for paired image tasks, for example
+with conditional couplings linking latent spaces across contrasts
+[@sun2019dualglow]. These works highlight the value of disentangling
+view-invariant content from view-specific variations but generally lack exact
+likelihoods and a one-shot invertible map to and from images.
+
+### Tabular and IDP modeling at cohort scale
+
+In large cohorts, multiview analyses often use linear embeddings, canonical
+correlation, and screening strategies for representation, harmonization, and
+transfer. A recent example is similarity-driven multiview embeddings for
+high-dimensional biomedical data, which demonstrated coherent cross-view
+structure discovery with rigorous validation across tasks
+[@Avants2021NatCompSci]. Our prior UK Biobank work on imaging-derived phenotypes
+used linear models as strong baselines and practical scorecards across cohorts
+[@Tustison:2024aa]. LAM-Flow complements this landscape by providing an
+exact-likelihood generative approach to multiview IDPs that exposes an
+invertible latent, supports shared-subspace alignment, and enables closed-form
+conditional queries.
+
+### Applied multiview cohorts in operational blast-exposure populations
+
+Operational and training environments provide natural multiview datasets mixing
+imaging, cognitive, clinical, and molecular measures. Career breachers exposed
+to repeated low-level blast have been profiled with multimodal MRI and serum
+biomarkers, showing functional and structural correlates that benefit from joint
+multiview analysis [@Stone2020BreachersNeuroimaging]. Follow-on work in Special
+Operations Forces reported altered inflammatory signatures and extracellular
+vesicle readouts alongside neurobehavioral assessment, again motivating
+calibrated cross-view comparisons [@Stone2024USSOCOM]. Additional studies in
+breacher training cohorts reported changes in glial fibrillary acidic protein
+and longitudinal serum panels, reinforcing the multiview nature of these data
+and the need to separate shared signal from view-specific factors
+[@Tschiffely2020GFAPBreachers; @Kamimori2018BreachersSerum].
+
+
+
+
+
+
+
+
+
+
 
 ## Normalizing flows as a foundation
 
@@ -57,34 +144,6 @@ framework is intended to be general. It applies to multiple imaging contrasts
 and also to multiview IDP blocks where each block comprises a coherent set of
 variables.
 
-## Related work in multiview learning
-
-### Shared and private representations
-
-Cross-modal image translation and imputation have been studied with supervised
-CNNs and with adversarial or cycle-consistent approaches [@han2017dcnn;
-@florkow2020mrm; @yang2018structurecyclegan; @lei2019densecyclegan]. Methods
-that accept missing modalities at inference without explicit synthesis, such as
-HeMIS, provided robust alternatives [@havaei2016hemis]. Diffusion-based
-approaches have recently been adapted to imputation and reconstruction with
-strong priors and uncertainty summaries [@yuan2024remind; @webber2024bjrai]. In
-parallel, multiview representation methods developed shared and private factors
-with autoencoders and contrastive learning in medical settings
-[@Chartsias2018MILR; @Chartsias2019SDNet]. Flow-based multimodal modeling has
-also been explored for paired image tasks [@sun2019dualglow].
-
-### Tabular and IDP modeling at cohort scale
-
-For tabular and IDP analyses, linear multiview embeddings, canonical correlation
-variants, and screening strategies are widely used for representation,
-harmonization, and transfer. Our prior work on the UK Biobank processed
-imaging-derived phenotypes and applied linear models with a fixed scorecard
-across multiple cohorts and tasks, which provides a practical and strong
-baseline for comparisons [@Tustison:2024aa]. Deep learning for tabular data has
-explored entity embeddings and attention over categorical slots, yet boosted
-trees remain strong baselines. In this landscape, LAM-Flow brings an
-exact-likelihood generative approach to multiview IDPs with explicit shared and
-private latents and closed-form conditional queries.
 
 ## Contributions
 
