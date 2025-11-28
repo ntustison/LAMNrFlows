@@ -102,7 +102,7 @@ python train_cohort_screened.py \
 
 <details>
 
-<summary>Output:  Sampled data at 120k iterations</summary>
+<summary>Output:  Generative samples at 120k iterations</summary>
 
 <p align="center">
   <img src="Manuscript/Figures/samples_view0_it120000.png" alt="T1" width="30%">
