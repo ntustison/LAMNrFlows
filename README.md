@@ -112,11 +112,10 @@ python train_cohort_screened.py \
   
 </details>
 
-<details>
+***
 
-<summary>Funding support</summary>
+### Funding support
 
 We gratefully acknowledge the grant support of the Office of Naval Research (N0014-23-1-2317).  
   
-</details>
 
