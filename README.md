@@ -22,10 +22,9 @@ We introduce Latent-Aligned Multiview Normalizing Flows, a general framework tha
 
 * The bottom level (L-1 = 4) keeps all its channels as z4.
 
+__Single view normalizing flow__
+
 ```python
-
-
-
 Input (image space)
 -------------------
 x : [B, 1, 128, 128]
@@ -102,7 +101,37 @@ All latents:
 ------------
 z = { z0, z1, z2, z3, z4 }
 ```
-  
+__Latent-aligned multiview__
+
+```python
+                Latent-Aligned Multiview Normalizing Flows
+                ==========================================
+
+   x^(1) (T1)           x^(2) (T2)           x^(3) (FA)
+ [B,1,128,128]        [B,1,128,128]        [B,1,128,128]
+       |                     |                     |
+       v                     v                     v
+   +----------+          +----------+          +----------+
+   |  Flow f1 |          |  Flow f2 |          |  Flow f3 |
+   | (Glow,   |          | (Glow,   |          | (Glow,   |
+   |  L = 5)  |          |  L = 5)  |          |  L = 5)  |
+   +----------+          +----------+          +----------+
+       |                     |                     |
+       | z^(1) = {z_0..z_4}  | z^(2) = {z_0..z_4}  | z^(3) = {z_0..z_4}
+       | (per-level latents) | (per-level latents) | (per-level latents)
+       +----------+----------+----------+----------+
+                  |                     |
+                  v                     v
+
+          +---------------------------------------------+
+          |  Per-level alignment + Gaussian head        |
+          |                                             |
+          |  For ℓ = 0..4:                              |
+          |    { z_ℓ^(v) }_(v=1..3)  ─→  projectors     |
+          |                            ─→  alignment    |
+          |    NLL from each flow     ─→  joint loss    |
+          +---------------------------------------------+
+```
 </details>
 
 <details>
