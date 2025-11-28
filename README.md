@@ -90,7 +90,7 @@ python train_cohort_screened.py \
 
 <details>
 
-<summary>Input:  HCP templates (T1, T2, & FA) with augmentation</summary>
+<summary>Input:  HCP templates (T1, T2, & FA/Young Adult, Adult, Inter) with augmentation</summary>
 
 <p align="center">
   <img src="Manuscript/Figures/input_data_view0.png" alt="T1" width="30%">
