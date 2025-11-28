@@ -8,6 +8,104 @@ We introduce Latent-Aligned Multiview Normalizing Flows, a general framework tha
 ### Glow 2-D HCP example
 
 <details>
+<summary>Network architecture</summary>
+
+* input size: 128×128
+
+* levels: L = 5
+
+* single-channel input per view: C₀ = 1 (you can mentally replace 1 with C₀ if you want it symbolic)
+
+* Squeeze 5 times to go from 128×128 down to 4×4.
+
+* Split at the first 4 levels (0–3).
+
+* The bottom level (L-1 = 4) keeps all its channels as z4.
+
+```python
+
+
+
+Input (image space)
+-------------------
+x : [B, 1, 128, 128]
+
+          |
+          | SQUEEZE (×4 channels, /2 spatial)
+          v
+
+Level 0 feature map
+-------------------
+h0: [B, 4, 64, 64]
+    |
+    | Glow blocks (K steps, invertible)
+    v
+    SPLIT (factor-out half the channels)
+    +-----------------------------> z0: [B, 2, 64, 64]   (latent level 0)
+    |
+    +--> h1: [B, 2, 64, 64]  (remaining, goes deeper)
+
+          |
+          | SQUEEZE
+          v
+
+Level 1 feature map
+-------------------
+h1s: [B, 8, 32, 32]
+     |
+     | Glow blocks
+     v
+     SPLIT
+     +----------------------------> z1: [B, 4, 32, 32]   (latent level 1)
+     |
+     +--> h2: [B, 4, 32, 32]
+
+          |
+          | SQUEEZE
+          v
+
+Level 2 feature map
+-------------------
+h2s: [B, 16, 16, 16]
+     |
+     | Glow blocks
+     v
+     SPLIT
+     +----------------------------> z2: [B, 8, 16, 16]   (latent level 2)
+     |
+     +--> h3: [B, 8, 16, 16]
+
+          |
+          | SQUEEZE
+          v
+
+Level 3 feature map
+-------------------
+h3s: [B, 32, 8, 8]
+     |
+     | Glow blocks
+     v
+     SPLIT
+     +----------------------------> z3: [B, 16, 8, 8]    (latent level 3)
+     |
+     +--> h4: [B, 16, 8, 8]
+
+          |
+          | SQUEEZE  (last time, because L=5)
+          v
+
+Level 4 (bottom level)
+----------------------
+h4s ≡ z4: [B, 64, 4, 4]          (latent level 4, NO split here)
+
+All latents:
+------------
+z = { z0, z1, z2, z3, z4 }
+```
+  
+</details>
+
+<details>
 
 <summary>Command call</summary>
 
