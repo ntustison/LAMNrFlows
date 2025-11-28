@@ -90,12 +90,12 @@ python train_cohort_screened.py \
 
 <details>
 
-<summary>Input:  HCP templates with augmentation</summary>
+<summary>Input:  HCP templates (T1, T2, & FA) with augmentation</summary>
 
 <p align="center">
-  <img src="Manuscript/Figures/input_data_view0.png" alt="alt1" width="30%">
-  <img src="Manuscript/Figures/input_data_view1.png" alt="alt1" width="30%">
-  <img src="Manuscript/Figures/input_data_view2.png" alt="alt1" width="30%">
+  <img src="Manuscript/Figures/input_data_view0.png" alt="T1" width="30%">
+  <img src="Manuscript/Figures/input_data_view1.png" alt="T2" width="30%">
+  <img src="Manuscript/Figures/input_data_view2.png" alt="FA" width="30%">
 </p>
   
 </details>
@@ -105,9 +105,9 @@ python train_cohort_screened.py \
 <summary>Output:  Sampled data at 120k iterations</summary>
 
 <p align="center">
-  <img src="Manuscript/Figures/samples_view0_it120000.png" alt="alt1" width="30%">
-  <img src="Manuscript/Figures/samples_view0_it120000.png" alt="alt1" width="30%">
-  <img src="Manuscript/Figures/samples_view0_it120000.png" alt="alt1" width="30%">
+  <img src="Manuscript/Figures/samples_view0_it120000.png" alt="T1" width="30%">
+  <img src="Manuscript/Figures/samples_view1_it120000.png" alt="T2" width="30%">
+  <img src="Manuscript/Figures/samples_view2_it120000.png" alt="FA" width="30%">
 </p>
   
 </details>
