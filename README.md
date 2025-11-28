@@ -93,9 +93,9 @@ python train_cohort_screened.py \
 <summary>Input:  HCP templates with augmentation</summary>
 
 <p align="center">
-  <img src="Figures/input_data_view0.png" alt="alt1" width="30%">
-  <img src="Figures/input_data_view1.png" alt="alt1" width="30%">
-  <img src="Figures/input_data_view2.png" alt="alt1" width="30%">
+  <img src="Manuscript/Figures/input_data_view0.png" alt="alt1" width="30%">
+  <img src="Manuscript/Figures/input_data_view1.png" alt="alt1" width="30%">
+  <img src="Manuscript/Figures/input_data_view2.png" alt="alt1" width="30%">
 </p>
   
 </details>
