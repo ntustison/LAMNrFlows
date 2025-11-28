@@ -2,6 +2,7 @@
 import argparse
 from pathlib import Path
 from typing import List, Tuple
+from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -46,7 +47,7 @@ def screen_dump_run_config(args, out_dir: Path, note: str = "", dataset_info: di
         "cuda_available": torch.cuda.is_available(),
         "cuda_device_count": torch.cuda.device_count(),
     }
-    if dataset_info:  # append dataset stats if provided later
+    if dataset_info:
         cfg["dataset_info"] = dataset_info
 
     # Save JSON (machine-readable)
@@ -55,19 +56,21 @@ def screen_dump_run_config(args, out_dir: Path, note: str = "", dataset_info: di
 
     # Pretty TXT (human-readable)
     rows = []
-    rows.append(f"[run] {env['timestamp']} | Py {env['python']} | torch {env['torch']} "
-                f"| cuda={_fmt_bool(env['cuda_available'])} (n={env['cuda_device_count']})")
+    rows.append(
+        f"[run] {env['timestamp']} | Py {env['python']} | torch {env['torch']} "
+        f"| cuda={_fmt_bool(env['cuda_available'])} (n={env['cuda_device_count']})"
+    )
     if note:
         rows.append(f"[note] {note}")
 
     def add(k, v):
-        if v is None: v = "None"
+        if v is None:
+            v = "None"
         rows.append(f"{k:>24}: {v}")
 
-    # Core architecture & training knobs (edit the list to taste)
+    # Core architecture & training knobs
     add("out_dir", cfg.get("out_dir"))
     add("views", getattr(args, "num_views", None))
-    # add("--view (globs)", cfg.get("view"))
     add("H×W", f"{cfg.get('H')}×{cfg.get('W')}")
     add("L / K / hidden", f"{cfg.get('L')} / {cfg.get('K')} / {cfg.get('hidden')}")
     add("align", cfg.get("align"))
@@ -87,8 +90,16 @@ def screen_dump_run_config(args, out_dir: Path, note: str = "", dataset_info: di
     add("smooth_alpha", cfg.get("smooth_alpha"))
     add("sample_mode / temp", f"{cfg.get('sample_mode')} / {cfg.get('sample_temp')}")
     add("disable_aug_anneal", _fmt_bool(cfg.get("disable_aug_anneal")))
-    # Schedules can be long—still print them explicitly:
     add("aug_schedules", cfg.get("aug_schedules"))
+
+    # --- NEW: screening configuration ---
+    add("screen", cfg.get("screen"))
+    add("screen_frac", cfg.get("screen_frac"))
+    add("screen_warmup / refresh",
+        f"{cfg.get('screen_warmup')} / {cfg.get('screen_refresh')}")
+    add("cca_ridge", cfg.get("cca_ridge"))
+    add("prefilter_frac", cfg.get("prefilter_frac"))
+    # ------------------------------------
 
     # Dataset summary if available
     if dataset_info:
@@ -100,7 +111,6 @@ def screen_dump_run_config(args, out_dir: Path, note: str = "", dataset_info: di
     print("\n" + txt)
     with open(out_dir / "run_config.txt", "a") as f:
         f.write(txt)
-
 
 
 # ------------------------- small utils -------------------------
@@ -221,6 +231,186 @@ class Projector(nn.Module):
 def _flatten_latents(z):
     zs = z if isinstance(z, (list, tuple)) else [z]
     return torch.cat([zi.flatten(1) for zi in zs], dim=1)  # [B, sum_i CiHiWi]
+
+# ------------------------- screening helpers (CCA / HSIC) -------------------------
+
+from typing import Optional, Dict, Literal, Tuple as _Tuple
+Method = Literal["none","cca","hsic"]
+
+@dataclass
+class ScreenState:
+    method: Method = "none"
+    proj_dim: int = 0
+    keep_dim: int = 0
+    n_views: int = 0
+    device: Optional[torch.device] = None
+    dtype: Optional[torch.dtype] = None
+    projectors: Optional[List[torch.Tensor]] = None  # for CCA (D,r)
+    masks: Optional[List[torch.Tensor]] = None       # for HSIC (D,)
+    meta: Optional[Dict] = None
+
+def _whiten(F: torch.Tensor, ridge: float = 1e-3) -> _Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    mu = F.mean(dim=0, keepdim=True)
+    X = F - mu
+    cov = (X.T @ X) / max(1, X.shape[0] - 1)
+    cov = cov + ridge * torch.eye(cov.shape[0], device=F.device, dtype=F.dtype)
+    evals, evecs = torch.linalg.eigh(cov)
+    evals = torch.clamp(evals, min=1e-12)
+    inv_sqrt = evecs @ torch.diag(evals.rsqrt()) @ evecs.T
+    return X @ inv_sqrt, mu, inv_sqrt
+
+@torch.no_grad()
+def _cca_pair(A: torch.Tensor, B: torch.Tensor, ridge: float = 1e-3):
+    Xa, _, Wa = _whiten(A, ridge=ridge)
+    Xb, _, Wb = _whiten(B, ridge=ridge)
+    M = Xa.T @ Xb / max(1, A.shape[0] - 1)
+    U, S, Vh = torch.linalg.svd(M, full_matrices=False)
+    Ua = Wa @ U
+    Vb = Wb @ Vh.T
+    return Ua, S, Vb
+
+@torch.no_grad()
+def _screen_cca(feats: List[torch.Tensor], keep_dim: int, ridge: float = 1e-3):
+    n = len(feats)
+    B, D = feats[0].shape
+    accum = [torch.zeros(D, D, device=feats[0].device, dtype=feats[0].dtype) for _ in range(n)]
+    spectra = []
+    for i in range(n):
+        for j in range(i+1, n):
+            Ui, S, Vj = _cca_pair(feats[i], feats[j], ridge=ridge)
+            ui = Ui[:, :keep_dim]
+            vj = Vj[:, :keep_dim]
+            accum[i] = accum[i] + ui @ ui.T
+            accum[j] = accum[j] + vj @ vj.T
+            spectra.append(S.detach().cpu())
+    projectors = []
+    for i in range(n):
+        A = accum[i] / max(1, (n-1)) + 1e-6 * torch.eye(accum[i].shape[0], device=accum[i].device, dtype=accum[i].dtype)
+        ev, evc = torch.linalg.eigh(A)
+        idx = torch.argsort(ev, descending=True)[:keep_dim]
+        Pi = evc[:, idx]
+        projectors.append(Pi)
+    info = {"cca_keep_dim": int(keep_dim), "mean_spectrum": (torch.stack(spectra).mean(dim=0).tolist() if len(spectra) else None)}
+    return projectors, info
+
+def _rbf_kernel(x: torch.Tensor, gamma: Optional[float] = None) -> torch.Tensor:
+    B = x.shape[0]
+    x_norm = (x * x).sum(1).view(-1, 1)
+    dist = x_norm + x_norm.T - 2.0 * (x @ x.T)
+    if gamma is None:
+        vals = dist.detach()
+        median = torch.median(vals[~torch.eye(B, dtype=torch.bool, device=x.device)])
+        if median <= 0: median = torch.tensor(1.0, device=x.device, dtype=x.dtype)
+        gamma = 1.0 / (2.0 * median)
+    K = torch.exp(-gamma * dist)
+    H = torch.eye(B, device=x.device, dtype=x.dtype) - (1.0/B) * torch.ones(B, B, device=x.device, dtype=x.dtype)
+    return H @ K @ H
+
+@torch.no_grad()
+def _hsic_unbiased(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    B = x.shape[0]
+    K = _rbf_kernel(x); L = _rbf_kernel(y)
+    mask = ~torch.eye(B, dtype=torch.bool, device=x.device)
+    K_off = K[mask].view(B, B-1); L_off = L[mask].view(B, B-1)
+    term1 = (K_off * L_off).sum() / (B * (B - 3))
+    K1 = K.sum(dim=1) - torch.diagonal(K); L1 = L.sum(dim=1) - torch.diagonal(L)
+    term2 = (K1 * L1).sum() / (B * (B - 3) * (B - 1))
+    return term1 - term2
+
+@torch.no_grad()
+def _screen_hsic(feats: List[torch.Tensor], keep_frac: float, prefilter_frac: float = 0.5):
+    n = len(feats)
+    B, D = feats[0].shape
+    r = max(1, int(round(D * keep_frac)))
+    k_pref = max(1, int(round(D * prefilter_frac)))
+    Z = []
+    for Fv in feats:
+        Zv = (Fv - Fv.mean(dim=0, keepdim=True)) / (Fv.std(dim=0, keepdim=True) + 1e-6)
+        Z.append(Zv)
+    pearson_scores = [torch.zeros(D, device=feats[0].device, dtype=feats[0].dtype) for _ in range(n)]
+    for v in range(n):
+        others = [Z[u] for u in range(n) if u != v]
+        Zcat = torch.cat(others, dim=1) if len(others) else None
+        if Zcat is None or Zcat.shape[1] == 0:
+            continue
+        zmean = Zcat.mean(dim=1, keepdim=True)
+        a = Z[v]
+        num = (a * zmean).sum(dim=0)
+        den = (a.pow(2).sum(dim=0).sqrt() * (zmean.pow(2).sum(dim=0).sqrt().squeeze(0) + 1e-8))
+        corr = (num / (den + 1e-8)).abs()
+        pearson_scores[v] = corr
+    hsic_scores = [torch.zeros(D, device=feats[0].device, dtype=feats[0].dtype) for _ in range(n)]
+    for v in range(n):
+        top_idx = torch.topk(pearson_scores[v], k=k_pref, largest=True).indices
+        others = [Z[u] for u in range(n) if u != v]
+        Zcat = torch.cat(others, dim=1) if len(others) else None
+        if Zcat is None or Zcat.shape[1] == 0:
+            continue
+        y = Zcat.mean(dim=1, keepdim=True)
+        for d in top_idx.tolist():
+            x = Z[v][:, d:d+1]
+            hs = _hsic_unbiased(x, y)
+            hsic_scores[v][d] = hs
+    masks = []
+    kept_counts = []
+    for v in range(n):
+        idx = torch.topk(hsic_scores[v], k=r, largest=True).indices
+        mask = torch.zeros(D, dtype=torch.bool, device=feats[0].device)
+        mask[idx] = True
+        masks.append(mask)
+        kept_counts.append(int(mask.sum().item()))
+    info = {"keep_dim": r, "prefilter_dim": k_pref, "kept_per_view": kept_counts}
+    return masks, info
+
+def update_screen(feats: List[torch.Tensor], state: Optional[ScreenState], method: Method="none",
+                  keep_frac: float=0.5, ridge: float=1e-3, refresh: bool=False, prefilter_frac: float=0.5) -> ScreenState:
+    if method == "none":
+        return ScreenState(method="none")
+    assert 0.0 < keep_frac <= 1.0
+    B, D = feats[0].shape
+    device, dtype = feats[0].device, feats[0].dtype
+    n_views = len(feats)
+    r = max(1, int(round(D * keep_frac)))
+    if state is None or (state.method != method or state.proj_dim != D or state.n_views != n_views or state.keep_dim != r):
+        state = ScreenState(method=method, proj_dim=D, keep_dim=r, n_views=n_views, device=device, dtype=dtype, projectors=None, masks=None, meta={})
+    if not refresh:
+        return state
+    if method == "cca":
+        projectors, info = _screen_cca(feats, keep_dim=r, ridge=ridge)
+        state.projectors = [P.to(device=device, dtype=dtype) for P in projectors]
+        state.masks = None
+        state.meta = {"cca_info": info, "keep_dim": r}
+    elif method == "hsic":
+        masks, info = _screen_hsic(feats, keep_frac=keep_frac, prefilter_frac=prefilter_frac)
+        state.masks = [m.to(device=device) for m in masks]
+        state.projectors = None
+        state.meta = {"hsic_info": info, "keep_dim": r}
+    return state
+
+@torch.no_grad()
+def apply_screen(feats: List[torch.Tensor], state: Optional[ScreenState]) -> List[torch.Tensor]:
+    """
+    Apply the learned screening transform if it exists.
+    If screening hasn't been computed yet, this safely falls back to identity.
+    """
+    if state is None or state.method == "none":
+        return feats
+
+    if state.method == "cca":
+        # Projectors not ready yet → skip screening
+        if state.projectors is None:
+            return feats
+        return [f @ P for f, P in zip(feats, state.projectors)]
+
+    if state.method == "hsic":
+        # Masks not ready yet → skip screening
+        if state.masks is None:
+            return feats
+        return [f[:, m] for f, m in zip(feats, state.masks)]
+
+    return feats
+
+
 
 # ------------------------- viz helpers -------------------------
 
@@ -561,7 +751,11 @@ def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch
     n_subj = len(images_by_subject)
     rng = np.random.default_rng(seed)
     idx = np.arange(n_subj); rng.shuffle(idx)
-    n_val = max(1, int(round(float(val_frac) * n_subj)))
+    n_val = int(round(float(val_frac) * n_subj))
+    # ensure we always leave at least one subject for training
+    if n_val >= n_subj:
+        n_val = max(0, n_subj - 1)
+
     val_idx = set(idx[:n_val])
 
     images_train = [s for si, subj in enumerate(images_by_subject) if si not in val_idx for s in subj]
@@ -758,6 +952,21 @@ def main():
                     help="How to produce preview grids during eval: model sampling, random val batch, or skip")
     ap.add_argument("--sample-temp", type=float, default=1.0,
                 help="Sampling temperature: scales prior noise (z = T·ε) when --sample-mode model")
+
+
+    # --- Screening (shared subspace discovery) ---
+    ap.add_argument("--screen", type=str, default="none", choices=["none","cca","hsic"],
+                    help="Optional subspace screening before alignment.")
+    ap.add_argument("--screen-warmup", type=int, default=1000,
+                    help="Iterations before first screening pass.")
+    ap.add_argument("--screen-refresh", type=int, default=0,
+                    help="Recompute screening every N iters (0 = one-shot).")
+    ap.add_argument("--screen-frac", type=float, default=0.5,
+                    help="Fraction of projected dims to keep as shared (0,1].")
+    ap.add_argument("--cca-ridge", type=float, default=1e-3,
+                    help="CCA ridge regularization (stability).")
+    ap.add_argument("--prefilter-frac", type=float, default=0.5,
+                help="HSIC Pearson prefilter fraction (0,1].")
 
     args = ap.parse_args()
     args.num_views = len(args.view)
@@ -1069,6 +1278,9 @@ def main():
 
     # ------------------------- train loop -------------------------
     n_views = len(models)
+
+    # screening state
+    screen_state: ScreenState = None
     tqdm.write(f"[info] training {n_views} view(s); params per view: {[n_params(m) for m in models]}")
 
     alpha = float(args.smooth_alpha)
@@ -1125,14 +1337,45 @@ def main():
 
         L_align = torch.tensor(0.0, device=dev)
         if args.align != "none" and it >= args.align_warmup:
+            # 1) Build per-view features (post-projector) BEFORE screening
             feats = [projectors[i](lat_flat[i]) for i in range(len(lat_flat))]
             feats = [f.float() for f in feats]
+
+            # 2) Optional shared-subspace screening
+            if args.screen != "none" and it >= args.screen_warmup:
+                # Semantics:
+                #   screen_refresh == 0  → discover once at first eligible iter
+                #   screen_refresh > 0   → recompute every screen_refresh iters
+                if screen_state is None:
+                    do_refresh = True
+                else:
+                    do_refresh = (
+                        args.screen_refresh > 0
+                        and (it - args.screen_warmup) % args.screen_refresh == 0
+                    )
+
+                screen_state = update_screen(
+                    feats,
+                    state=screen_state,
+                    method=args.screen,           # 'cca' | 'hsic'
+                    keep_frac=args.screen_frac,   # e.g., 0.5
+                    ridge=args.cca_ridge,         # CCA ridge
+                    refresh=do_refresh,
+                    prefilter_frac=args.prefilter_frac,  # HSIC prefilter
+                )
+                feats = apply_screen(feats, screen_state)
+            # else: no screening yet; use full projector outputs
+
+            # 3) Alignment loss on (optionally) screened features
             if args.align == "barlow":
                 L_align = antstorch.barlow_twins_multi(feats, lam=float(args.barlow_lambda))
             elif args.align == "vicreg":
                 L_align = antstorch.vicreg_multi(
-                    feats, w_inv=float(args.vicreg_inv), w_var=float(args.vicreg_var),
-                    w_cov=float(args.vicreg_cov), gamma=float(args.vicreg_gamma),
+                    feats,
+                    w_inv=float(args.vicreg_inv),
+                    w_var=float(args.vicreg_var),
+                    w_cov=float(args.vicreg_cov),
+                    gamma=float(args.vicreg_gamma),
                 )
             elif args.align == "infonce":
                 L_align = antstorch.info_nce_multi(feats, T=float(args.temperature))
@@ -1229,7 +1472,7 @@ def main():
                 eval_models = ema_models if ema_models is not None else models
                 num_views = len(eval_models)
                 ok, err = save_coordinated_input_grids(
-                    val_loader, num_views=num_views, out_dir=run_dir, fallback_loader=train_loader,
+                    train_loader, num_views=num_views, out_dir=run_dir, fallback_loader=train_loader,
                     n=100, nrow=10, target_hw=(args.H, args.W), device=dev,
                 )
                 if ok:
