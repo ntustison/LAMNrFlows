@@ -42,7 +42,7 @@ sd_histogram_warping:cos:0.008->0.008@${extra}"
 SLICE_IDX=116
 
 # ---- Phase 1: strong->weak aug (as in earlier successful runs) ----
-python train_cohort_screened.py \
+python train_cohort.py \
   --view ~/Data/HCPTemplates/*/T_template0.nii.gz \
   --view ~/Data/HCPTemplates/*/T_template1.nii.gz \
   --view ~/Data/HCPTemplates/*/T_template2.nii.gz \
@@ -72,7 +72,7 @@ python train_cohort_screened.py \
   --out-dir "${OUTDIR}"
 
 # ---- Phase 2: resume, template-only fine-tune ----
-# python train_cohort_screened.py \
+# python train_cohort.py \
 #  --auto-resume --extra-iters ${extra} \
 #  --view ~/Data/HCPTemplates/*/T_template0.nii.gz \
 #  --view ~/Data/HCPTemplates/*/T_template1.nii.gz \
