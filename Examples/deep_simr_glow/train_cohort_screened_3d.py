@@ -515,56 +515,174 @@ def _extract_views_from_batch(batch, num_views: int | None = None):
 
     raise ValueError(f"Unsupported batch type for multi-view extraction: {type(batch)}")
 
-def save_coordinated_input_grids(val_loader, num_views: int, out_dir: Path,
-                                 fallback_loader=None,
-                                 n: int = 100, nrow: int = 10, target_hw=None, device="cpu"):
-    import torch
+from pathlib import Path
+import torch
+import torch.nn.functional as F
 
-    def collect_from_loader(loader):
-        samples_per_view = [[] for _ in range(num_views)]
-        collected = 0
-        for batch in loader:
-            xs = _extract_views_from_batch(batch, num_views=num_views)
-            if len(xs) != num_views:
-                return None, f"Expected {num_views} views, got {len(xs)}."
-            B = xs[0].shape[0]
-            take = min(n - collected, B)
-            if take > 0:
-                for vi in range(num_views):
-                    xvi = xs[vi][:take].to(device, non_blocking=True)
-                    samples_per_view[vi].append(xvi)
-                collected += take
-            if collected >= n:
-                break
-        if collected == 0:
-            return None, "loader yielded no samples."
-        stacked = [torch.cat(vs, dim=0)[:n] for vs in samples_per_view]
-        return stacked, None
+def save_input_grids_any(
+    train_loader,
+    val_loader,
+    num_views: int,
+    out_dir: Path,
+    max_per_view: int,
+    grid_cols: int,
+    global_step: int,
+    logger,
+):
+    """
+    Save per-view input grids for both 2D and 3D runs.
 
+    - For 2D, behaves like the original coordinated input grids.
+    - For 3D, uses the center slice along D for each view.
+    """
+    from torchvision.utils import make_grid, save_image
+
+    def _get_first_batch(loader):
+        try:
+            return next(iter(loader))
+        except StopIteration:
+            return None
+
+    def _coerce_batch_to_tensor(batch):
+        # Mirror what the training loop expects
+        if isinstance(batch, (list, tuple)):
+            # most likely (images, *meta)
+            return batch[0]
+        if isinstance(batch, dict) and "image" in batch:
+            return batch["image"]
+        return batch
+
+    def _save_for_loader(loader, split_name: str):
+        if loader is None:
+            return
+        batch = _get_first_batch(loader)
+        if batch is None:
+            logger.warning(f"[input-grids] no batch available for {split_name}")
+            return
+
+        x = _coerce_batch_to_tensor(batch)
+        xs = _extract_views_from_batch(x, num_views=num_views)  # uses same logic as training
+
+        split_dir = out_dir / f"grids_input_{split_name}"
+        split_dir.mkdir(parents=True, exist_ok=True)
+
+        # For each view, make a small grid of center slices
+        for vi in range(min(num_views, len(xs))):
+            x_v = xs[vi]  # shape: (N, C, H, W) or (N, C, D, H, W)
+            if not torch.is_tensor(x_v):
+                continue
+
+            # normalize to [0,1] over spatial dims
+            x_v = to01(x_v.clone())
+
+            # Limit number of examples per view
+            x_v = x_v[:max_per_view]
+
+            # _coerce_nchw_4d handles 3D volumes by taking center slice along D
+            imgs = _coerce_nchw_4d(x_v)
+
+            # Make a grid and save
+            grid = make_grid(
+                imgs,
+                nrow=max(1, grid_cols),
+                padding=2,
+                normalize=False,
+            )
+            out_path = split_dir / f"input_data_view{vi}_it{global_step:06d}.png"
+            save_image(grid, out_path)
+            logger.info(
+                f"[input-grids] wrote {out_path} "
+                f"(split={split_name}, view={vi}, n={imgs.size(0)})"
+            )
+
+    _save_for_loader(train_loader, "train")
+    _save_for_loader(val_loader, "val")
+    return True, None
+
+from pathlib import Path
+import torch
+
+from pathlib import Path
+import torch
+
+def save_coordinated_input_grids(
+    loader,
+    num_views,
+    out_dir,
+    fallback_loader=None,
+    n=100,
+    nrow=10,
+    target_hw=None,
+    device=None,
+):
+    """
+    Build one grid per view from the first batch of `loader` (or `fallback_loader`).
+
+    Works for:
+      - 2D: tensors shaped (N, C, H, W)
+      - 3D: tensors shaped (N, C, D, H, W) by taking the center slice along D.
+
+    Writes files like:
+      out_dir/input_data_view0.png
+      out_dir/input_data_view1.png
+      ...
+    """
+    from torchvision.utils import make_grid, save_image
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- grab one batch ---
     try:
-        result, err = collect_from_loader(val_loader)
-        if result is None:
-            if fallback_loader is not None:
-                result, err_fb = collect_from_loader(fallback_loader)
-                if result is None:
-                    return False, f"val+fallback loaders failed: {err}; {err_fb}"
-            else:
-                return False, f"val loader failed: {err}"
-    except Exception as e:
-        if fallback_loader is not None:
-            try:
-                result, err_fb = collect_from_loader(fallback_loader)
-                if result is None:
-                    return False, f"val+fallback loaders failed: {e}; {err_fb}"
-            except Exception as e2:
-                return False, f"val+fallback loaders exception: {e}; {e2}"
-        else:
-            return False, f"val loader exception: {e}"
+        batch = next(iter(loader))
+    except StopIteration:
+        if fallback_loader is None:
+            return False, "empty loader and no fallback_loader"
+        try:
+            batch = next(iter(fallback_loader))
+        except StopIteration:
+            return False, "empty loader and empty fallback_loader"
+
+    # --- unwrap batch to a tensor x ---
+    if isinstance(batch, (list, tuple)):
+        x = batch[0]
+    elif isinstance(batch, dict) and "image" in batch:
+        x = batch["image"]
+    else:
+        x = batch
+
+    # Split into per-view tensors; this should give you [view0, view1, view2]
+    xs = _extract_views_from_batch(x, num_views=num_views)
+    if len(xs) == 0:
+        return False, "no per-view tensors extracted from batch"
+
+    num_views = min(num_views, len(xs))
 
     for vi in range(num_views):
-        x = result[vi]  # (n,C,H,W)
+        x_v = xs[vi]
+        if not torch.is_tensor(x_v):
+            continue
+
+        # limit number of examples and move to device
+        x_v = x_v[:n].to(device)
+
+        # normalize to [0,1] over spatial dims
+        x_v = to01(x_v)
+
+        # handle 2D vs 3D; _coerce_nchw_4d:
+        #   - for 5D N×C×D×H×W → center D slice, N×C×H×W
+        #   - for C>3, averages over channels to get grayscale
+        imgs = _coerce_nchw_4d(x_v, target_hw=target_hw)
+
+        grid = make_grid(
+            imgs,
+            nrow=max(1, nrow),
+            padding=2,
+            normalize=False,
+        )
         out_path = out_dir / f"input_data_view{vi}.png"
-        _save_grid_from_tensor(x, out_path, nrow=nrow, target_hw=target_hw)
+        save_image(grid, out_path)
+
     return True, None
 
 def _make_grid_canvas(x, nrow=10):
@@ -581,10 +699,18 @@ def _make_grid_canvas(x, nrow=10):
 
 def _coerce_nchw_4d(x, target_hw=None):
     """
-    Coerce samples to N×C×H×W for grid saving.
+    Coerce sample outputs to (N, C, H, W) for grid saving.
 
-    If a 3D volume (N×C×D×H×W) is provided, take the center slice along D.
+    Supports:
+      - 2D tensors: (N, C, H, W), (C, H, W), (H, W, C)
+      - 3D volumes: (N, C, S0, S1, S2) by taking the center slice along
+        the *last* spatial dimension S2 -> (N, C, S0, S1).
+      - Lists/tuples of such tensors: pick the candidate with the largest
+        spatial area of the last two dims.
     """
+    import torch
+
+    # If we got a list/tuple, pick the largest spatial candidate
     if isinstance(x, (list, tuple)):
         cands = [t for t in x if torch.is_tensor(t) and t.dim() in (3, 4, 5)]
         if not cands:
@@ -592,43 +718,53 @@ def _coerce_nchw_4d(x, target_hw=None):
         areas, fixed = [], []
         for t in cands:
             if t.dim() == 5:
-                _, _, D, H, W = t.shape
-                mid = D // 2
-                t = t[:, :, mid:mid+1, :, :]
-                t = t.squeeze(2)
-            if t.dim() == 3:
+                # Treat as (N, C, S0, S1, S2); project to 2D via center slice on last dim
+                mid = t.shape[-1] // 2
+                t = t[..., mid]  # (N, C, S0, S1)
+            elif t.dim() == 3:
+                # (C, H, W) or (H, W, C)
                 if t.shape[-1] in (1, 3) and (t.shape[0] not in (1, 3)):
                     t = t.permute(2, 0, 1).contiguous()
-                t = t.unsqueeze(0)
+                t = t.unsqueeze(0)  # (1, C, H, W)
             elif t.dim() == 4:
+                # (N, H, W, C) -> (N, C, H, W) if needed
                 if t.shape[-1] in (1, 3) and t.shape[1] not in (1, 3):
                     t = t.permute(0, 3, 1, 2).contiguous()
             fixed.append(t)
-            areas.append(int(t.shape[-1]) * int(t.shape[-2]))
+            H, W = int(t.shape[-2]), int(t.shape[-1])
+            areas.append(H * W)
         x = fixed[int(torch.tensor(areas).argmax().item())]
+
     if not torch.is_tensor(x):
         raise ValueError(f"Sample output is not a tensor: {type(x)}")
+
+    # Direct 5D volumes: (N, C, S0, S1, S2)
     if x.dim() == 5:
-        _, _, D, H, W = x.shape
-        mid = D // 2
-        x = x[:, :, mid:mid+1, :, :]
-        x = x.squeeze(2)
+        mid = x.shape[-1] // 2  # center slice along last spatial dim
+        x = x[..., mid]         # -> (N, C, S0, S1)
+
+    # Standard 2D coercion from here
     if x.dim() == 3:
+        # (C, H, W) or (H, W, C)
         if x.shape[-1] in (1, 3) and x.shape[0] not in (1, 3):
             x = x.permute(2, 0, 1).contiguous()
-        x = x.unsqueeze(0)
+        x = x.unsqueeze(0)  # (1, C, H, W)
     if x.dim() == 4 and x.shape[-1] in (1, 3) and x.shape[1] not in (1, 3):
+        # (N, H, W, C) -> (N, C, H, W)
         x = x.permute(0, 3, 1, 2).contiguous()
-    if x.size(1) not in (1, 3):
+
+    # If channel count is not 1 or 3, average to grayscale
+    if x.dim() == 4 and x.size(1) not in (1, 3):
         x = x.mean(dim=1, keepdim=True)
+
     x = torch.clamp(x, 0, 1).float()
+
     if target_hw is not None:
         Ht, Wt = int(target_hw[0]), int(target_hw[1])
         H, W = int(x.shape[-2]), int(x.shape[-1])
         if (H, W) != (Ht, Wt):
             x = F.interpolate(x, size=(Ht, Wt), mode="bilinear", align_corners=False)
     return x
-
 
 @torch.no_grad()
 def _save_samples_grid(model, n, temp, out_path, nrow=10, target_hw=None, warm_x=None):
@@ -1798,13 +1934,19 @@ def main():
             postfix[f"v{i}"] = f"{curr_bpd_views[i]:.3f}/{ema_bpd_views_disp[i]:.3f}"
         pbar.set_postfix(postfix); pbar.update(1)
 
-        if (not input_data_sampled) and (args.spatial_dims == 2):
+        if not input_data_sampled:
             with torch.no_grad():
                 eval_models = ema_models if ema_models is not None else models
                 num_views = len(eval_models)
                 ok, err = save_coordinated_input_grids(
-                    train_loader, num_views=num_views, out_dir=run_dir, fallback_loader=train_loader,
-                    n=100, nrow=10, target_hw=(args.H, args.W), device=dev,
+                    train_loader,
+                    num_views=num_views,
+                    out_dir=run_dir,
+                    fallback_loader=train_loader,
+                    n=100,
+                    nrow=10,
+                    target_hw=(args.H, args.W),
+                    device=dev,
                 )
                 if ok:
                     tqdm.write(f"[samples] saved coordinated input data grids @ iter {it}")

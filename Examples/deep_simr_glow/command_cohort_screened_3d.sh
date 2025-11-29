@@ -11,9 +11,9 @@ H=96
 W=96
 D=96               # depth for 3D Glow
 L=4
-K=8
-hidden=160
-BATCH=4             # start conservative in 3D; bump if VRAM allows
+K=6
+hidden=128
+BATCH=3             # start conservative in 3D; bump if VRAM allows
 
 align=vicreg
 align_weight=0.01
