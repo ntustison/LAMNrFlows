@@ -20,6 +20,7 @@ import numpy as np
 import torch
 from pathlib import Path
 import time
+import math
 import inspect
 import warnings
 import os
@@ -92,6 +93,211 @@ def _print_screen_dump(args, views):
         print(f"  {k}: {getattr(args, k)}")
 
     return n_samples, dims_per_view, total_dims
+
+
+def _standardize_np(X: np.ndarray) -> np.ndarray:
+    """
+    Column-wise standardization with NaN handling: mean 0, std 1.
+    Columns that are all-NaN are dropped.
+    """
+    X = np.asarray(X, dtype=float)
+    # Impute NaNs with column means
+    col_means = np.nanmean(X, axis=0)
+    # Identify all-NaN columns (nanmean -> nan)
+    valid = np.isfinite(col_means)
+    if not np.all(valid):
+        X = X[:, valid]
+        col_means = col_means[valid]
+    # Impute remaining NaNs
+    inds = np.where(np.isnan(X))
+    if inds[0].size > 0:
+        X[inds] = np.take(col_means, inds[1])
+    # Standardize
+    mean = X.mean(axis=0, keepdims=True)
+    std = X.std(axis=0, keepdims=True)
+    std[std < 1e-8] = 1.0
+    X = (X - mean) / std
+    return X
+
+
+def _rbf_gram(X: np.ndarray, sigma: float | None = None) -> np.ndarray:
+    """
+    RBF kernel Gram matrix with optional median heuristic for sigma.
+    """
+    X = np.asarray(X, dtype=float)
+    sq_norms = np.sum(X * X, axis=1, keepdims=True)
+    dist2 = sq_norms + sq_norms.T - 2.0 * (X @ X.T)
+    # Numerical safety
+    np.maximum(dist2, 0.0, out=dist2)
+
+    if sigma is None or sigma <= 0.0:
+        # Median heuristic on upper triangle
+        triu = dist2[np.triu_indices_from(dist2, k=1)]
+        triu = triu[np.isfinite(triu) & (triu > 0)]
+        if triu.size == 0:
+            sigma = 1.0
+        else:
+            med = np.median(triu)
+            sigma = math.sqrt(0.5 * med) if med > 0 else 1.0
+
+    K = np.exp(-dist2 / (2.0 * sigma * sigma))
+    return K
+
+
+def _center_gram(K: np.ndarray) -> np.ndarray:
+    """
+    Double-center a Gram matrix.
+    """
+    n = K.shape[0]
+    H = np.eye(n) - np.ones((n, n)) / float(n)
+    return H @ K @ H
+
+
+def _hsic_value(X: np.ndarray, Y: np.ndarray, sigma: float | None = None) -> float:
+    """
+    Unnormalized HSIC estimator with RBF kernels.
+    """
+    n = X.shape[0]
+    if n < 3:
+        return 0.0
+    K = _rbf_gram(X, sigma=sigma)
+    L = _rbf_gram(Y, sigma=sigma)
+    Kc = _center_gram(K)
+    Lc = _center_gram(L)
+    # Biased estimator is fine for screening
+    hsic = np.trace(Kc @ Lc) / ((n - 1.0) ** 2)
+    return float(max(hsic, 0.0))
+
+
+def _hsic_normalized(X: np.ndarray, Y: np.ndarray, sigma: float | None = None) -> float:
+    """
+    Normalized HSIC in [0, 1] via HSIC(X,Y) / sqrt(HSIC(X,X) * HSIC(Y,Y)).
+    """
+    h_xy = _hsic_value(X, Y, sigma=sigma)
+    if h_xy <= 0.0:
+        return 0.0
+    h_xx = _hsic_value(X, X, sigma=sigma)
+    h_yy = _hsic_value(Y, Y, sigma=sigma)
+    denom = math.sqrt(max(h_xx, 1e-12) * max(h_yy, 1e-12))
+    val = h_xy / denom if denom > 0 else 0.0
+    return float(max(min(val, 1.0), 0.0))
+
+
+def _cca_max_corr(X: np.ndarray, Y: np.ndarray, reg: float = 1e-4) -> float:
+    """
+    Max canonical correlation between standardized X and Y via eigendecomposition.
+
+    X, Y: shape [n, d1], [n, d2].
+    """
+    X = np.asarray(X, dtype=float)
+    Y = np.asarray(Y, dtype=float)
+    n = X.shape[0]
+    if n < 3:
+        return 0.0
+
+    # Covariance matrices
+    Cxx = (X.T @ X) / (n - 1.0)
+    Cyy = (Y.T @ Y) / (n - 1.0)
+    Cxy = (X.T @ Y) / (n - 1.0)
+
+    # Regularization
+    d1 = Cxx.shape[0]
+    d2 = Cyy.shape[0]
+    Cxx = Cxx + reg * np.eye(d1)
+    Cyy = Cyy + reg * np.eye(d2)
+
+    # Inverse square roots via eigen-decomposition
+    ex, Ux = np.linalg.eigh(Cxx)
+    ey, Uy = np.linalg.eigh(Cyy)
+    ex[ex < 1e-12] = 1e-12
+    ey[ey < 1e-12] = 1e-12
+    Cxx_inv_sqrt = (Ux / np.sqrt(ex)) @ Ux.T
+    Cyy_inv_sqrt = (Uy / np.sqrt(ey)) @ Uy.T
+
+    T = Cxx_inv_sqrt @ Cxy @ Cyy_inv_sqrt
+    # Singular values of T are canonical correlations
+    u, s, v = np.linalg.svd(T, full_matrices=False)
+    if s.size == 0:
+        return 0.0
+    val = float(np.max(s))
+    # Numerical clipping
+    return float(max(min(val, 1.0), 0.0))
+
+
+def _screen_views_for_alignment(args, views, verbose: bool = False):
+    """
+    Optional pre-training dependence screening using HSIC or CCA.
+
+    If the average pairwise dependence across views is below args.screening_threshold,
+    this function sets args.penalty_type = "none" (disabling latent alignment).
+    """
+    mode = getattr(args, "screening_mode", "none")
+    if mode == "none":
+        return
+    if args.penalty_type == "none":
+        return
+    if len(views) < 2:
+        return
+
+    n = len(views[0])
+    if n < 3:
+        return
+
+    frac = float(getattr(args, "screening_fraction", 0.2))
+    frac = min(max(frac, 0.0), 1.0)
+    max_samples = int(getattr(args, "screening_max_samples", 5000))
+    thresh = float(getattr(args, "screening_threshold", 0.1))
+
+    n_sample = max(10, min(n, max_samples, int(round(frac * n)) if frac > 0 else n))
+    idx = np.random.choice(n, size=n_sample, replace=False)
+
+    labels = [Path(p).stem for p in args.views]
+    Xs = []
+    for v in views:
+        X = v.values
+        X = X[idx, :]
+        X = _standardize_np(X)
+        Xs.append(X)
+
+    scores = []
+    pair_labels = []
+    for i in range(len(Xs)):
+        for j in range(i + 1, len(Xs)):
+            Xi = Xs[i]
+            Xj = Xs[j]
+            if Xi.shape[0] < 3 or Xj.shape[0] < 3:
+                s = 0.0
+            else:
+                if mode == "hsic":
+                    s = _hsic_normalized(Xi, Xj, sigma=None)
+                elif mode == "cca":
+                    s = _cca_max_corr(Xi, Xj)
+                else:
+                    return  # unknown mode, silently skip
+            scores.append(s)
+            pair_labels.append(f"{labels[i]} vs {labels[j]}")
+
+    if not scores:
+        return
+
+    scores = np.asarray(scores, dtype=float)
+    mean_score = float(scores.mean())
+
+    if verbose:
+        print(f"=== Screening cross-view dependence (mode={mode}) ===")
+        print(f"Using {n_sample} subjects (out of {n}) for screening.")
+        for lbl, s in zip(pair_labels, scores):
+            print(f"  {lbl}: {s:.4f}")
+        print(f"  Average score: {mean_score:.4f}")
+        print(f"  Threshold    : {thresh:.4f}")
+
+    if mean_score < thresh:
+        if verbose:
+            print("  -> Average dependence below threshold; disabling alignment penalty (penalty_type='none').")
+        args.penalty_type = "none"
+    else:
+        if verbose:
+            print("  -> Dependence above threshold; keeping alignment penalty.")
 
 def load_views(view_paths):
     views = []
@@ -238,6 +444,36 @@ def main():
 
     ap.add_argument("--penalty-warmup-iters", type=int, default=400)
 
+    # Optional pre-training screening of cross-view dependence
+    ap.add_argument(
+        "--screening-mode",
+        type=str,
+        default="none",
+        choices=["none", "hsic", "cca"],
+        help="Optional pre-training dependence screening; may disable alignment if views are weakly related.",
+    )
+    ap.add_argument(
+        "--screening-fraction",
+        type=float,
+        default=0.2,
+        help="Fraction of subjects to sample for screening (0-1].",
+    )
+    ap.add_argument(
+        "--screening-max-samples",
+        type=int,
+        default=5000,
+        help="Maximum number of subjects to use for screening.",
+    )
+    ap.add_argument(
+        "--screening-threshold",
+        type=float,
+        default=0.1,
+        help="Minimum average dependence score required to keep alignment active. "
+             "For 'cca' this is max canonical corr (0-1); for 'hsic' this is normalized HSIC (0-1).",
+    )
+
+
+
 
 # Scale regularizer
     ap.add_argument("--scale-penalty-weight", type=float, default=None,
@@ -277,6 +513,9 @@ def main():
 
     # Load CSV views
     views = load_views(args.views)
+
+    # Optional pre-training dependence screening (may disable alignment)
+    _screen_views_for_alignment(args, views, verbose=verbose)
 
     # Screen dump of configuration & basic data stats
     if verbose:
