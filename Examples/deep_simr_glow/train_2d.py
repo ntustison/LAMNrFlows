@@ -71,7 +71,7 @@ def screen_dump_run_config(args, out_dir: Path, note: str = "", dataset_info: di
     # Core architecture & training knobs
     add("out_dir", cfg.get("out_dir"))
     add("views", getattr(args, "num_views", None))
-    add("H×WxD", f"{cfg.get('H')}×{cfg.get('W')}×{cfg.get('D')}")
+    add("H×W", f"{cfg.get('H')}×{cfg.get('W')}")
     add("L / K / hidden", f"{cfg.get('L')} / {cfg.get('K')} / {cfg.get('hidden')}")
     add("align", cfg.get("align"))
     add("weighting", cfg.get("weighting"))
@@ -121,44 +121,15 @@ def set_deterministic(seed: int):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def _check_hw_divisible(
-    H: int,
-    W: int,
-    L: int,
-    D: int | None = None,
-    spatial_dims: int = 2,
-):
-    """
-    Ensure spatial dims are divisible by 2**L.
-
-    For 2D, checks H and W.
-    For 3D, also checks D.
-    """
+def _check_hw_divisible(H: int, W: int, L: int):
     r = 2 ** L
     if (H % r) or (W % r):
         raise ValueError(f"H and W must be divisible by 2**L={r}. Got H={H}, W={W}, L={L}")
-    if spatial_dims == 3:
-        if D is None:
-            raise ValueError("D must be provided when spatial_dims=3.")
-        if D % r:
-            raise ValueError(f"D must be divisible by 2**L={r}. Got D={D}, L={L}")
-
 
 def to01(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """
-    Normalize over all spatial dims.
-
-    Works for both:
-      - 2D: (N, C, H, W)
-      - 3D: (N, C, D, H, W)
-    """
-    if x.ndim < 4:
-        return x
-    spatial_dims = tuple(range(2, x.ndim))
-    x_min = x.amin(dim=spatial_dims, keepdim=True)
-    x_max = x.amax(dim=spatial_dims, keepdim=True)
+    x_min = x.amin(dim=(2, 3), keepdim=True)
+    x_max = x.amax(dim=(2, 3), keepdim=True)
     return (x - x_min) / (x_max - x_min + eps)
-
 
 def bits_per_dim(logp: torch.Tensor, num_dims: int) -> torch.Tensor:
     return -logp / (np.log(2.0) * float(num_dims))  # [B]
@@ -445,19 +416,18 @@ def apply_screen(feats: List[torch.Tensor], state: Optional[ScreenState]) -> Lis
 
 def _extract_views_from_batch(batch, num_views: int | None = None):
     """
-    Normalize a multi-view batch into a list [x_view0, x_view1, ...].
+    Normalize a multi-view batch into a list [x_view0, x_view1, ...], each (B,C,H,W).
 
     Supported input forms:
       - dict with 'x' or 'views' (list/tuple of tensors)
       - list/tuple of per-view tensors
       - tuple like (x, y, ...) where x is a tensor or multi-view container
       - torch.Tensor of shape:
-          (B, V, *spatial)                     -> unstack along V (views along dim=1)
-          (B, C_total, *spatial) with C_total % num_views == 0 -> split channels
+          (B, V, C, H, W)  -> unstack along V
+          (B, C_total, H, W) with C_total % num_views == 0 -> split channels
     """
     import torch
 
-    # Unwrap simple containers
     if isinstance(batch, tuple) and len(batch) > 0 and (
         torch.is_tensor(batch[0]) or isinstance(batch[0], (list, tuple, dict))
     ):
@@ -480,209 +450,82 @@ def _extract_views_from_batch(batch, num_views: int | None = None):
         return list(batch)
 
     if torch.is_tensor(batch):
-        if num_views is None or num_views <= 1:
-            return [batch]
-
         if batch.ndim == 5:
-            # 3D or channel-augmented tensors: (B, V_or_C, D, H, W)
-            B, C_or_V, D, H, W = batch.shape
-            if C_or_V == num_views:
-                # treat dim 1 as views
-                return [batch[:, vi:vi+1, ...] for vi in range(num_views)]
-            if C_or_V % num_views != 0:
-                raise ValueError(
-                    f"Cannot split (B,C,D,H,W)=({B},{C_or_V},{D},{H},{W}) into {num_views} views: "
-                    f"dim1 ({C_or_V}) not divisible by num_views."
-                )
-            Cpv = C_or_V // num_views
-            return [batch[:, vi*Cpv:(vi+1)*Cpv, ...] for vi in range(num_views)]
-
+            B, V, C, H, W = batch.shape
+            return [batch[:, vi, :, :, :] for vi in range(V)]
         elif batch.ndim == 4:
-            # 2D tensors: (B, V_or_C, H, W)
-            B, C_or_V, H, W = batch.shape
-            if C_or_V == num_views:
-                return [batch[:, vi:vi+1, ...] for vi in range(num_views)]
-            if C_or_V % num_views != 0:
+            if num_views is None or num_views <= 1:
+                return [batch]
+            B, Ctot, H, W = batch.shape
+            if Ctot % num_views != 0:
                 raise ValueError(
-                    f"Cannot split (B,C,H,W)=({B},{C_or_V},{H},{W}) into {num_views} views: "
-                    f"dim1 ({C_or_V}) not divisible by num_views."
+                    f"Cannot split (B,C,H,W)=({B},{Ctot},{H},{W}) into {num_views} views: "
+                    f"C ({Ctot}) not divisible by num_views."
                 )
-            Cpv = C_or_V // num_views
+            Cpv = Ctot // num_views
             return [batch[:, vi*Cpv:(vi+1)*Cpv, :, :] for vi in range(num_views)]
-
         else:
             raise ValueError(f"Unsupported tensor ndim={batch.ndim}; expected 4 or 5.")
 
     raise ValueError(f"Unsupported batch type for multi-view extraction: {type(batch)}")
 
-from pathlib import Path
-import torch
-import torch.nn.functional as F
+def _save_grid_from_tensor(x, out_path: Path, nrow: int, target_hw=None, value_range=None):
+    x = x.detach().cpu()
+    if target_hw is not None and (x.shape[-2] != target_hw[0] or x.shape[-1] != target_hw[1]):
+        x = F.interpolate(x, size=target_hw, mode='bilinear', align_corners=False)
+    grid = tv.utils.make_grid(x, nrow=nrow, normalize=(value_range is None), value_range=value_range)
+    tv.utils.save_image(grid, str(out_path))
 
-def save_input_grids_any(
-    train_loader,
-    val_loader,
-    num_views: int,
-    out_dir: Path,
-    max_per_view: int,
-    grid_cols: int,
-    global_step: int,
-    logger,
-):
-    """
-    Save per-view input grids for both 2D and 3D runs.
+def save_coordinated_input_grids(val_loader, num_views: int, out_dir: Path,
+                                 fallback_loader=None,
+                                 n: int = 100, nrow: int = 10, target_hw=None, device="cpu"):
+    import torch
 
-    - For 2D, behaves like the original coordinated input grids.
-    - For 3D, uses the center slice along D for each view.
-    """
-    from torchvision.utils import make_grid, save_image
+    def collect_from_loader(loader):
+        samples_per_view = [[] for _ in range(num_views)]
+        collected = 0
+        for batch in loader:
+            xs = _extract_views_from_batch(batch, num_views=num_views)
+            if len(xs) != num_views:
+                return None, f"Expected {num_views} views, got {len(xs)}."
+            B = xs[0].shape[0]
+            take = min(n - collected, B)
+            if take > 0:
+                for vi in range(num_views):
+                    xvi = xs[vi][:take].to(device, non_blocking=True)
+                    samples_per_view[vi].append(xvi)
+                collected += take
+            if collected >= n:
+                break
+        if collected == 0:
+            return None, "loader yielded no samples."
+        stacked = [torch.cat(vs, dim=0)[:n] for vs in samples_per_view]
+        return stacked, None
 
-    def _get_first_batch(loader):
-        try:
-            return next(iter(loader))
-        except StopIteration:
-            return None
-
-    def _coerce_batch_to_tensor(batch):
-        # Mirror what the training loop expects
-        if isinstance(batch, (list, tuple)):
-            # most likely (images, *meta)
-            return batch[0]
-        if isinstance(batch, dict) and "image" in batch:
-            return batch["image"]
-        return batch
-
-    def _save_for_loader(loader, split_name: str):
-        if loader is None:
-            return
-        batch = _get_first_batch(loader)
-        if batch is None:
-            logger.warning(f"[input-grids] no batch available for {split_name}")
-            return
-
-        x = _coerce_batch_to_tensor(batch)
-        xs = _extract_views_from_batch(x, num_views=num_views)  # uses same logic as training
-
-        split_dir = out_dir / f"grids_input_{split_name}"
-        split_dir.mkdir(parents=True, exist_ok=True)
-
-        # For each view, make a small grid of center slices
-        for vi in range(min(num_views, len(xs))):
-            x_v = xs[vi]  # shape: (N, C, H, W) or (N, C, D, H, W)
-            if not torch.is_tensor(x_v):
-                continue
-
-            # normalize to [0,1] over spatial dims
-            x_v = to01(x_v.clone())
-
-            # Limit number of examples per view
-            x_v = x_v[:max_per_view]
-
-            # _coerce_nchw_4d handles 3D volumes by taking center slice along D
-            imgs = _coerce_nchw_4d(x_v)
-
-            # Make a grid and save
-            grid = make_grid(
-                imgs,
-                nrow=max(1, grid_cols),
-                padding=2,
-                normalize=False,
-            )
-            out_path = split_dir / f"input_data_view{vi}_it{global_step:06d}.png"
-            save_image(grid, out_path)
-            logger.info(
-                f"[input-grids] wrote {out_path} "
-                f"(split={split_name}, view={vi}, n={imgs.size(0)})"
-            )
-
-    _save_for_loader(train_loader, "train")
-    _save_for_loader(val_loader, "val")
-    return True, None
-
-from pathlib import Path
-import torch
-
-from pathlib import Path
-import torch
-
-def save_coordinated_input_grids(
-    loader,
-    num_views,
-    out_dir,
-    fallback_loader=None,
-    n=100,
-    nrow=10,
-    target_hw=None,
-    device=None,
-):
-    """
-    Build one grid per view from the first batch of `loader` (or `fallback_loader`).
-
-    Works for:
-      - 2D: tensors shaped (N, C, H, W)
-      - 3D: tensors shaped (N, C, D, H, W) by taking the center slice along D.
-
-    Writes files like:
-      out_dir/input_data_view0.png
-      out_dir/input_data_view1.png
-      ...
-    """
-    from torchvision.utils import make_grid, save_image
-
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # --- grab one batch ---
     try:
-        batch = next(iter(loader))
-    except StopIteration:
-        if fallback_loader is None:
-            return False, "empty loader and no fallback_loader"
-        try:
-            batch = next(iter(fallback_loader))
-        except StopIteration:
-            return False, "empty loader and empty fallback_loader"
-
-    # --- unwrap batch to a tensor x ---
-    if isinstance(batch, (list, tuple)):
-        x = batch[0]
-    elif isinstance(batch, dict) and "image" in batch:
-        x = batch["image"]
-    else:
-        x = batch
-
-    # Split into per-view tensors; this should give you [view0, view1, view2]
-    xs = _extract_views_from_batch(x, num_views=num_views)
-    if len(xs) == 0:
-        return False, "no per-view tensors extracted from batch"
-
-    num_views = min(num_views, len(xs))
+        result, err = collect_from_loader(val_loader)
+        if result is None:
+            if fallback_loader is not None:
+                result, err_fb = collect_from_loader(fallback_loader)
+                if result is None:
+                    return False, f"val+fallback loaders failed: {err}; {err_fb}"
+            else:
+                return False, f"val loader failed: {err}"
+    except Exception as e:
+        if fallback_loader is not None:
+            try:
+                result, err_fb = collect_from_loader(fallback_loader)
+                if result is None:
+                    return False, f"val+fallback loaders failed: {e}; {err_fb}"
+            except Exception as e2:
+                return False, f"val+fallback loaders exception: {e}; {e2}"
+        else:
+            return False, f"val loader exception: {e}"
 
     for vi in range(num_views):
-        x_v = xs[vi]
-        if not torch.is_tensor(x_v):
-            continue
-
-        # limit number of examples and move to device
-        x_v = x_v[:n].to(device)
-
-        # normalize to [0,1] over spatial dims
-        x_v = to01(x_v)
-
-        # handle 2D vs 3D; _coerce_nchw_4d:
-        #   - for 5D N×C×D×H×W → center D slice, N×C×H×W
-        #   - for C>3, averages over channels to get grayscale
-        imgs = _coerce_nchw_4d(x_v, target_hw=target_hw)
-
-        grid = make_grid(
-            imgs,
-            nrow=max(1, nrow),
-            padding=2,
-            normalize=False,
-        )
+        x = result[vi]  # (n,C,H,W)
         out_path = out_dir / f"input_data_view{vi}.png"
-        save_image(grid, out_path)
-
+        _save_grid_from_tensor(x, out_path, nrow=nrow, target_hw=target_hw)
     return True, None
 
 def _make_grid_canvas(x, nrow=10):
@@ -698,67 +541,33 @@ def _make_grid_canvas(x, nrow=10):
     return canvas
 
 def _coerce_nchw_4d(x, target_hw=None):
-    """
-    Coerce sample outputs to (N, C, H, W) for grid saving.
-
-    Supports:
-      - 2D tensors: (N, C, H, W), (C, H, W), (H, W, C)
-      - 3D volumes: (N, C, S0, S1, S2) by taking the center slice along
-        the *last* spatial dimension S2 -> (N, C, S0, S1).
-      - Lists/tuples of such tensors: pick the candidate with the largest
-        spatial area of the last two dims.
-    """
-    import torch
-
-    # If we got a list/tuple, pick the largest spatial candidate
     if isinstance(x, (list, tuple)):
-        cands = [t for t in x if torch.is_tensor(t) and t.dim() in (3, 4, 5)]
+        cands = [t for t in x if torch.is_tensor(t) and t.dim() in (3,4)]
         if not cands:
             raise ValueError("No tensor candidates in sample output.")
         areas, fixed = [], []
         for t in cands:
-            if t.dim() == 5:
-                # Treat as (N, C, S0, S1, S2); project to 2D via center slice on last dim
-                mid = t.shape[-1] // 2
-                t = t[..., mid]  # (N, C, S0, S1)
-            elif t.dim() == 3:
-                # (C, H, W) or (H, W, C)
-                if t.shape[-1] in (1, 3) and (t.shape[0] not in (1, 3)):
-                    t = t.permute(2, 0, 1).contiguous()
-                t = t.unsqueeze(0)  # (1, C, H, W)
+            if t.dim() == 3:
+                if t.shape[-1] in (1,3) and (t.shape[0] not in (1,3)):
+                    t = t.permute(2,0,1).contiguous()
+                t = t.unsqueeze(0)
             elif t.dim() == 4:
-                # (N, H, W, C) -> (N, C, H, W) if needed
-                if t.shape[-1] in (1, 3) and t.shape[1] not in (1, 3):
-                    t = t.permute(0, 3, 1, 2).contiguous()
+                if t.shape[-1] in (1,3) and t.shape[1] not in (1,3):
+                    t = t.permute(0,3,1,2).contiguous()
             fixed.append(t)
-            H, W = int(t.shape[-2]), int(t.shape[-1])
-            areas.append(H * W)
+            areas.append(int(t.shape[-1]) * int(t.shape[-2]))
         x = fixed[int(torch.tensor(areas).argmax().item())]
-
     if not torch.is_tensor(x):
         raise ValueError(f"Sample output is not a tensor: {type(x)}")
-
-    # Direct 5D volumes: (N, C, S0, S1, S2)
-    if x.dim() == 5:
-        mid = x.shape[-1] // 2  # center slice along last spatial dim
-        x = x[..., mid]         # -> (N, C, S0, S1)
-
-    # Standard 2D coercion from here
     if x.dim() == 3:
-        # (C, H, W) or (H, W, C)
-        if x.shape[-1] in (1, 3) and x.shape[0] not in (1, 3):
-            x = x.permute(2, 0, 1).contiguous()
-        x = x.unsqueeze(0)  # (1, C, H, W)
-    if x.dim() == 4 and x.shape[-1] in (1, 3) and x.shape[1] not in (1, 3):
-        # (N, H, W, C) -> (N, C, H, W)
-        x = x.permute(0, 3, 1, 2).contiguous()
-
-    # If channel count is not 1 or 3, average to grayscale
-    if x.dim() == 4 and x.size(1) not in (1, 3):
+        if x.shape[-1] in (1,3) and x.shape[0] not in (1,3):
+            x = x.permute(2,0,1).contiguous()
+        x = x.unsqueeze(0)
+    if x.dim() == 4 and x.shape[-1] in (1,3) and x.shape[1] not in (1,3):
+        x = x.permute(0,3,1,2).contiguous()
+    if x.size(1) not in (1,3):
         x = x.mean(dim=1, keepdim=True)
-
     x = torch.clamp(x, 0, 1).float()
-
     if target_hw is not None:
         Ht, Wt = int(target_hw[0]), int(target_hw[1])
         H, W = int(x.shape[-2]), int(x.shape[-1])
@@ -898,20 +707,20 @@ def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch
             return per_subj
 
         def _expand_globs_per_view(view_specs):
-            """Expand per-view glob patterns for 3D loader.
-
-            Supports absolute ("/..."), home-relative ("~/..."), and relative
-            patterns. Uses glob.glob instead of Path().glob to avoid the
-            NotImplementedError on non-relative patterns.
+            """
+            view_specs: list[list[str]]; each inner list are glob patterns for that view
+            Returns: list[list[Path]] per view (sorted)
             """
             import glob, os
             per_view_files = []
-            for spec in view_specs:
-                files = []
-                for g in spec:
-                    g = os.path.expanduser(g)
-                    files.extend(sorted(glob.glob(g)))
-                per_view_files.append([Path(f) for f in files])
+            for specs in view_specs:
+                paths = []
+                for pat in specs:
+                    pat = os.path.expanduser(pat)
+                    paths.extend(glob.glob(pat))
+                # unique + sort
+                paths = sorted({str(p) for p in paths})
+                per_view_files.append([Path(p) for p in paths])
             return per_view_files
 
         def _read_slice(path: Path, idx: int, H: int, W: int):
@@ -1000,179 +809,6 @@ def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch
     val_loader   = DataLoader(val_ds,   batch_size=min(16, batch), shuffle=False, num_workers=max(1, num_workers // 2), pin_memory=True)
     return train_loader, val_loader, global_step
 
-
-def build_loaders_from_globs_3d(
-    view_specs,
-    H,
-    W,
-    D,
-    train_samples,
-    val_samples,
-    batch,
-    num_workers,
-    val_frac: float,
-    subject_limit: int | None,
-    do_aug: bool = True,
-    aug_schedules=None,
-    disable_aug_anneal: bool = False,
-    seed: int = 0,
-):
-    """
-    3D variant of build_loaders_from_globs.
-
-    Expects per-view glob specs pointing to 3D ANTs images. For each subject and
-    sample index, we assemble a list of views [v0, v1, ...] as full 3D volumes.
-    """
-    import ants
-    import antstorch
-    from pathlib import Path
-
-    def _expand_globs_per_view(view_specs):
-        """Expand per-view glob patterns for 3D loader.
-
-        Supports absolute ("/..."), home-relative ("~/..."), and relative
-        patterns. Uses glob.glob instead of Path().glob to avoid the
-        NotImplementedError on non-relative patterns.
-        """
-        import glob, os
-        per_view_files = []
-        for spec in view_specs:
-            files = []
-            for g in spec:
-                g = os.path.expanduser(g)
-                files.extend(sorted(glob.glob(g)))
-            per_view_files.append([Path(f) for f in files])
-        return per_view_files
-
-    def _group_by_subject(per_view_files):
-        from collections import defaultdict
-
-        subj_map = defaultdict(list)
-        n_views = len(per_view_files)
-        # group by parent directory name
-        def _key(p: Path):
-            return p.parent.name
-
-        subj_to_files = [defaultdict(list) for _ in range(n_views)]
-        for vi, files in enumerate(per_view_files):
-            for f in files:
-                subj_to_files[vi][_key(f)].append(f)
-
-        common_subjects = set(subj_to_files[0].keys())
-        for vi in range(1, n_views):
-            common_subjects &= set(subj_to_files[vi].keys())
-
-        for s in sorted(common_subjects):
-            per_view_lists = []
-            for vi in range(n_views):
-                flist = sorted(subj_to_files[vi][s])
-                if len(flist) == 0:
-                    break
-                per_view_lists.append(flist)
-            if len(per_view_lists) == n_views:
-                # zip over samples
-                for sample_files in zip(*per_view_lists):
-                    subj_map[s].append(sample_files)
-        return subj_map
-
-    def _read_volume(path: Path, H: int, W: int, D: int):
-        img = ants.image_read(str(path))
-        img = ants.resample_image(img, (H, W, D), use_voxels=True)
-        return img
-
-    per_view_files = _expand_globs_per_view(view_specs)
-    per_subj = _group_by_subject(per_view_files)
-    subjects = list(sorted(per_subj.keys()))
-    if subject_limit and subject_limit > 0:
-        subjects = subjects[: int(subject_limit)]
-
-    images_by_subject = []
-    for s in subjects:
-        samples = []
-        for sample in per_subj[s]:
-            views = []
-            for f in sample:
-                views.append(_read_volume(Path(f), H, W, D))
-            samples.append(views)
-        images_by_subject.append(samples)
-
-    if len(images_by_subject) == 0:
-        raise RuntimeError("No 3D images assembled from provided --view globs.")
-
-    n_subj = len(images_by_subject)
-    rng = np.random.default_rng(seed)
-    idx = np.arange(n_subj)
-    rng.shuffle(idx)
-    n_val = int(round(float(val_frac) * n_subj))
-    if n_val >= n_subj:
-        n_val = max(0, n_subj - 1)
-
-    val_idx = set(idx[:n_val])
-
-    images_train = [s for si, subj in enumerate(images_by_subject) if si not in val_idx for s in subj]
-    images_val = [s for si, subj in enumerate(images_by_subject) if si in val_idx for s in subj]
-
-    if len(images_train) == 0:
-        raise RuntimeError("Split produced an empty training set. Decrease --val-frac or increase subjects.")
-
-    tmpl = images_train[0][0]
-
-    if aug_schedules and not disable_aug_anneal:
-        sched = antstorch.MultiParamScheduler(antstorch.parse_schedules(aug_schedules))
-        def aug_sched_fn(step: int):
-            return sched.step(step)
-    else:
-        aug_sched_fn = None
-
-    global_step = Value('i', 0)
-
-    train_ds = antstorch.ImageDataset(
-        images=images_train,
-        template=tmpl,
-        do_data_augmentation=do_aug,
-        data_augmentation_transform_type="affineAndDeformation",
-        data_augmentation_sd_affine=0.05,
-        data_augmentation_sd_deformation=10.0,
-        data_augmentation_noise_model="additivegaussian",
-        data_augmentation_noise_parameters=(0.0, 0.05),
-        data_augmentation_sd_simulated_bias_field=0.00000001,
-        data_augmentation_sd_histogram_warping=0.025,
-        number_of_samples=int(train_samples),
-        aug_scheduler=aug_sched_fn,
-    )
-    train_ds.global_step_ref = global_step
-
-    val_ds = antstorch.ImageDataset(
-        images=(images_val if len(images_val) > 0 else images_train[:1]),
-        template=tmpl,
-        do_data_augmentation=True,
-        data_augmentation_transform_type="affineAndDeformation",
-        data_augmentation_sd_affine=0.0,
-        data_augmentation_sd_deformation=0.0,
-        data_augmentation_noise_model="additivegaussian",
-        data_augmentation_noise_parameters=(0.0, 0.0),
-        data_augmentation_sd_simulated_bias_field=0.0,
-        data_augmentation_sd_histogram_warping=0.0,
-        number_of_samples=int(val_samples),
-    )
-
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=batch,
-        shuffle=True,
-        num_workers=num_workers,
-        pin_memory=True,
-    )
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=min(16, batch),
-        shuffle=False,
-        num_workers=max(1, num_workers // 2),
-        pin_memory=True,
-    )
-    return train_loader, val_loader, global_step
-
-
 def ensure_shapes_cached(model, x_template: torch.Tensor):
     try:
         _ = model.sample(1)  # if cache exists this is a no-op
@@ -1199,54 +835,24 @@ def warmup_actnorm_with_real_batch(model, x_real: torch.Tensor):
                 continue
 
 @torch.no_grad()
-def _manual_prior_sample(
-    model,
-    n: int,
-    temp: float = 1.0,
-    x_template: torch.Tensor = None,
-):
-    """
-    Fallback prior sampling when model.sample is unavailable or unprimed.
-
-    Uses model.input_shape to construct a dummy template with the right spatial
-    dimensions, supporting both 2D (C,H,W) and 3D (C,D,H,W).
-    """
+def _manual_prior_sample(model, n: int, temp: float = 1.0, x_template: torch.Tensor = None):
     p = next(model.parameters())
     dev, dt = p.device, torch.float32
     if x_template is None:
-        if hasattr(model, "input_shape") and isinstance(
-            getattr(model, "input_shape"), (tuple, list)
-        ):
-            inp = tuple(int(d) for d in model.input_shape)
-            if len(inp) == 3:
-                C, H, W = inp
-                x_shape = (1, C, H, W)
-            elif len(inp) == 4:
-                C, D, H, W = inp
-                x_shape = (1, C, D, H, W)
-            else:
-                x_shape = (1, 1, 64, 64)
-        else:
-            x_shape = (1, 1, 64, 64)
-        x_template = torch.randn(*x_shape, device=dev, dtype=dt) * 0.1
+        H = W = 64
+        if hasattr(model, "input_shape") and isinstance(model.input_shape, (tuple, list)) and len(model.input_shape) >= 3:
+            H, W = int(model.input_shape[-2]), int(model.input_shape[-1])
+        x_template = torch.randn(1, 1, H, W, device=dev, dtype=dt) * 0.1
     z_tmpl, _ = model.inverse_and_log_det(x_template[:1].to(dev, dt))
     if isinstance(z_tmpl, torch.Tensor):
         z_tmpl = [z_tmpl]
-    z_list = [
-        torch.randn(n, *z.shape[1:], device=dev, dtype=z.dtype) * float(temp)
-        for z in z_tmpl
-    ]
+    z_list = [torch.randn(n, *z.shape[1:], device=dev, dtype=z.dtype) * float(temp) for z in z_tmpl]
     for fn in ("forward_from_latents", "forward", "sample_from_latents", "_forward"):
         if hasattr(model, fn):
             out = getattr(model, fn)(z_list)
             return out[0] if isinstance(out, (list, tuple)) else out
-    s = (
-        model.sample(n, T=temp)
-        if hasattr(model, "sample") and ("T" in model.sample.__code__.co_varnames)
-        else model.sample(n)
-    )
+    s = model.sample(n, T=temp) if hasattr(model, "sample") and ("T" in model.sample.__code__.co_varnames) else model.sample(n)
     return s[0] if isinstance(s, (list, tuple)) else s
-
 
 # ------------------------- main -------------------------
 
@@ -1256,14 +862,6 @@ def main():
                 help="Repeat per view. Each view takes one or more glob patterns (full paths). Files are paired across views by subject folder.")
     ap.add_argument("--H", type=int, default=128)
     ap.add_argument("--W", type=int, default=128)
-    ap.add_argument("--D", type=int, default=128, help="Depth for 3D volumes")
-    ap.add_argument(
-        "--spatial-dims",
-        type=int,
-        choices=[2, 3],
-        default=2,
-        help="Number of spatial dimensions: 2 for 2D slices, 3 for 3D volumes",
-    )
     ap.add_argument("--L", type=int, default=4)
     ap.add_argument("--K", type=int, default=3)
     ap.add_argument("--hidden", type=int, default=96)
@@ -1406,120 +1004,55 @@ def main():
     else:
         aug_sched_fn = None
 
-    # spatial shape + dimensionality
-    if args.spatial_dims == 2:
-        _check_hw_divisible(args.H, args.W, args.L)
-        C = 1
-        input_shape = (C, args.H, args.W)
-    else:
-        _check_hw_divisible(args.H, args.W, args.L, D=args.D, spatial_dims=3)
-        C = 1
-        input_shape = (C, args.D, args.H, args.W)
+    _check_hw_divisible(args.H, args.W, args.L)
+    C = 1
+    input_shape = (C, args.H, args.W)
     n_dims = int(np.prod(input_shape))
 
     # ---------------- Data ----------------
-
+    
     try:
-        if args.spatial_dims == 2:
-            train_loader, val_loader, global_step = build_loaders_from_globs(
-                view_specs=args.view,
-                H=args.H,
-                W=args.W,
-                train_samples=args.train_samples,
-                val_samples=args.val_samples,
-                batch=args.batch,
-                num_workers=args.num_workers,
-                slice_idx=args.slice_idx,
-                val_frac=float(args.val_frac),
-                subject_limit=(args.subject_limit if args.subject_limit > 0 else None),
-                do_aug=True,
-                aug_schedules=(args.aug_schedules if not args.disable_aug_anneal else None),
-                disable_aug_anneal=args.disable_aug_anneal,
-                seed=args.seed,
-            )
-        else:
-            train_loader, val_loader, global_step = build_loaders_from_globs_3d(
-                view_specs=args.view,
-                H=args.H,
-                W=args.W,
-                D=args.D,
-                train_samples=args.train_samples,
-                val_samples=args.val_samples,
-                batch=args.batch,
-                num_workers=args.num_workers,
-                val_frac=float(args.val_frac),
-                subject_limit=(args.subject_limit if args.subject_limit > 0 else None),
-                do_aug=True,
-                aug_schedules=(args.aug_schedules if not args.disable_aug_anneal else None),
-                disable_aug_anneal=args.disable_aug_anneal,
-                seed=args.seed,
-            )
+        train_loader, val_loader, global_step = build_loaders_from_globs(
+            view_specs=args.view, H=args.H, W=args.W,
+            train_samples=args.train_samples, val_samples=args.val_samples,
+            batch=args.batch, num_workers=args.num_workers,
+            slice_idx=args.slice_idx, val_frac=float(args.val_frac),
+            subject_limit=(args.subject_limit if args.subject_limit > 0 else None),
+            do_aug=True, aug_schedules=(args.aug_schedules if not args.disable_aug_anneal else None),
+            disable_aug_anneal=args.disable_aug_anneal, seed=args.seed)
     except Exception as e:
         import traceback
         print("[data] failed to build loaders:", repr(e))
         traceback.print_exc()
         raise
 
-
     input_data_sampled = False
 
     # Build models using the builder
     from antstorch import create_glow_normalizing_flow_model_2d
-    try:
-        from antstorch import create_glow_normalizing_flow_model_3d
-    except Exception:
-        create_glow_normalizing_flow_model_3d = None
-
     models: List[nf.Flow] = []
     for _ in range(args.num_views):
-        if args.spatial_dims == 2:
-            m = create_glow_normalizing_flow_model_2d(
-                input_shape=input_shape,
-                L=args.L,
-                K=args.K,
-                hidden_channels=args.hidden,
-                base=args.base,
-                glowbase_logscale_factor=args.glowbase_logscale_factor,
-                glowbase_min_log=args.glowbase_min_log,
-                glowbase_max_log=args.glowbase_max_log,
-                split_mode="channel",
-                scale=True,
-                scale_map=args.scale_map,
-                leaky=0.0,
-                net_actnorm=bool(args.net_actnorm),
-                scale_cap=args.scale_cap,
-            )
-        else:
-            if create_glow_normalizing_flow_model_3d is None:
-                raise RuntimeError(
-                    "antstorch.create_glow_normalizing_flow_model_3d is not available; "
-                    "please update antstorch or set --spatial-dims=2."
-                )
-            m = create_glow_normalizing_flow_model_3d(
-                input_shape=input_shape,
-                L=args.L,
-                K=args.K,
-                hidden_channels=args.hidden,
-                base=args.base,
-                glowbase_logscale_factor=args.glowbase_logscale_factor,
-                glowbase_min_log=args.glowbase_min_log,
-                glowbase_max_log=args.glowbase_max_log,
-                split_mode="channel",
-                scale=True,
-                scale_map=args.scale_map,
-                leaky=0.0,
-                net_actnorm=bool(args.net_actnorm),
-                scale_cap=args.scale_cap,
-            )
-        m = m.to(dev).float().train()  # FP32 params
+        m = create_glow_normalizing_flow_model_2d(
+            input_shape=input_shape,
+            L=args.L, K=args.K, hidden_channels=args.hidden,
+            base=args.base,
+            glowbase_logscale_factor=args.glowbase_logscale_factor,
+            glowbase_min_log=args.glowbase_min_log,
+            glowbase_max_log=args.glowbase_max_log,
+            split_mode="channel",
+            scale=True,
+            scale_map=args.scale_map,
+            leaky=0.0,
+            net_actnorm=bool(args.net_actnorm),
+            scale_cap=args.scale_cap,
+        ).to(dev).float().train()  # FP32 params
         for name, p in m.named_parameters():
             if p.dtype != torch.float32:
                 print(f"[warn] casting param {name} from {p.dtype} -> float32")
                 p.data = p.data.float()
-        if not hasattr(m, "input_shape"):
+        if not hasattr(m, 'input_shape'):
             m.input_shape = input_shape
         models.append(m)
-
 
     # ---------------- EMA (lazy init) ----------------
     ema_models = None  # created after first optimizer step
@@ -1780,7 +1313,7 @@ def main():
         with ctx:
             bad_batch = False
             for vi, m in enumerate(models):
-                x_v = to01(x[:, vi:vi+1, ...].to(dev))
+                x_v = to01(x[:, vi:vi+1, :, :].to(dev))
                 logp_v = m.log_prob(x_v.float())
                 z_v, _ = m.inverse_and_log_det(x_v.float())
                 if not torch.isfinite(logp_v).all():
@@ -1893,7 +1426,7 @@ def main():
             with torch.no_grad():
                 for vi, (m, em) in enumerate(zip(models, ema_models)):
                     _copy_actnorm_state(m, em)
-                    xv_real = to01(x[:, vi:vi+1, ...].to(dev)).float()
+                    xv_real = to01(x[:, vi:vi+1, :, :].to(dev)).float()
                     warmup_actnorm_with_real_batch(em, xv_real)
             tqdm.write("[ema] initialized from base after first update")
 
@@ -1939,14 +1472,8 @@ def main():
                 eval_models = ema_models if ema_models is not None else models
                 num_views = len(eval_models)
                 ok, err = save_coordinated_input_grids(
-                    train_loader,
-                    num_views=num_views,
-                    out_dir=run_dir,
-                    fallback_loader=train_loader,
-                    n=100,
-                    nrow=10,
-                    target_hw=(args.H, args.W),
-                    device=dev,
+                    train_loader, num_views=num_views, out_dir=run_dir, fallback_loader=train_loader,
+                    n=100, nrow=10, target_hw=(args.H, args.W), device=dev,
                 )
                 if ok:
                     tqdm.write(f"[samples] saved coordinated input data grids @ iter {it}")
@@ -1963,7 +1490,7 @@ def main():
                 for j, batch_val in enumerate(val_loader):
                     bpd_views = []
                     for vi, m in enumerate(eval_models):
-                        xv = to01(batch_val[:, vi:vi+1, ...].to(dev))
+                        xv = to01(batch_val[:, vi:vi+1, :, :].to(dev))
                         tmpl_by_view[vi] = xv
                         lp = m.log_prob(xv.float())
                         lp = torch.nan_to_num(lp, nan=-1e9, posinf=-1e9, neginf=-1e9)
