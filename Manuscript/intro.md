@@ -70,23 +70,23 @@ realistic reconstructions in the original data space, including images.
 ### Shared and private representations
 
 Beyond linear methods, a broad range of multiview representation-learning
-approaches also target shared and private structure. In medical imaging, cross-modal
-translation and imputation have been studied with supervised CNNs and
-adversarial or cycle-consistent mappings [@han2017dcnn; @florkow2020mrm;
+approaches also target shared and private structure. In medical imaging,
+cross-modal translation and imputation have been studied with supervised CNNs
+and adversarial or cycle-consistent mappings [@han2017dcnn; @florkow2020mrm;
 @yang2018structurecyclegan; @lei2019densecyclegan]. Methods such as HeMIS learn
-latent spaces that can be averaged across available modalities to obtain
-robust predictions under missing views [@havaei2016hemis], and diffusion-based
-models have recently been adapted to imputation and reconstruction with strong
-priors and uncertainty summaries [@yuan2024remind; @webber2024bjrai]. Parallel
-efforts in multiview representation learning aim to disentangle explicit shared
-and private factors using autoencoders and contrastive losses
-[@Chartsias2018MILR; @Chartsias2019SDNet], while flow-based multimodal models
-have linked latent spaces across paired modalities via conditional couplings
-[@sun2019dualglow]. These methods highlight the importance of separating
-view-invariant content from view-specific variation, but they typically lack the
-combination of exact likelihoods, a one-shot invertible map, and explicit
-Gaussian latent structure that enables closed-form conditional queries for
-both image and multiview tabular data.
+latent spaces that can be averaged across available modalities to obtain robust
+predictions under missing views [@havaei2016hemis], and diffusion-based models
+have recently been adapted to imputation and reconstruction with strong priors
+and uncertainty summaries [@yuan2024remind; @webber2024bjrai]. Parallel efforts
+in multiview representation learning aim to disentangle explicit shared and
+private factors using autoencoders and contrastive losses [@Chartsias2018MILR;
+@Chartsias2019SDNet], while flow-based multimodal models have linked latent
+spaces across paired modalities via conditional couplings [@sun2019dualglow].
+These methods highlight the importance of separating view-invariant content from
+view-specific variation, but they typically lack the combination of exact
+likelihoods, a one-shot invertible map, and explicit Gaussian latent structure
+that enables closed-form conditional queries for both image and multiview
+tabular data.
 
 ## Normalizing flows for latent-aligned multiview modeling
 
@@ -117,6 +117,8 @@ be parameterized with convolutional architectures for images or multilayer
 perceptrons for tabular variables, the same machinery can be applied across
 multimodal imaging, imaging-derived phenotypes, and broader multiview tabular
 settings.
+
+## Contributions
 
 We introduce latent-aligned multiview normalizing (LAMNr) flows, a general
 framework that learns shared and private latent structure across multiple views
@@ -149,11 +151,7 @@ general: it applies to multiple imaging contrasts, multiview IDP blocks, and
 multimodal tabular datasets where each view comprises a coherent set of
 variables.
 
-## Contributions
-
-This work introduces latent-aligned multiview normalizing (LAMNr) flows, a
-general framework for multiview modeling with exact likelihoods and invertible
-latents. Our contributions are:
+In summary, our contributions are:
 1) We extend linear shared/private decompositions such as SiMLR to nonlinear,
    multiscale normalizing flows, yielding a deep, likelihood-based multiview
    model with explicit shared and view-specific latent coordinates.

@@ -2,53 +2,211 @@
 \clearpage
 
 
-
 # Methods
 
-## Overview
+LAMNr Flows are built in two stages. First, each view is assigned a separate
+normalizing flow that is trained by maximum likelihood, with additional
+penalties that align designated shared latent coordinates across views.
+Alignment can be applied directly in the latent space or after an optional CCA
+or HSIC-based screening step that selects coordinates with empirical cross-view
+dependence. Second, after training the flows, we fit a conditional Gaussian
+model over the concatenated latents to enable closed-form posteriors, exact
+decoding, and latent-space manipulations for imputation, harmonization,
+counterfactual edits, and shared-latent reconstructions.
 
-LAMNr Flows comprise two components. First, a set of per-view flows are trained by maximum likelihood with latent alignment on designated shared coordinates. Alignment can be applied across views directly or after an optional CCA or HSIC screen that selects directions with evidence of cross-view dependence. Second, a conditional Gaussian layer is fit over latents to enable closed-form posteriors and exact decoding for imputation, harmonization, counterfactual edits, and shared-latent reconstructions.
+## Normalizing flows and the multiview training objective
 
-We denote a subject’s data by \( \{x^{(v)}\}_{v=1}^V \). Each view \(v\) has a flow \(f^{(v)}\) mapping \(x^{(v)}\) to latents \(z^{(v)}\) with density \(p(z^{(v)})\) and exact log-likelihood \(\log p(x^{(v)}) = \log p(z^{(v)}) + \log |\det \partial f^{(v)} / \partial x^{(v)}| \) [@papamakarios2021nfreview; @kingma2018glow]. We split latents into shared and private parts, \(z^{(v)} = [z^{(v)}_S, z^{(v)}_P]\), with selection defined by either a fixed allocation or by screening.
-
-## Per-view flow architectures
-
-### Image views
-
-For images we adopt Glow-style discrete flows with L levels and K steps per level. Each step comprises ActNorm, invertible 1×1 convolutions, and affine coupling with convolutional predictors. Squeeze and split operations provide multiscale access to per-level latents. LU parameterization is used for stable log-determinant computation, and data-dependent initialization is used for ActNorm [@kingma2018glow]. We also considered variants with richer coupling and spline transforms [@ho2019flowpp; @durkan2019nsf]. Continuous-time flows are related but we do not use them here due to the cost of unbiased likelihood estimates [@grathwohl2019ffjord].
-
-### IDP and CSV views
-
-For tabular blocks we use RealNVP or MAF stacks with affine couplings and masked MLPs [@dinh2016realnvp; @papamakarios2017maf]. Continuous variables are standardized. Positive skewed variables can be log or log1p transformed. Bounded variables can be mapped to the real line with a logit transform. Categorical variables are one-hot encoded when needed. Each per-view flow yields a single-scale latent vector, to which the same projector, screening, and alignment steps are applied.
-
-## Projector, alignment losses, and shared subspace screening
-
-Let \(\phi^{(v)}(z^{(v)}) \in \mathbb{R}^D\) be the output of a small projector head that produces features with matched dimension across views. Given subject-matched batches \(\{\phi^{(v)}_n\}_{n=1}^N\), we apply an alignment loss on the coordinates designated as shared. We support Barlow Twins, VICReg, InfoNCE, Pearson correlation, and HSIC losses, each with standard hyperparameters [@zbontar2021barlow; @bardes2021vicreg; @oord2018cpc; @gretton2005hsic].
-
-To identify shared coordinates automatically, we perform a short screening pass after an MLE warm-up. For CCA screening, we compute whitening matrices for two views and perform an SVD of the whitened cross-covariance \(X_a^\top X_b\). We retain the top r canonical directions per view and average pairwise subspaces across all view pairs to obtain per-view projectors \(P^{(v)} \in \mathbb{R}^{D \times r}\). For HSIC screening, we score coordinates by dependence using a two-stage procedure. First, a Pearson prefilter selects candidate dimensions. Second, an unbiased HSIC estimate with RBF kernels ranks dependence with the average of the other views. We then select the top r coordinates per view. The alignment loss is applied only to the projected or masked features. Screening can be performed once after warm-up or on a fixed refresh cadence [@Murphy2012ML; @bishop2006prml; @gretton2005hsic].
-
-## Conditional Gaussian inference over latents
-
-After training, we estimate per-level Gaussian statistics for latents. For images we collect \(z^{(v)}_\ell\) at each level \(\ell \in \{1,\dots,L\}\). For IDP blocks there is a single level. We model the joint latent vector across views as Gaussian with mean \(\mu\) and covariance \(\Sigma\). Given an observed subset \(O\) and an unobserved subset \(U\), the posterior \(p(z_U \mid z_O)\) is Gaussian with mean
+For a single view \(v\), a normalizing flow with parameters \(\theta^{(v)}\) is
+an invertible mapping
 \[
-\mu_{U \mid O} = \mu_U + \Sigma_{UO} \Sigma_{OO}^{-1} (z_O - \mu_O)
+f^{(v)}_{\theta} : \mathcal{X}^{(v)} \to \mathcal{Z}^{(v)}, \quad
+z_n^{(v)} = f^{(v)}_{\theta}(x_n^{(v)}),
 \]
-and covariance
+that sends observed data \(x_n^{(v)}\) to a latent space
+\(\mathcal{Z}^{(v)}\) with a simple base density, typically
+\(p_Z(z) = \mathcal{N}(0, I)\). The induced density on \(\mathcal{X}^{(v)}\)
+follows from the change-of-variables formula:
 \[
-\Sigma_{U \mid O} = \Sigma_{UU} - \Sigma_{UO} \Sigma_{OO}^{-1} \Sigma_{OU}.
+\log p_{\theta}(x_n^{(v)}) =
+\log p_Z\bigl(z_n^{(v)}\bigr)
++ \log \bigl|\det \partial f^{(v)}_{\theta} / \partial x_n^{(v)}\bigr|,
 \]
-We use shrinkage for numerical stability when needed and clip small eigenvalues to maintain positive definiteness [@schafer2005shrinkage; @ledoit2004well; @higham2002accuracy]. The posterior mean provides a calibrated point estimate. Samples from the posterior propagate uncertainty. Exact decoding through the inverse flows yields imputations, harmonized outputs, and latent edits with tractable likelihoods.
+which we can evaluate exactly for the Glow [@kingma2018glow] and RealNVP-style
+[@dinh2016realnvp] architectures used here. Maximum-likelihood estimation
+chooses \(\theta^{(v)}\) to maximize the sum of log-likelihoods over subjects,
+or equivalently to minimize the average negative log-likelihood  [@kobyzev2020nfsurvey].
 
-## Shared-latent reconstructions and operational edits
+In our proposed multiview setting, each subject \(n\) has measurements
+\(\{x_n^{(v)}\}_{v=1}^V\) across views \(v = 1,\dots,V\). We instantiate one
+flow per view and train them jointly on subject-matched minibatches. If we
+consider only the flow likelihoods, the pure maximum-likelihood objective is
+\[
+\mathcal{L}_{\text{like}}(\theta)
+= \frac{1}{N} \sum_{n=1}^N \sum_{v=1}^V
+\bigl[- \log p_{\theta}(x_n^{(v)})\bigr],
+\]
+where \(\theta = \{\theta^{(v)}\}_{v=1}^V\) collects all view-specific
+parameters. This term ensures that each per-view flow is an exact-likelihood
+model of its corresponding data distribution.
 
-For image views we define shared-latent images by replacing private latents with their conditional means while holding shared latents fixed. This yields reconstructions that preserve geometry and suppress view-specific contrast. When a downstream task is sensitive to contrast or confounders, a transform can be estimated on these surrogates and then applied to the original images without further approximation. For IDP blocks, the same conditional layer provides calibrated imputation under missingness patterns, counterfactual queries with covariate edits, and harmonization across sites. We evaluate with likelihood calibration, imputation error, and predictive transfer in line with prior IDP analyses [@Tustison:2024aa].
+To expose multiview structure, we work in latent space. For each view and
+subject we write
+\[
+z_n^{(v)} = \bigl[z^{(v)}_{S,n}, \; z^{(v)}_{P,n}\bigr],
+\]
+splitting the latent into a block \(z^{(v)}_{S,n}\) that is intended to carry
+shared information across views and a block \(z^{(v)}_{P,n}\) that is
+view-specific. The indices that define this split can be chosen a priori or via
+the CCA/HSIC-based screening procedure described below.
 
-## Relation to latent-space templates
+We then attach a small projector network
+\(\phi^{(v)}_{\psi} : \mathcal{Z}^{(v)} \to \mathbb{R}^D\) to each view, with a
+matched output dimension \(D\) across views, and apply a multiview alignment
+loss to the projected shared coordinates. For a subject-matched minibatch of
+size \(N\), the full training objective becomes
+\[
+\mathcal{L}(\theta, \psi)
+= \frac{1}{N} \sum_{n=1}^N \sum_{v=1}^V
+\bigl[- \log p_{\theta}(x_n^{(v)})\bigr]
++ \lambda \, \mathcal{L}_{\text{align}}
+\Bigl(\bigl\{\phi^{(v)}_{\psi}(z^{(v)}_{S,n})\bigr\}_{v,n}\Bigr),
+\]
+where \(\mathcal{L}_{\text{align}}\) is chosen from Barlow Twins, VICReg,
+InfoNCE, Pearson correlation, or HSIC, and \(\lambda\) controls the strength of
+alignment.[^Kendall-Gal] 
 
-Latent-space templates can be defined as means in latent space decoded back to image space, or as Monte Carlo expectations under the learned latent distribution. In the small-variance or locally linear regime the two constructions agree up to second order terms, which connects latent templates to Fréchet means in the induced metric. We present precise definitions, per-level composition, and conditions for agreement in the Supplementary Methods, and we use the constructs here as operational tools for surrogates and visualization.
+[^Kendall-Gal]: 
+In some experiments we replaced the fixed weighting, \(\lambda\), by learned task weights
+following the homoscedastic aleatoric uncertainty scheme of Kendall and Gal
+[@kendall2018mtl]. In this formulation, each loss term \(L_i\) is scaled
+as \(e^{-s_i} L_i + s_i\), where \(s_i = \log \sigma_i^2\) represents
+task-dependent aleatoric (data) uncertainty, as opposed to epistemic (model)
+uncertainty [@Hullermeier2021UncertaintyReview]. While this can automatically
+balance losses with different units, in our multiview setting it tended to
+inflate the alignment variance and drive the effective alignment weight
+\(e^{-s_{\text{align}}}\) toward zero, effectively suppressing latent
+alignment. For clarity and robustness we therefore report results using a fixed
+\(\lambda\) schedule in the main experiments.
 
-## Practical training details
 
-For images we use multiscale Glow with data-dependent ActNorm initialization, LU factorization for invertible convolutions, and a fixed number of steps per level. For tabular blocks we use 8 to 12 coupling layers with width between 256 and 512 units. We train by maximum likelihood with mixed precision and exponential moving averages of weights. Augmentations are used for images as described in the experimental section. Alignment losses are weighted relative to likelihood and turned on after a short warm-up. Screening uses CCA with ridge regularization or HSIC with a Pearson prefilter. We monitor exact NLL and simple latent calibration diagnostics for both images and IDPs [@kingma2018glow; @papamakarios2021nfreview; @zbontar2021barlow; @bardes2021vicreg].
+## Per-view flow backbones
 
-In preliminary experiments we observed a characteristic failure mode of normalizing flows when trained directly on essentially noise-free template images whose background voxels are exactly zero. Because flows model continuous densities, fitting them to discrete-valued images without any dequantization noise encourages the model to concentrate probability mass in extremely sharp spikes at the observed intensity levels, particularly at the background mode. This behavior can yield steadily improving likelihood estimates while generating samples that degrade into high-frequency, salt-and-pepper–like texture rather than anatomically coherent brains. To avoid this pathology, we treated additive Gaussian noise as a dequantization step rather than as a biological variability source and used a small, constant noise standard deviation during training. Shape variability was then driven primarily by the affine and diffeomorphic augmentation components, while the noise ensured that the learned continuous density remained smooth and produced realistic samples.
+### Image views (Glow-style multiscale flows)
+
+For image views we adopt Glow-style discrete normalizing flows with \(L\) levels
+and \(K\) coupling steps per level. Each step comprises: (i) ActNorm layers with
+data-dependent initialization, (ii) invertible \(1 \times 1 (\times 1)\)
+convolutions parameterized with LU factorization for efficient log-determinant
+computation, and (iii) affine coupling layers whose scale and shift fields are
+predicted by shallow convolutional subnetworks with a configurable number of
+hidden channels. Squeeze and split operations provide a multiscale
+representation in which shallower levels capture coarse structure while deeper
+levels model fine texture. Our implementation follows the standard Glow
+construction, instantiated via a model factory in ANTsTorch
+(`create_glow_normalizing_flow_model_2d`/`3d`), with configurable image size
+(both 2-D and 3-D), number of levels \(L\), steps per level \(K\), and hidden
+channels. 
+
+### Tabular and IDP views (RealNVP/MAF)
+
+For imaging-derived phenotypes (IDPs) and other tabular blocks, we use
+single-scale flows based on RealNVP and masked autoregressive flows (MAF) with
+affine couplings and masked MLPs. Continuous variables are standardized to zero
+mean and unit variance where positively skewed variables may be log or log1p
+transformed, and bounded variables are mapped to the real line with a logit
+transform. Categorical variables are one-hot encoded where needed. The resulting
+vector for each tabular view is passed through a stack of 8–12 coupling layers
+with fully connected subnetworks of width 256–512. Each per-view flow yields a
+single latent vector \(z^{(v)}\) that is handled identically to image latents by
+the projector, screening, and alignment mechanisms.
+
+## Projector networks, alignment losses, and shared-subspace screening
+
+Let \(\phi^{(v)}_\psi : \mathcal{Z}^{(v)} \to \mathbb{R}^D\) be a small
+projector head that maps the flattened latents of view \(v\) to a
+\(D\)-dimensional feature vector with the same dimension across views. In
+practice, the projector is a two-layer MLP for tabular flows or a linear head on
+the concatenated multiscale image latents; the dimensionality \(D\) is chosen so
+that we can apply multiview alignment losses efficiently.  Given a
+subject-matched minibatch \(\{\phi^{(v)}_\psi(z^{(v)}_{S,n})\}\), we apply one
+of several alignment losses on the coordinates marked as shared:
+
+- Barlow Twins,
+- VICReg,
+- InfoNCE,
+- Pearson correlation, or
+- HSIC,
+
+all using their standard hyperparameters. This flexibility allows us to trade off between second-order correlation structure (Pearson, CCA-style) and higher-order dependence (HSIC, contrastive losses).
+
+To automatically identify shared coordinates, we perform a short screening pass after an MLE warm-up phase. For CCA-based screening, we construct whitened feature matrices for two views and perform an SVD of the cross-covariance \(X_a^\top X_b\), retaining the top \(r\) canonical directions per view. Averaging across all view pairs yields per-view projectors \(P^{(v)} \in \mathbb{R}^{D \times r}\) defining the shared subspace. For HSIC-based screening, we first prefilter coordinates using Pearson correlation, then rank remaining dimensions by an unbiased HSIC estimate with RBF kernels averaged over other views, and select the top \(r\) per view. Alignment losses are applied only to these projected or masked coordinates. Screening can be performed once after warm-up or periodically refreshed during training.
+
+## Conditional Gaussian model over latents
+
+After training the per-view flows and projector alignment, we freeze the flow parameters and collect latents for all subjects. For image views, we retain a multiscale representation \(z^{(v)}_\ell\) at each level \(\ell \in \{1,\dots,L\}\); for tabular views we have a single level. Concatenating across views and levels yields a joint latent vector
+\[
+z = \bigl[z^{(1)}_1, \dots, z^{(1)}_L, \dots, z^{(V)}_1, \dots, z^{(V)}_L\bigr].
+\]
+
+We model this joint latent as Gaussian,
+\[
+z \sim \mathcal{N}(\mu, \Sigma),
+\]
+with mean \(\mu\) and covariance \(\Sigma\) estimated either per level or in a merged representation, using either full covariance, shrinkage estimators, or a low-rank-plus-diagonal parameterization depending on dimensionality.
+
+Given an observed subset of coordinates \(O\) and an unobserved subset \(U\), the posterior \(p(z_U \mid z_O)\) is Gaussian with closed-form mean and covariance:
+\[
+\mu_{U\mid O}
+= \mu_U + \Sigma_{UO}\Sigma_{OO}^{-1}(z_O - \mu_O),
+\]
+\[
+\Sigma_{U\mid O}
+= \Sigma_{UU} - \Sigma_{UO}\Sigma_{OO}^{-1}\Sigma_{OU}.
+\]
+We use shrinkage or low-rank regularization to ensure positive definiteness and numerical stability during inversion of \(\Sigma_{OO}\).
+
+Samples from this conditional Gaussian propagate uncertainty, while the posterior mean provides a calibrated point estimate. Applying the inverse flows to these posterior latents yields imputations, harmonized representations, and latent edits in the original data space, with exact likelihoods available for all configurations.
+
+## Shared-latent reconstructions, templates, and operational edits
+
+For image views, we define shared-latent reconstructions by holding the shared coordinates fixed and replacing private coordinates by draws from the conditional posterior mean (or samples) of \(z_P^{(v)}\) given all available views. This produces images that preserve subject-specific anatomy while suppressing view-specific contrast and noise. These shared-latent images can be used either directly in downstream tasks or as contrast-robust surrogates for estimating mappings that are later applied back to the original images.
+
+For IDP and other tabular blocks, the same conditional layer provides a unified mechanism for:
+
+- imputing missing views under arbitrary missingness patterns,
+- harmonizing across sites or acquisition protocols by conditioning on shared covariates, and
+- answering model-based counterfactual queries (e.g., editing a subset of variables while conditioning on the remainder).
+
+We also define latent-space templates as averages in latent space decoded back to image space, or as Monte Carlo expectations under the learned latent distribution. In the small-variance or locally linear regime, these constructions coincide up to second-order terms, linking our latent templates to Fréchet means in the induced metric on images. These tools are implemented via the `recon` and `recon-template` subcommands of our `lamnr_flow_tool.py` utility, which load trained checkpoints, apply Gaussian editing in latent space, and render the resulting templates or edited reconstructions as images for inspection.
+
+## Implementation and training details
+
+All flows and auxiliary functionality are implemented in PyTorch via ANTsTorch
+and a modified fork of a publicly available version of a normalizing flows
+library [@stimper2023normflows]. Training and validation splits are defined at
+the subject level, and each minibatch contains aligned multiview slices from
+matched subjects. Image data augmentation is performed on-the-fly using the
+ANTsTorch-based `ImageDataset` with affine and diffeomorphic deformations, small
+intensity perturbations (histogram warping and bias field simulation), and
+additive Gaussian noise treated as dequantization rather than biological
+variability. For validation, we use the same spatial transforms but disable
+additional noise and histogram warping. This design preserves anatomical
+variability while preventing overfitting to discrete, noise-free templates that
+would otherwise cause flows to collapse onto spiky background modes.
+
+Glow models are initialized with data-dependent ActNorm, and we perform a
+one-time warm-up pass with real images before starting training to stabilize
+statistics. We train with Adamax, mixed precision, and optional exponential
+moving averages of model parameters. Learning rates follow a warm-up plus decay
+schedule with a plateau-based reducer. We monitor exact negative log-likelihood
+in bits-per-dimension, view-wise breakdowns, and alignment loss values, and
+periodically log reconstructions and samples for visual inspection.
+
+The same training loop supports multiple views by instantiating one flow per
+view, computing per-view log-likelihoods and latents for each minibatch,
+flattening the multiscale latents, and applying the projector plus alignment and
+screening logic described above. For IDP/tabular experiments, we replace the
+image Glow backbones with RealNVP/MAF stacks while keeping the multiview
+alignment and conditional Gaussian stages unchanged, which allows LAMNr Flows to
+operate uniformly across image contrasts and multiview IDP blocks within the
+same methodological framework.
