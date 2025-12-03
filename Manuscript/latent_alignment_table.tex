@@ -1,0 +1,40 @@
+\begin{table}[t]
+\centering
+\scriptsize
+\begin{tabular}{p{2.7cm} p{3.8cm} p{3.1cm} p{5.0cm}}
+\hline
+\textbf{Method} &
+\textbf{Objective (sketch)} &
+\textbf{Typical hyperparameters} &
+\textbf{Qualitative behavior / usage} \\
+\hline
+\textbf{Pearson (multi)} &
+Maximize mean pairwise correlation:
+$\mathrm{corr}(\tilde Z^{(i)}, \tilde Z^{(j)})$ &
+Projector dimension; feature normalization (pre-BN / L2) &
+Emphasizes linear shared structure; simple, fast, and stable at small batch sizes; purely second-order, can over-smooth fine texture if heavily weighted at high levels. \\[0.2em]
+\textbf{Barlow Twins (multi)} &
+Cross-correlation to identity:
+$\mathcal{L} = \sum_i (1 - C_{ii})^2 + \lambda \sum_{i \neq j} C_{ij}^2$ &
+$\lambda$ (off-diagonal weight); covariance shrinkage; projector dimension &
+Encourages invariance and decorrelation; no negatives; good default when moderate batch sizes are available; shrinkage improves stability of $C$. \\[0.2em]
+\textbf{VICReg (multi)} &
+$\alpha\,\mathrm{Inv} + \beta\,\mathrm{Var} + \gamma\,\mathrm{Cov}$ &
+$\alpha, \beta, \gamma$; variance margin; projector dimension &
+Promotes invariance while preserving variance and discouraging collapse; works with small-to-moderate batches; more tuning knobs (trade-off between invariance, variance, and decorrelation). \\[0.2em]
+\textbf{InfoNCE (multi)} &
+Contrastive:
+$\mathcal{L} = - \log \dfrac{\exp(s / \tau)}{\sum \exp(s' / \tau)}$ &
+Temperature $\tau$; projector dimension; (optional) augmentation strength &
+Strong discriminative alignment when large batches and many in-batch negatives are available; higher compute cost; sensitive to batch size and choice of $\tau$. \\[0.2em]
+\textbf{HSIC (biased)} &
+Maximize kernel dependence:
+$\mathrm{HSIC}(X,Y)$ (e.g., RBF kernel) &
+Kernel type; bandwidth $\sigma$ (median heuristic); regularization &
+Captures non-linear shared structure beyond correlations; useful when complex cross-view relations are expected; $\mathcal{O}(B^2)$ cost in batch size and sensitive to bandwidth choice. \\
+\hline
+\end{tabular}
+\caption{Summary of latent alignment objectives used in LAMNr Flows.}
+\label{tab:alignment}
+\normalsize
+\end{table}
