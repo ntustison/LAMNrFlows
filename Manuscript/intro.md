@@ -38,6 +38,33 @@ and InfoNCE [@zbontar2021barlow; @bardes2021vicreg; @oord2018cpc] can also be
 used for broader application to missing-data patterns [@bishop2006prml;
 @Murphy2012ML].
 
+Similarity-driven multilinear reconstruction (SiMLR) makes this decomposition
+explicit in a linear, low-rank setting by factorizing multiview data into
+shared and view-specific components under subject-level similarity constraints
+[@Avants2021NatCompSci]. In SiMLR, each view is expressed as the sum of a
+low-rank shared representation and a private residual, with the shared factors
+regularized to respect an external similarity structure (for example, derived
+from clinical, cognitive, or exposure variables). This coupling to a
+subject-similarity kernel encourages shared components that are both
+statistically coherent across views and aligned with downstream phenotypes,
+while private components capture contrast- or modality-specific variation. The
+resulting embeddings support tasks such as cross-view harmonization,
+visualization, and prediction in a way that cleanly separates common and
+idiosyncratic effects [@Stone2020BreachersNeuroimaging; @Stone2024USSOCOM].
+
+LAMNr Flows can be viewed as a deep, likelihood-based extension of this SiMLR
+framework to nonlinear, invertible latent spaces. Rather than performing an
+explicit linear factorization in the observation domain, LAMNr first maps each
+view into a shared multiscale latent space using normalizing flows with exact
+log-likelihoods and bijective mappings. Latent-alignment objectives (e.g.,
+VICReg, InfoNCE) identify a subset of coordinates that play the role of SiMLR’s
+shared component, while remaining coordinates act as view-specific latents.
+Modeling the joint latents with a Gaussian and using conditional Gaussian
+formulas recovers the same style of shared/private decomposition, cross-view
+imputation, and phenotype-guided reasoning as SiMLR, but now with nonlinear
+representational capacity, calibrated likelihoods, and the ability to generate
+realistic reconstructions in the original imaging space.
+
 
 _Edit below_
 
@@ -69,7 +96,7 @@ high-dimensional biomedical data, which demonstrated coherent cross-view
 structure discovery with rigorous validation across tasks
 [@Avants2021NatCompSci]. Our prior UK Biobank work on imaging-derived phenotypes
 used linear models as strong baselines and practical scorecards across cohorts
-[@Tustison:2024aa]. LAM-Flow complements this landscape by providing an
+[@Tustison:2024aa]. LAMNr flows complement this landscape by providing an
 exact-likelihood generative approach to multiview IDPs that exposes an
 invertible latent, supports shared-subspace alignment, and enables closed-form
 conditional queries.
@@ -120,7 +147,7 @@ as first-class probabilistic backbones [@croitoru2023diffusion_vision_survey;
 
 ## Latent-aligned multiview flows
 
-We introduce latent-aligned multiview normalizing flows (LAM-Flow), a general
+We introduce latent-aligned multiview normalizing (LAMNr) flows, a general
 framework that learns shared and private latent structure across multiple views
 while preserving exact likelihoods and invertibility. For images we adopt
 Glow-style models to retain multiscale access. For imaging-derived phenotypes
