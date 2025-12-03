@@ -194,6 +194,14 @@ free to capture view-specific variation. Screening can be performed once after
 warm-up or periodically refreshed during training; in our experiments we use a
 single screening stage for simplicity.
 
+In the tabular setting we additionally allow a coarse pre-training dependence
+screen on the raw views. Using either normalized HSIC or maximum canonical
+correlation on standardized input features, we estimate the average pairwise
+dependence across views on a subsample of subjects. If this average falls below
+a user-defined threshold, we disable the alignment penalty altogether and train
+independent per-view flows. This avoids forcing alignment when views are only
+weakly related or effectively independent, while still enabling shared-subspace
+alignment when substantial cross-view structure is present.
 
 ## Conditional Gaussian model over latents
 
