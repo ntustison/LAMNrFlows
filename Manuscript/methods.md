@@ -7,7 +7,7 @@
 
 ## Overview
 
-LAM-Flow comprises two components. First, a set of per-view flows are trained by maximum likelihood with latent alignment on designated shared coordinates. Alignment can be applied across views directly or after an optional CCA or HSIC screen that selects directions with evidence of cross-view dependence. Second, a conditional Gaussian layer is fit over latents to enable closed-form posteriors and exact decoding for imputation, harmonization, counterfactual edits, and shared-latent reconstructions.
+LAMNr Flows comprise two components. First, a set of per-view flows are trained by maximum likelihood with latent alignment on designated shared coordinates. Alignment can be applied across views directly or after an optional CCA or HSIC screen that selects directions with evidence of cross-view dependence. Second, a conditional Gaussian layer is fit over latents to enable closed-form posteriors and exact decoding for imputation, harmonization, counterfactual edits, and shared-latent reconstructions.
 
 We denote a subject’s data by \( \{x^{(v)}\}_{v=1}^V \). Each view \(v\) has a flow \(f^{(v)}\) mapping \(x^{(v)}\) to latents \(z^{(v)}\) with density \(p(z^{(v)})\) and exact log-likelihood \(\log p(x^{(v)}) = \log p(z^{(v)}) + \log |\det \partial f^{(v)} / \partial x^{(v)}| \) [@papamakarios2021nfreview; @kingma2018glow]. We split latents into shared and private parts, \(z^{(v)} = [z^{(v)}_S, z^{(v)}_P]\), with selection defined by either a fixed allocation or by screening.
 
