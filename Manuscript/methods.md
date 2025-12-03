@@ -120,30 +120,65 @@ with fully connected subnetworks of width 256–512. Each per-view flow yields a
 single latent vector \(z^{(v)}\) that is handled identically to image latents by
 the projector, screening, and alignment mechanisms.
 
-## Projector networks, alignment losses, and shared-subspace screening
+### Projector networks and latent alignment objectives
 
 Let \(\phi^{(v)}_\psi : \mathcal{Z}^{(v)} \to \mathbb{R}^D\) be a small
 projector head that maps the flattened latents of view \(v\) to a
 \(D\)-dimensional feature vector with the same dimension across views. In
 practice, the projector is a two-layer MLP for tabular flows or a linear head on
 the concatenated multiscale image latents; the dimensionality \(D\) is chosen so
-that we can apply multiview alignment losses efficiently.  Given a
+that we can apply multiview alignment losses efficiently. Given a
 subject-matched minibatch \(\{\phi^{(v)}_\psi(z^{(v)}_{S,n})\}\), we apply one
 of several alignment losses on the coordinates marked as shared:
+Pearson correlation, Barlow Twins, VICReg, InfoNCE, or HSIC
+[@zbontar2021barlow; @bardes2021vicreg; @oord2018cpc; @gretton2005hsic]. These
+objectives trade off simplicity, batch-size requirements, and the type of
+cross-view dependence they emphasize (linear vs. non-linear, second-order vs.
+higher-order).
 
-- Barlow Twins,
-- VICReg,
-- InfoNCE,
-- Pearson correlation, or
-- HSIC,
+We summarize the main options in Table~\ref{tab:alignment}, which we use
+interchangeably depending on the experiment. Pearson and VICReg are effective
+when batch sizes are modest and we want stable, low-cost alignment. Barlow Twins
+adds explicit redundancy reduction via cross-correlation decorrelation. InfoNCE
+provides a strong discriminative signal when large batches and in-batch
+negatives are available, while HSIC captures non-linear dependence at the cost
+of \(O(B^2)\) kernel operations. In all cases, the alignment term acts only on
+shared coordinates, leaving private coordinates free to capture
+view-specific variation.
 
-all using their standard hyperparameters. This flexibility allows us to trade off between second-order correlation structure (Pearson, CCA-style) and higher-order dependence (HSIC, contrastive losses).
+\input{latent_alignment_table.tex}
 
-To automatically identify shared coordinates, we perform a short screening pass after an MLE warm-up phase. For CCA-based screening, we construct whitened feature matrices for two views and perform an SVD of the cross-covariance \(X_a^\top X_b\), retaining the top \(r\) canonical directions per view. Averaging across all view pairs yields per-view projectors \(P^{(v)} \in \mathbb{R}^{D \times r}\) defining the shared subspace. For HSIC-based screening, we first prefilter coordinates using Pearson correlation, then rank remaining dimensions by an unbiased HSIC estimate with RBF kernels averaged over other views, and select the top \(r\) per view. Alignment losses are applied only to these projected or masked coordinates. Screening can be performed once after warm-up or periodically refreshed during training.
+In practice, we choose the alignment objective based on computational budget and
+the expected structure of the views. For small batches or limited compute,
+Pearson or VICReg are attractive. When we want stronger redundancy reduction
+without negatives, Barlow Twins is a good default. InfoNCE is most useful for
+large-batch, discriminative alignment (e.g., retrieval-like settings), and HSIC
+is reserved for settings where non-linear cross-modality relations are expected
+to be dominant.
+
+### Shared-subspace screening with CCA and HSIC
+
+To automatically identify shared coordinates, we perform a short screening pass
+after an MLE warm-up phase. For CCA-based screening, we construct whitened
+feature matrices for two views and perform an SVD of the cross-covariance
+\(X_a^\top X_b\), retaining the top \(r\) canonical directions per view. Averaging
+across all view pairs yields per-view projectors \(P^{(v)} \in \mathbb{R}^{D \times r}\)
+defining the shared subspace. For HSIC-based screening, we first prefilter
+coordinates using Pearson correlation, then rank remaining dimensions by an
+unbiased HSIC estimate with RBF kernels averaged over other views, and select
+the top \(r\) per view. Alignment losses are applied only to these projected or
+masked coordinates. Screening can be performed once after warm-up or
+periodically refreshed during training; in our experiments we use a single
+screening stage for simplicity.
+
 
 ## Conditional Gaussian model over latents
 
-After training the per-view flows and projector alignment, we freeze the flow parameters and collect latents for all subjects. For image views, we retain a multiscale representation \(z^{(v)}_\ell\) at each level \(\ell \in \{1,\dots,L\}\); for tabular views we have a single level. Concatenating across views and levels yields a joint latent vector
+After training the per-view flows and projector alignment, we freeze the flow
+parameters and collect latents for all subjects. For image views, we retain a
+multiscale representation \(z^{(v)}_\ell\) at each level \(\ell \in
+\{1,\dots,L\}\); for tabular views we have a single level. Concatenating across
+views and levels yields a joint latent vector
 \[
 z = \bigl[z^{(1)}_1, \dots, z^{(1)}_L, \dots, z^{(V)}_1, \dots, z^{(V)}_L\bigr].
 \]
@@ -152,9 +187,13 @@ We model this joint latent as Gaussian,
 \[
 z \sim \mathcal{N}(\mu, \Sigma),
 \]
-with mean \(\mu\) and covariance \(\Sigma\) estimated either per level or in a merged representation, using either full covariance, shrinkage estimators, or a low-rank-plus-diagonal parameterization depending on dimensionality.
+with mean \(\mu\) and covariance \(\Sigma\) estimated either per level or in a
+merged representation, using either full covariance, shrinkage estimators, or a
+low-rank-plus-diagonal parameterization depending on dimensionality.
 
-Given an observed subset of coordinates \(O\) and an unobserved subset \(U\), the posterior \(p(z_U \mid z_O)\) is Gaussian with closed-form mean and covariance:
+Given an observed subset of coordinates \(O\) and an unobserved subset \(U\),
+the posterior \(p(z_U \mid z_O)\) is Gaussian with closed-form mean and
+covariance:
 \[
 \mu_{U\mid O}
 = \mu_U + \Sigma_{UO}\Sigma_{OO}^{-1}(z_O - \mu_O),
@@ -163,21 +202,43 @@ Given an observed subset of coordinates \(O\) and an unobserved subset \(U\), th
 \Sigma_{U\mid O}
 = \Sigma_{UU} - \Sigma_{UO}\Sigma_{OO}^{-1}\Sigma_{OU}.
 \]
-We use shrinkage or low-rank regularization to ensure positive definiteness and numerical stability during inversion of \(\Sigma_{OO}\).
+We use shrinkage or low-rank regularization to ensure positive definiteness and
+numerical stability during inversion of \(\Sigma_{OO}\).
 
-Samples from this conditional Gaussian propagate uncertainty, while the posterior mean provides a calibrated point estimate. Applying the inverse flows to these posterior latents yields imputations, harmonized representations, and latent edits in the original data space, with exact likelihoods available for all configurations.
+Samples from this conditional Gaussian propagate uncertainty, while the
+posterior mean provides a calibrated point estimate. Applying the inverse flows
+to these posterior latents yields imputations, harmonized representations, and
+latent edits in the original data space, with exact likelihoods available for
+all configurations.
 
 ## Shared-latent reconstructions, templates, and operational edits
 
-For image views, we define shared-latent reconstructions by holding the shared coordinates fixed and replacing private coordinates by draws from the conditional posterior mean (or samples) of \(z_P^{(v)}\) given all available views. This produces images that preserve subject-specific anatomy while suppressing view-specific contrast and noise. These shared-latent images can be used either directly in downstream tasks or as contrast-robust surrogates for estimating mappings that are later applied back to the original images.
+For image views, we define shared-latent reconstructions by holding the shared
+coordinates fixed and replacing private coordinates by draws from the
+conditional posterior mean (or samples) of \(z_P^{(v)}\) given all available
+views. This produces images that preserve subject-specific anatomy while
+suppressing view-specific contrast and noise. These shared-latent images can be
+used either directly in downstream tasks or as contrast-robust surrogates for
+estimating mappings that are later applied back to the original images.
 
-For IDP and other tabular blocks, the same conditional layer provides a unified mechanism for:
+For IDP and other tabular blocks, the same conditional layer provides a unified
+mechanism for:
 
 - imputing missing views under arbitrary missingness patterns,
-- harmonizing across sites or acquisition protocols by conditioning on shared covariates, and
-- answering model-based counterfactual queries (e.g., editing a subset of variables while conditioning on the remainder).
+- harmonizing across sites or acquisition protocols by conditioning on shared
+  covariates, and
+- answering model-based counterfactual queries (e.g., editing a subset of
+  variables while conditioning on the remainder).
 
-We also define latent-space templates as averages in latent space decoded back to image space, or as Monte Carlo expectations under the learned latent distribution. In the small-variance or locally linear regime, these constructions coincide up to second-order terms, linking our latent templates to Fréchet means in the induced metric on images. These tools are implemented via the `recon` and `recon-template` subcommands of our `lamnr_flow_tool.py` utility, which load trained checkpoints, apply Gaussian editing in latent space, and render the resulting templates or edited reconstructions as images for inspection.
+We also define latent-space templates as averages in latent space decoded back
+to image space, or as Monte Carlo expectations under the learned latent
+distribution. In the small-variance or locally linear regime, these
+constructions coincide up to second-order terms, linking our latent templates to
+Fréchet means in the induced metric on images. These tools are implemented via
+the `recon` and `recon-template` subcommands of our `lamnr_flow_tool.py`
+utility, which load trained checkpoints, apply Gaussian editing in latent space,
+and render the resulting templates or edited reconstructions as images for
+inspection.
 
 ## Implementation and training details
 
