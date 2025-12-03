@@ -25,8 +25,73 @@ import warnings
 import os
 import json
 
-from antstorch import normalizing_simr_flows_whitener, apply_normalizing_simr_flows_whitener
+from antstorch import lamnr_flows_whitener, apply_lamnr_flows_whitener
 
+
+
+def _format_seconds(seconds: float) -> str:
+    """
+    Pretty-print seconds as Hh Mm Ss.
+    """
+    seconds = int(max(0, round(seconds)))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    parts = []
+    if h:
+        parts.append(f"{h}h")
+    if m or (h and s):
+        parts.append(f"{m}m")
+    parts.append(f"{s}s")
+    return " ".join(parts)
+
+
+def _estimate_seconds_per_iter_tabular(batch_size: int, total_dims: int, K: int) -> float:
+    """
+    Very rough heuristic for seconds/iteration for tabular flows.
+
+    Scales with batch_size, total feature dimensionality, and flow depth (K).
+    This is intentionally conservative and only meant to provide an order-of-magnitude ETA.
+    """
+    total_dims = max(1, int(total_dims))
+    batch_size = max(1, int(batch_size))
+    K = max(1, int(K))
+
+    base = 0.002  # baseline overhead
+    dim_term = 1e-5 * batch_size * total_dims
+    depth_term = 5e-4 * (K / 32.0)
+    return base + dim_term + depth_term
+
+
+def _print_screen_dump(args, views):
+    """
+    Print a configuration screen dump similar to the Glow-based trainer.
+    """
+    n_views = len(views)
+    n_samples = len(views[0]) if views else 0
+    dims_per_view = [df.shape[1] for df in views]
+    total_dims = sum(dims_per_view)
+
+    print("\n=== Training configuration (tabular LAMNR flows) ===")
+    print(f"Output prefix     : {args.output_prefix}")
+    print(f"Number of views   : {n_views}")
+    print(f"Samples per view  : {n_samples}")
+    print(f"Dims per view     : {dims_per_view} (total={total_dims})")
+    print(f"Base distribution : {args.base_distribution}")
+    print(f"Flow depth K      : {args.K}")
+    print(f"Scale cap         : {args.scale_cap}")
+    print(f"Penalty type      : {args.penalty_type}")
+    print(f"Tradeoff mode     : {args.tradeoff_mode}")
+    print(f"Lambda penalty    : {args.lambda_penalty}")
+    print(f"Batch size        : {args.batch_size}")
+    print(f"Max iterations    : {args.max_iter}")
+    print(f"Val interval      : {args.val_interval}")
+    print(f"CUDA device       : {args.cuda_device}")
+    print(f"Seed              : {args.seed}")
+    print("\nAll parsed arguments:")
+    for k in sorted(vars(args).keys()):
+        print(f"  {k}: {getattr(args, k)}")
+
+    return n_samples, dims_per_view, total_dims
 
 def load_views(view_paths):
     views = []
@@ -103,14 +168,78 @@ def main():
     ap.add_argument("--target-ratio", type=float, default=9.0)
     ap.add_argument("--lambda-penalty", type=float, default=1.0)
     ap.add_argument("--ema-beta", type=float, default=0.98)
-    ap.add_argument("--penalty-type", default="barlow_twins_align",
-                   choices=["decorrelate", "correlate", "barlow_twins_align"])
+
+    # Latent alignment penalty / multi-view coupling
+    ap.add_argument(
+        "--penalty-type",
+        default="barlow_twins_align",
+        choices=[
+            "decorrelate",
+            "correlate",
+            "barlow_twins_align",
+            "pearson",
+            "barlow_twins_multi",
+            "vicreg",
+            "info_nce",
+            "hsic",
+            "none",
+        ],
+    )
+
+    # Barlow Twins (legacy + multi-view)
     ap.add_argument("--bt-lambda-diag", type=float, default=1.0)
     ap.add_argument("--bt-lambda-offdiag", type=float, default=5e-3)
     ap.add_argument("--bt-eps", type=float, default=1e-6)
+
+    # InfoNCE temperature
+    ap.add_argument(
+        "--info-nce-T",
+        type=float,
+        default=0.2,
+        help="Temperature for InfoNCE / NT-Xent when penalty_type='info_nce'.",
+    )
+
+    # VICReg weights
+    ap.add_argument(
+        "--vicreg-w-inv",
+        type=float,
+        default=25.0,
+        help="Invariance (MSE) weight for VICReg when penalty_type='vicreg'.",
+    )
+    ap.add_argument(
+        "--vicreg-w-var",
+        type=float,
+        default=25.0,
+        help="Variance floor weight for VICReg when penalty_type='vicreg'.",
+    )
+    ap.add_argument(
+        "--vicreg-w-cov",
+        type=float,
+        default=1.0,
+        help="Covariance off-diagonal weight for VICReg when penalty_type='vicreg'.",
+    )
+    ap.add_argument(
+        "--vicreg-gamma",
+        type=float,
+        default=1.0,
+        help="Target std (gamma) for VICReg variance floor when penalty_type='vicreg'.",
+    )
+
+    # HSIC bandwidth
+    ap.add_argument(
+        "--hsic-sigma",
+        type=float,
+        default=0.0,
+        help=(
+            "RBF kernel bandwidth for HSIC when penalty_type='hsic'; "
+            "0.0 = median heuristic per batch."
+        ),
+    )
+
     ap.add_argument("--penalty-warmup-iters", type=int, default=400)
 
-    # Scale regularizer
+
+# Scale regularizer
     ap.add_argument("--scale-penalty-weight", type=float, default=None,
                     help="Weight for mean|s| regularizer; passed only if whitener supports it")
 
@@ -148,6 +277,28 @@ def main():
 
     # Load CSV views
     views = load_views(args.views)
+
+    # Screen dump of configuration & basic data stats
+    if verbose:
+        n_samples, dims_per_view, total_dims = _print_screen_dump(args, views)
+    else:
+        n_samples = len(views[0]) if views else 0
+        dims_per_view = [df.shape[1] for df in views]
+        total_dims = sum(dims_per_view)
+
+    # Rough ETA based on a simple heuristic, similar in spirit to the Glow trainer
+    if verbose and args.max_iter is not None and args.max_iter > 0:
+        sec_per_iter = _estimate_seconds_per_iter_tabular(
+            batch_size=args.batch_size,
+            total_dims=total_dims,
+            K=args.K,
+        )
+        eta_seconds = sec_per_iter * args.max_iter
+        eta_str = _format_seconds(eta_seconds)
+        finish_time = time.localtime(time.time() + eta_seconds)
+        finish_str = time.strftime("%Y-%m-%d %H:%M:%S", finish_time)
+        print(f"Estimated total training time (heuristic): ~{eta_str} (finish around {finish_str})")
+
 
     # === Prepare kwargs and filter by whitener signature for backward compatibility ===
     base_kwargs = dict(
@@ -188,10 +339,17 @@ def main():
         lambda_penalty=args.lambda_penalty,
         ema_beta=args.ema_beta,
 
+        # Latent alignment configuration
         penalty_type=args.penalty_type,
         bt_lambda_diag=args.bt_lambda_diag,
         bt_lambda_offdiag=args.bt_lambda_offdiag,
         bt_eps=args.bt_eps,
+        info_nce_T=getattr(args, "info_nce_T", None),
+        vicreg_w_inv=getattr(args, "vicreg_w_inv", None),
+        vicreg_w_var=getattr(args, "vicreg_w_var", None),
+        vicreg_w_cov=getattr(args, "vicreg_w_cov", None),
+        vicreg_gamma=getattr(args, "vicreg_gamma", None),
+        hsic_sigma=getattr(args, "hsic_sigma", None),
         penalty_warmup_iters=args.penalty_warmup_iters,
 
         val_fraction=args.val_fraction,
@@ -228,7 +386,7 @@ def main():
     call_kwargs.update(flow_kwargs)
     call_kwargs.update(train_kwargs)
 
-    sig = inspect.signature(normalizing_simr_flows_whitener)
+    sig = inspect.signature(lamnr_flows_whitener)
     filtered_kwargs = {k: v for k, v in call_kwargs.items() if k in sig.parameters}
 
     # Train
@@ -241,7 +399,7 @@ def main():
                 print("  -", k)
 
     start_time = time.perf_counter()
-    result = normalizing_simr_flows_whitener(**filtered_kwargs)
+    result = lamnr_flows_whitener(**filtered_kwargs)
     end_time = time.perf_counter()
     elapsed_time = end_time - start_time
 
@@ -270,7 +428,7 @@ def main():
             print("\n=== Save outputs ===")
 
         # Detect which apply() API we have
-        apply_sig = inspect.signature(apply_normalizing_simr_flows_whitener)
+        apply_sig = inspect.signature(apply_lamnr_flows_whitener)
         supports_new = "normalization_mode" in apply_sig.parameters
 
         # Prepare normalization hints for apply()
@@ -283,7 +441,7 @@ def main():
         # Forward transforms
         if args.save_z:
             if supports_new:
-                z_views = apply_normalizing_simr_flows_whitener(
+                z_views = apply_lamnr_flows_whitener(
                     trainer_output=result,
                     data=views,
                     direction="forward",
@@ -294,7 +452,7 @@ def main():
                     **apply_common,
                 )
             else:
-                z_views = apply_normalizing_simr_flows_whitener(
+                z_views = apply_lamnr_flows_whitener(
                     trainer_output=result,
                     data=views,
                     direction="forward",
@@ -311,7 +469,7 @@ def main():
         wh_views = None
         if args.save_whitened == "pca" and args.base_distribution == "GaussianPCA":
             if supports_new:
-                wh_views = apply_normalizing_simr_flows_whitener(
+                wh_views = apply_lamnr_flows_whitener(
                     trainer_output=result,
                     data=views,
                     direction="forward",
@@ -322,7 +480,7 @@ def main():
                     **apply_common,
                 )
             else:
-                wh_views = apply_normalizing_simr_flows_whitener(
+                wh_views = apply_lamnr_flows_whitener(
                     trainer_output=result,
                     data=views,
                     direction="forward",
@@ -338,7 +496,7 @@ def main():
 
         elif args.save_whitened == "full" and args.base_distribution == "GaussianPCA":
             if supports_new:
-                wh_views = apply_normalizing_simr_flows_whitener(
+                wh_views = apply_lamnr_flows_whitener(
                     trainer_output=result,
                     data=views,
                     direction="forward",
@@ -349,7 +507,7 @@ def main():
                     **apply_common,
                 )
             else:
-                wh_views = apply_normalizing_simr_flows_whitener(
+                wh_views = apply_lamnr_flows_whitener(
                     trainer_output=result,
                     data=views,
                     direction="forward",
@@ -377,7 +535,7 @@ def main():
                 else:
                     # compute z on the fly
                     if supports_new:
-                        z_views = apply_normalizing_simr_flows_whitener(
+                        z_views = apply_lamnr_flows_whitener(
                             trainer_output=result,
                             data=views,
                             direction="forward",
@@ -388,7 +546,7 @@ def main():
                             **apply_common,
                         )
                     else:
-                        z_views = apply_normalizing_simr_flows_whitener(
+                        z_views = apply_lamnr_flows_whitener(
                             trainer_output=result,
                             data=views,
                             direction="forward",
@@ -400,7 +558,7 @@ def main():
                     inv_input = "z"
 
             if supports_new:
-                recon_views = apply_normalizing_simr_flows_whitener(
+                recon_views = apply_lamnr_flows_whitener(
                     trainer_output=result["models"],   # list of models
                     data=inv_data,
                     direction="inverse",
@@ -411,7 +569,7 @@ def main():
                     **apply_common,
                 )
             else:
-                recon_views = apply_normalizing_simr_flows_whitener(
+                recon_views = apply_lamnr_flows_whitener(
                     trainer_output=result["models"],
                     data=inv_data,
                     direction="inverse",
