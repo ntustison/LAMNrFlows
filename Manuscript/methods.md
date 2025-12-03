@@ -158,18 +158,30 @@ to be dominant.
 
 ### Shared-subspace screening with CCA and HSIC
 
+If we apply alignment losses to all latent coordinates, the model is implicitly
+pushed toward making every feature shared across views. This can over-constrain
+the flows, force view-specific structure into the shared space, and blur
+contrast- or modality-specific information. It is also wasteful from a
+statistical and computational perspective as many latent dimensions are weakly
+related across views or primarily encode private variation, so aligning them
+adds noise rather than useful signal. In analogy to SiMLR, we therefore seek a
+lower-dimensional shared subspace that concentrates cross-view dependence while
+leaving a complementary private subspace unconstrained.
+
 To automatically identify shared coordinates, we perform a short screening pass
 after an MLE warm-up phase. For CCA-based screening, we construct whitened
 feature matrices for two views and perform an SVD of the cross-covariance
-\(X_a^\top X_b\), retaining the top \(r\) canonical directions per view. Averaging
-across all view pairs yields per-view projectors \(P^{(v)} \in \mathbb{R}^{D \times r}\)
-defining the shared subspace. For HSIC-based screening, we first prefilter
-coordinates using Pearson correlation, then rank remaining dimensions by an
-unbiased HSIC estimate with RBF kernels averaged over other views, and select
-the top \(r\) per view. Alignment losses are applied only to these projected or
-masked coordinates. Screening can be performed once after warm-up or
-periodically refreshed during training; in our experiments we use a single
-screening stage for simplicity.
+\(X_a^\top X_b\), retaining the top \(r\) canonical directions per view.
+Averaging across all view pairs yields per-view projectors
+\(P^{(v)} \in \mathbb{R}^{D \times r}\) defining the shared subspace. For
+HSIC-based screening, we first prefilter coordinates using Pearson correlation,
+then rank remaining dimensions by an unbiased HSIC estimate with RBF kernels
+averaged over other views, and select the top \(r\) per view. Alignment losses
+are applied only to these projected or masked coordinates, so that dependence
+is enforced where cross-view signal is strongest and private dimensions remain
+free to capture view-specific variation. Screening can be performed once after
+warm-up or periodically refreshed during training; in our experiments we use a
+single screening stage for simplicity.
 
 
 ## Conditional Gaussian model over latents
