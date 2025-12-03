@@ -1,4 +1,6 @@
-python3 ../train_antstorch_simr_flows.py \
+#/usr/bin/zsh
+
+python3 ../train_lamnr_flows_tabular.py \
   --views UniformSimulatedData/uniform_10000x4.csv \
   --output-prefix ./runs/uniform \
   --base-distribution DiagGaussian \
