@@ -202,6 +202,34 @@ alignment when substantial cross-view structure is present.
 
 ## Conditional Gaussian model over latents
 
+Normalizing flows give us an explicit bijection between data space and a latent
+space with a simple base density (e.g., Gaussian). Once the per-view flows have been trained,
+every multiview observation \(x = \{x^{(v)}\}_{v=1}^V\) can be mapped to a
+collection of latents \(z = \{z^{(v)}\}_{v=1}^V\) with an exactly known
+Jacobian. Any joint distribution placed on these latents induces a valid joint
+distribution on the original data via the change-of-variables formula. In other
+words, specifying a model \(p_Z(z)\) in latent space is equivalent to
+specifying a generative model \(p_X(x)\) in data space, but with the advantage
+that inference and conditioning can be carried out where the geometry is
+simpler.
+
+LAMNr Flows exploit this by choosing a multivariate Gaussian model on the
+concatenated latents. This choice is deliberately simple: flows absorb the
+complex, non-Gaussian aspects of each view into the invertible mappings
+\(f^{(v)}\), so that the residual cross-view structure can be captured by a
+Gaussian dependence model in \(z\). Under this construction, the joint density
+factorizes as
+\[
+p_X(x) = p_Z(z)\,\prod_{v=1}^V \left|\det \frac{\partial f^{(v)}}{\partial x^{(v)}}\right|,
+\]
+with \(z = f(x)\). Because \(p_Z(z)\) is Gaussian, all conditionals
+\(p_Z(z_U \mid z_O)\) are available in closed form, and exact conditional
+inference in data space reduces to three steps: encode observed views to
+latents, apply Gaussian conditioning in \(z\), and decode the resulting latents
+back through the inverse flows. This yields closed-form posteriors, imputations,
+and counterfactuals that are fully consistent with the learned flow model.
+
+
 After training the per-view flows and projector alignment, we freeze the flow
 parameters and collect latents for all subjects. For image views, we retain a
 multiscale representation \(z^{(v)}_\ell\) at each level \(\ell \in
