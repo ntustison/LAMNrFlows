@@ -147,6 +147,8 @@ objectives trade off simplicity, batch-size requirements, and the type of
 cross-view dependence they emphasize (linear vs. non-linear, second-order vs.
 higher-order).
 
+\input{latent_alignment_table.tex}
+
 We summarize the main options in Table~\ref{tab:alignment}, which we use
 interchangeably depending on the experiment. Pearson and VICReg are effective
 when batch sizes are modest and we want stable, low-cost alignment. Barlow Twins
@@ -154,18 +156,14 @@ adds explicit redundancy reduction via cross-correlation decorrelation. InfoNCE
 provides a strong discriminative signal when large batches and in-batch
 negatives are available, while HSIC captures non-linear dependence at the cost
 of \(O(B^2)\) kernel operations. In all cases, the alignment term acts only on
-shared coordinates, leaving private coordinates free to capture
-view-specific variation.
-
-\input{latent_alignment_table.tex}
-
-In practice, we choose the alignment objective based on computational budget and
-the expected structure of the views. For small batches or limited compute,
-Pearson or VICReg are attractive. When we want stronger redundancy reduction
-without negatives, Barlow Twins is a good default. InfoNCE is most useful for
-large-batch, discriminative alignment (e.g., retrieval-like settings), and HSIC
-is reserved for settings where non-linear cross-modality relations are expected
-to be dominant.
+shared coordinates, leaving private coordinates free to capture view-specific
+variation. In practice, we choose the alignment objective based on computational
+budget and the expected structure of the views. For small batches or limited
+compute, Pearson or VICReg are attractive. When we want stronger redundancy
+reduction without negatives, Barlow Twins is a good default. InfoNCE is most
+useful for large-batch, discriminative alignment (e.g., retrieval-like
+settings), and HSIC is reserved for settings where non-linear cross-modality
+relations are expected to be dominant.
 
 ### Shared-subspace screening with CCA and HSIC
 

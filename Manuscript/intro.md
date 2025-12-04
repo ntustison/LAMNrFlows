@@ -38,7 +38,7 @@ and InfoNCE [@zbontar2021barlow; @bardes2021vicreg; @oord2018cpc] can also be
 used for broader application to missing-data patterns [@bishop2006prml;
 @Murphy2012ML].
 
-### Similarity-driven multilinear reconstruction (SiMLR)
+### Similarity-driven multilinear reconstruction
 
 Similarity-driven multilinear reconstruction (SiMLR) makes this decomposition
 explicit in a linear, low-rank setting by factorizing multiview data into
