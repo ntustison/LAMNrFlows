@@ -89,7 +89,7 @@ alignment. For clarity and robustness we therefore report results using a fixed
 \(\lambda\) schedule in the main experiments.
 
 
-## Per-view flow backbones
+## View-specific flow architectures
 
 ### Image views (Glow-style multiscale flows)
 
