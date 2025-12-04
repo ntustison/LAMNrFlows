@@ -1,7 +1,25 @@
 
-## Latent-Aligned Multiview Normalizing Flows
+## Latent-Aligned Multiview Normalizing (LAMNr) Flows
 
 We introduce Latent-Aligned Multiview Normalizing (LAMNr) Flows, a general framework that learns a shared latent subspace across views, thereby treating the orthogonal complement as view-specific variation. Using subject-matched batches, we implement a library of latent-alignment constraints (Pearson, Barlow Twins, VICReg, InfoNCE, HSIC) and optionally use CCA (linear) or HSIC (kernel) to identify latent directions that are statistically shared across views, restricting alignment to those coordinates. After maximum-likelihood training, we model the joint latents as Gaussian, estimate per-level moments, and use the conditional Gaussian formulation to obtain closed-form posteriors for any subset. This enables principled cross-view imputation and, more generally, latent manipulations that preserve anatomy or identity while modulating modality- or view-specific factors; for images, replacing private components by their conditional means produces shared-latent images that act as contrast-robust surrogates. 
+
+***
+
+### RealNVP (tabular data)
+
+<details>
+<summary>Single view, uniform --> diagonal Gaussian (toy example)</summary>
+
+
+
+<p align="center">
+  <img src="Examples/lamnr_realnvp/Test_SimpleUniform/UniformSimulatedData/uniform_10000x4.png" alt="Input" width="75%"><br>
+  Input<br>        
+  <img src="Examples/lamnr_realnvp/Test_SimpleUniform/uniform_z_view0.png" alt="Output" width="75%"><br>
+  Output
+</p>
+
+</details>
 
 ***
 

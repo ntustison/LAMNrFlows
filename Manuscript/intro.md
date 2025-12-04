@@ -21,7 +21,7 @@ multimodal and multiview settings, where contrasts or views may be missing or
 heterogeneous and downstream analyses depend on calibrated comparisons and
 coherent cross-view reconstructions.
 
-## Related work in "multiview" learning
+## Related work in multiview learning
 
 A view is a set of measurements on the same subjects that arises from a distinct
 acquisition or feature space (for example, distinct image types or tabular
@@ -38,7 +38,7 @@ and InfoNCE [@zbontar2021barlow; @bardes2021vicreg; @oord2018cpc] can also be
 used for broader application to missing-data patterns [@bishop2006prml;
 @Murphy2012ML].
 
-### Similarity-driven multilinear reconstruction (SiMLR)
+### Similarity-driven multilinear reconstruction
 
 Similarity-driven multilinear reconstruction (SiMLR) makes this decomposition
 explicit in a linear, low-rank setting by factorizing multiview data into
@@ -52,7 +52,7 @@ statistically coherent across views and aligned with downstream phenotypes,
 while private components capture contrast- or modality-specific variation. The
 resulting embeddings support tasks such as cross-view harmonization,
 visualization, and prediction in a way that cleanly separates common and
-idiosyncratic effects (e.g., [@Stone2020BreachersNeuroimaging; @Stone2024USSOCOM]).
+idiosyncratic effects [@Stone2020BreachersNeuroimaging; @Stone2024USSOCOM].
 
 LAMNr Flows can be viewed as a deep, likelihood-based extension of this SiMLR
 framework to nonlinear, invertible latent spaces. Rather than performing an
