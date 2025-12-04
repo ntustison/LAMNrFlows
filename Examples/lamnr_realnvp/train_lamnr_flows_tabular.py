@@ -299,12 +299,76 @@ def _screen_views_for_alignment(args, views, verbose: bool = False):
         if verbose:
             print("  -> Dependence above threshold; keeping alignment penalty.")
 
-def load_views(view_paths):
+def _rank_gaussianize_series(col: pd.Series) -> pd.Series:
+    """Rank-based Gaussianization: map empirical CDF to N(0,1).
+
+    NaNs are left as NaN. Uses torch.erfinv to avoid a SciPy dependency.
+    """
+    mask = col.notna().values
+    if not mask.any():
+        return col
+    x = col.values[mask].astype(float)
+
+    # ranks: 1..m
+    order = np.argsort(x)
+    ranks = np.empty_like(order, dtype=float)
+    ranks[order] = np.arange(1, len(x) + 1, dtype=float)
+
+    m = float(len(x))
+    # Convert ranks to uniform in (0,1), then to Gaussian via erfinv
+    u = (ranks - 0.5) / m
+    u = np.clip(u, 1e-6, 1.0 - 1e-6)
+    u_t = torch.from_numpy(u)
+    z_t = torch.erfinv(2.0 * u_t - 1.0) * math.sqrt(2.0)
+    z = z_t.numpy()
+
+    out = col.copy()
+    out.values[mask] = z
+    return out
+
+
+def _apply_marginal_transform(df: pd.DataFrame, kind: str) -> pd.DataFrame:
+    """Apply a per-feature marginal transform to all numeric columns of a view.
+
+    Supported kinds:
+      - 'asinh'          : elementwise arcsinh(x)
+      - 'rank_gaussian'  : rank-based Gaussianization
+      - 'none' / '' / None: no-op
+    """
+    if kind is None:
+        return df
+    kind = str(kind).lower()
+    if kind in ["none", "", "null"]:
+        return df
+
+    if kind == "asinh":
+        return df.apply(lambda s: np.arcsinh(s))
+    elif kind == "rank_gaussian":
+        return df.apply(_rank_gaussianize_series)
+    else:
+        raise ValueError(f"Unknown marginal transform kind: {kind}")
+
+
+def load_views(view_paths, marginal_transforms=None):
+    """Load CSV views and optionally apply per-view marginal transforms.
+
+    Parameters
+    ----------
+    view_paths : list[str]
+        CSV paths for each view.
+    marginal_transforms : dict[int,str] or None
+        Optional mapping from view index (0-based) to a marginal transform
+        kind ('asinh', 'rank_gaussian', 'none').
+    """
     views = []
-    for p in view_paths:
+    for i, p in enumerate(view_paths):
         df = pd.read_csv(p)
         # Force numeric; non-numeric will become NaN → trainer/dataset handles imputation/normalization
         df = df.apply(pd.to_numeric, errors="coerce")
+
+        if marginal_transforms is not None and i in marginal_transforms:
+            df = _apply_marginal_transform(df, marginal_transforms[i])
+
         views.append(df)
     # Basic shape check
     nset = {len(df) for df in views}
@@ -332,6 +396,19 @@ def main():
     ap.add_argument("--pca-latent-dimension", type=int, default=4)
     ap.add_argument("--K", type=int, default=64)
     ap.add_argument("--leaky-relu-negative-slope", type=float, default=0.2)
+
+
+    # Optional per-view marginal transforms (applied before normalization).
+    # Format: --marginal-transform VIEW:KIND  (can be passed multiple times),
+    # where VIEW is 0-based index into the views list and KIND is one of:
+    #   asinh, rank_gaussian, none
+    ap.add_argument(
+        "--marginal-transform",
+        type=str,
+        nargs="*",
+        default=[],
+        help="Optional per-view marginal transforms, e.g. '2:rank_gaussian' to transform view 2.",
+    )
 
     # Flow/builder stability knobs
     ap.add_argument("--scale-cap", type=float, default=3.0, help="Bound for log-scale s via tanh; exp(s) in [e^-cap, e^cap]")
@@ -507,6 +584,19 @@ def main():
     args = ap.parse_args()
     verbose = args.verbose
 
+    # Parse per-view marginal transform specs, e.g. ['2:rank_gaussian'].
+    marginal_transforms = {}
+    for spec in getattr(args, "marginal_transform", []) or []:
+        try:
+            view_str, kind = spec.split(":", 1)
+        except ValueError:
+            raise ValueError(f"Invalid --marginal-transform spec '{spec}'. Expected format VIEW:KIND, e.g. '2:rank_gaussian'.")
+        view_idx = int(view_str)
+        if view_idx < 0:
+            raise ValueError(f"View index in --marginal-transform must be non-negative; got {view_idx}")
+        marginal_transforms[view_idx] = kind
+
+
     if len(args.views) == 1 and args.penalty_type != "none":
         args.penalty_type = "none"
 
@@ -515,7 +605,7 @@ def main():
     np.random.seed(args.seed)
 
     # Load CSV views
-    views = load_views(args.views)
+    views = load_views(args.views, marginal_transforms=marginal_transforms)
 
     # Optional pre-training dependence screening (may disable alignment)
     _screen_views_for_alignment(args, views, verbose=verbose)
