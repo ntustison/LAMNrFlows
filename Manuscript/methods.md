@@ -91,7 +91,7 @@ alignment. For clarity and robustness we therefore report results using a fixed
 
 ## View-specific flow architectures
 
-### Image views (Glow-style multiscale flows)
+### Image views via Glow-based multiscale flows
 
 For image views we adopt Glow-style discrete normalizing flows with \(L\) levels
 and \(K\) coupling steps per level. Each step comprises: (i) ActNorm layers with
@@ -107,7 +107,7 @@ construction, instantiated via a model factory in ANTsTorch
 (both 2-D and 3-D), number of levels \(L\), steps per level \(K\), and hidden
 channels. 
 
-#### Tabular and IDP views (RealNVP/MAF whiteners)
+### Tabular/IDP views via RealNVP
 
 For imaging-derived phenotypes (IDPs) and other tabular blocks, we use
 single-scale flows based on RealNVP and masked autoregressive flows (MAF) with
