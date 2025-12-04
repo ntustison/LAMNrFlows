@@ -33,6 +33,14 @@ $\mathcal{L} = \mathrm{HSIC}(X,Y)$ (e.g., RBF kernel) &
 Kernel type; bandwidth $\sigma$ (median heuristic); regularization &
 Captures non-linear shared structure beyond correlations; useful when complex cross-view relations are expected; $\mathcal{O}(B^2)$ cost in batch size and sensitive to bandwidth choice. \\
 \hline
+\multicolumn{4}{p{13.85cm}}{\textbf{Legend:}
+$\tilde Z^{(i)}$ and $\tilde Z^{(j)}$ are batch-normalized projector outputs for
+two views; $C$ is their cross-correlation matrix with entries $C_{ij}$;
+$\mathrm{Inv}$, $\mathrm{Var}$, and $\mathrm{Cov}$ denote the invariance,
+variance, and covariance terms in VICReg; $s$ and $s'$ are similarity scores
+between paired and non-paired samples; $\tau$ is the temperature; $X$ and $Y$
+are projected features from two views used to compute $\mathrm{HSIC}(X,Y)$; and
+$\sigma$ is the kernel bandwidth.} \\
 \end{tabular}
 \caption{Summary of latent alignment objectives used in LAMNr Flows.}
 \label{tab:alignment}

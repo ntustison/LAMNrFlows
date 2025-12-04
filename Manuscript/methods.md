@@ -102,10 +102,9 @@ predicted by shallow convolutional subnetworks with a configurable number of
 hidden channels. Squeeze and split operations provide a multiscale
 representation in which shallower levels capture coarse structure while deeper
 levels model fine texture. Our implementation follows the standard Glow
-construction, instantiated via a model factory in ANTsTorch
-(`create_glow_normalizing_flow_model_2d`/`3d`), with configurable image size
-(both 2-D and 3-D), number of levels \(L\), steps per level \(K\), and hidden
-channels. 
+construction, instantiated via a model factory in ANTsTorch, with configurable
+image size (both 2-D and 3-D), number of levels \(L\), steps per level \(K\),
+and hidden channels. 
 
 ### Tabular/IDP views via RealNVP
 
@@ -155,15 +154,15 @@ when batch sizes are modest and we want stable, low-cost alignment. Barlow Twins
 adds explicit redundancy reduction via cross-correlation decorrelation. InfoNCE
 provides a strong discriminative signal when large batches and in-batch
 negatives are available, while HSIC captures non-linear dependence at the cost
-of \(O(B^2)\) kernel operations. In all cases, the alignment term acts only on
-shared coordinates, leaving private coordinates free to capture view-specific
-variation. In practice, we choose the alignment objective based on computational
-budget and the expected structure of the views. For small batches or limited
-compute, Pearson or VICReg are attractive. When we want stronger redundancy
-reduction without negatives, Barlow Twins is a good default. InfoNCE is most
-useful for large-batch, discriminative alignment (e.g., retrieval-like
-settings), and HSIC is reserved for settings where non-linear cross-modality
-relations are expected to be dominant.
+of \(O(B^2)\) kernel operations, where $B =$ batch size. In all cases, the
+alignment term acts only on shared coordinates, leaving private coordinates free
+to capture view-specific variation. In practice, we choose the alignment
+objective based on computational budget and the expected structure of the views.
+For small batches or limited compute, Pearson or VICReg are attractive. When we
+want stronger redundancy reduction without negatives, Barlow Twins is a good
+default. InfoNCE is most useful for large-batch, discriminative alignment (e.g.,
+retrieval-like settings), and HSIC is reserved for settings where non-linear
+cross-modality relations are expected to be dominant.
 
 ### Shared-subspace screening with CCA and HSIC
 
@@ -271,32 +270,43 @@ inspection.
 
 ## Implementation and training details
 
-All flows and auxiliary functionality are implemented in PyTorch via ANTsTorch
-and a modified fork of a publicly available version of a normalizing flows
-library [@stimper2023normflows]. Training and validation splits are defined at
-the subject level, and each minibatch contains aligned multiview slices from
-matched subjects. Image data augmentation is performed on-the-fly using the
-ANTsTorch-based `ImageDataset` with affine and diffeomorphic deformations, small
-intensity perturbations (histogram warping and bias field simulation), and
-additive Gaussian noise treated as dequantization rather than biological
-variability. We control the overall augmentation strength by a scalar schedule
-\(\alpha(t) \in [0,1]\) as a function of normalized training time \(t\), and
-support linear, cosine, and exponential decay: for example, a linear schedule
-reduces augmentation proportionally to \(t\), a cosine schedule keeps stronger
-perturbations early and then decays smoothly, and an exponential schedule
-reduces aggressive warps and noise most rapidly at the beginning of training.
-This allows us to start with heavier augmentations to regularize the flows and
-discourage overfitting to discrete templates, then gradually emphasize fidelity
-to the true data distribution as training progresses. For validation, we use the
-same spatial transforms but disable additional noise and histogram warping. This
-design preserves anatomical variability while preventing overfitting to
-discrete, noise-free templates that would otherwise cause flows to collapse onto
-spiky background modes.  For tabular flows we apply a small additive “jitter”
-noise to the features, treated as dequantization rather than biological
-variation. The amplitude is controlled by a scalar schedule \(\alpha(t)\)
-(linear, cosine, or exponential in training time), analogous to the image-domain
-augmentation schedule. This helps regularize the tabular flows and prevents them
-from overfitting to discrete patterns or exact repeated rows in large cohorts.
+Our implementation builds on the \texttt{normflows} PyTorch package for
+normalizing flows [@stimper2023normflows], which we adapt and extend for the
+LAMNr setting. At the architectural level, we reconfigured the layer ordering to
+match Glow-style multiscale flows (ActNorm $\rightarrow$ invertible
+$1{\times}1(\times1)$ convolution $\rightarrow$ affine coupling).  We also
+implement 3-D variants of the core components (squeeze / unsqueeze, split /
+merge, invertible $1{\times}1{\times}1$ convolutions, and 3-D coupling networks)
+to support volumetric MRI data. These models are exposed through ANTsTorch as
+configurable factories for both image and tabular views: Glow-style flows for
+2-D/3-D images and RealNVP-style flows for IDPs and other tabular blocks. The
+ANTsTorch interface handles dataset-level normalization and imputation, Gaussian
+and Gaussian–PCA whiteners with optional application at train and test time.
+
+Training and validation splits are defined at the subject level, and each
+minibatch contains aligned multiview slices from matched subjects. Image data
+augmentation is performed on-the-fly using the ANTsTorch-based `ImageDataset`
+with affine and diffeomorphic deformations, small intensity perturbations
+(histogram warping and bias field simulation), and additive Gaussian noise
+treated as dequantization rather than biological variability. We control the
+overall augmentation strength by a scalar schedule \(\alpha(t) \in [0,1]\) as a
+function of normalized training time \(t\), and support linear, cosine, and
+exponential decay: for example, a linear schedule reduces augmentation
+proportionally to \(t\), a cosine schedule keeps stronger perturbations early
+and then decays smoothly, and an exponential schedule reduces aggressive warps
+and noise most rapidly at the beginning of training. This allows us to start
+with heavier augmentations to regularize the flows and discourage overfitting to
+discrete templates, then gradually emphasize fidelity to the true data
+distribution as training progresses. For validation, we use the same spatial
+transforms but disable additional noise and histogram warping. This design
+preserves anatomical variability while preventing overfitting to discrete,
+noise-free templates that would otherwise cause flows to collapse onto spiky
+background modes.  For tabular flows we apply a small additive “jitter” noise to
+the features, treated as dequantization rather than biological variation. The
+amplitude is controlled by a scalar schedule \(\alpha(t)\) (linear, cosine, or
+exponential in training time), analogous to the image-domain augmentation
+schedule. This helps regularize the tabular flows and prevents them from
+overfitting to discrete patterns or exact repeated rows in large cohorts.
 
 Glow models are initialized with data-dependent ActNorm, and we perform a
 one-time warm-up pass with real images before starting training to stabilize
