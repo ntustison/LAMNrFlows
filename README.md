@@ -5,6 +5,24 @@ We introduce Latent-Aligned Multiview Normalizing (LAMNr) Flows, a general frame
 
 ***
 
+### RealNVP (tabular data)
+
+<details>
+<summary>Single view, uniform --> diagonal Gaussian</summary>
+
+
+
+<p align="center">
+  <img src="Examples/lamnr_realnvp/Test_SimpleUniform/UniformSimulatedData/uniform_10000x4.png" alt="Input" width="75%"><br>
+  Input<br>        
+  <img src="Examples/lamnr_realnvp/Test_SimpleUniform/uniform_z_view0.png" alt="Output" width="75%"><br>
+  Output
+</p>
+
+</details>
+
+***
+
 ### Glow-based 2-D HCP example
 
 <details>
