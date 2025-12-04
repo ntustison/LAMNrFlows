@@ -341,8 +341,8 @@ def main():
     ap.add_argument("--mask-mode", type=str, default="alternating", choices=["alternating", "rolling"], help="Mask alternation strategy")
 
     # Base distribution stability knobs
-    ap.add_argument("--base-min-log", type=float, default=-5.0, help="Lower clamp for base log-scales (if supported)")
-    ap.add_argument("--base-max-log", type=float, default=5.0, help="Upper clamp for base log-scales (if supported)")
+    ap.add_argument("--base-min-log", type=float, default=-2.0, help="Lower clamp for base log-scales (if supported)")
+    ap.add_argument("--base-max-log", type=float, default=2.0, help="Upper clamp for base log-scales (if supported)")
     ap.add_argument("--base-sigma", type=float, default=0.1, help="Noise for GaussianPCA (if used)")
 
     # === Dataset normalization & jitter (new) ===
@@ -362,16 +362,16 @@ def main():
     ap.add_argument("--jitter-alpha-total-steps", type=int, default=None)
 
     # Optimization
-    ap.add_argument("--lr", type=float, default=1e-5)
+    ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--batch-size", type=int, default=256)
     ap.add_argument("--weight-decay", type=float, default=0.0)
-    ap.add_argument("--max-iter", type=int, default=1200)
+    ap.add_argument("--max-iter", type=int, default=1000)
     ap.add_argument("--cuda-device", default="cpu")
     ap.add_argument("--seed", type=int, default=0)
 
     # Penalty/tradeoff
     ap.add_argument("--tradeoff-mode", default="uncertainty", choices=["ema", "uncertainty", "fixed"])
-    ap.add_argument("--target-ratio", type=float, default=9.0)
+    ap.add_argument("--target-ratio", type=float, default=4.0)
     ap.add_argument("--lambda-penalty", type=float, default=1.0)
     ap.add_argument("--ema-beta", type=float, default=0.98)
 
@@ -506,6 +506,9 @@ def main():
 
     args = ap.parse_args()
     verbose = args.verbose
+
+    if len(args.views) == 1 and args.penalty_type != "none":
+        args.penalty_type = "none"
 
     # Determinism
     torch.manual_seed(args.seed)
