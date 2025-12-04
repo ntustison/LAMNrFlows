@@ -156,13 +156,22 @@ provides a strong discriminative signal when large batches and in-batch
 negatives are available, while HSIC captures non-linear dependence at the cost
 of \(O(B^2)\) kernel operations, where $B =$ batch size. In all cases, the
 alignment term acts only on shared coordinates, leaving private coordinates free
-to capture view-specific variation. In practice, we choose the alignment
-objective based on computational budget and the expected structure of the views.
-For small batches or limited compute, Pearson or VICReg are attractive. When we
-want stronger redundancy reduction without negatives, Barlow Twins is a good
-default. InfoNCE is most useful for large-batch, discriminative alignment (e.g.,
-retrieval-like settings), and HSIC is reserved for settings where non-linear
-cross-modality relations are expected to be dominant.
+to capture view-specific variation.[^align] 
+
+[^align]: In practice, we choose the alignment objective based on both computational
+budget and the expected cross-view structure. For small batches or limited
+compute, simple second-order methods such as Pearson correlation, or
+non-contrastive objectives such as VICReg, are attractive because they are
+stable and inexpensive to estimate. When stronger redundancy reduction is needed
+while still avoiding negative pairs, Barlow Twins is a good default, explicitly
+driving cross-correlation matrices towards identity. InfoNCE is most useful
+when we can train with large batches and many in-batch negatives, for example in
+discriminative multiview matching or retrieval-style scenarios where each sample
+in one view must be matched against many candidates in another. HSIC-based
+alignment is reserved for settings where we expect predominantly non-linear
+cross-modality relations as it can capture richer dependencies than correlations
+but carries an $O(B^2)$ kernel cost and is more sensitive to kernel and
+bandwidth choices.
 
 ### Shared-subspace screening with CCA and HSIC
 
