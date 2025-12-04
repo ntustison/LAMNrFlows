@@ -52,7 +52,7 @@ statistically coherent across views and aligned with downstream phenotypes,
 while private components capture contrast- or modality-specific variation. The
 resulting embeddings support tasks such as cross-view harmonization,
 visualization, and prediction in a way that cleanly separates common and
-idiosyncratic effects @Stone2020BreachersNeuroimaging; @Stone2024USSOCOM.
+idiosyncratic effects [@Stone2020BreachersNeuroimaging; @Stone2024USSOCOM].
 
 LAMNr Flows can be viewed as a deep, likelihood-based extension of this SiMLR
 framework to nonlinear, invertible latent spaces. Rather than performing an

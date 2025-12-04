@@ -20,7 +20,8 @@ $ $
 Nicholas J. Tustison\textsuperscript{1,\textrm{\Letter}},
 Brian B. Avants\textsuperscript{1},
 \dots\textsuperscript{?},
-
+James C. Gee\textsuperscript{2},
+James R. Stone\textsuperscript{1}
 \small
 
 \textsuperscript{1}Department of Radiology and Medical Imaging, University of Virginia, Charlottesville, VA \\

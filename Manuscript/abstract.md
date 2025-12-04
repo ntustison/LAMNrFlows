@@ -16,7 +16,7 @@ maximum-likelihood training, we model the joint latents as Gaussian, estimate
 per-level moments, and use the conditional Gaussian formulation to obtain
 closed-form posteriors for any subset. This enables principled cross-view
 imputation and, more generally, latent manipulations that preserve anatomy or
-identity while modulating modality- or view-specific factors; for images,
+identity while modulating modality- or view-specific factors.  For images,
 replacing private components by their conditional means produces shared-latent
 images that act as contrast-robust surrogates. We evaluate on multimodal MRI
 cohorts and multiview imaging-derived phenotype datasets, comparing against
