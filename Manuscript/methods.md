@@ -320,6 +320,20 @@ configurable factories for both image and tabular views: Glow-style flows for
 ANTsTorch interface handles dataset-level normalization and imputation, Gaussian
 and Gaussian–PCA whiteners with optional application at train and test time.
 
+Several empirical and survey works have noted that, compared to VAEs and
+diffusion models, deep normalizing flows can be numerically sensitive on
+high-dimensional data, with stability depending strongly on architectural
+choices, scale parameterization, and Jacobian conditioning
+[@papamakarios2021nfreview; @kobyzev2020nfsurvey; @Behrmann2019ResidualFlows;
+@durkan2019nsf; @croitoru2023diffusion_vision_survey]. In light of this, we
+introduced several additional stability-oriented modifications in both our
+ANTsTorch builders and our \texttt{normflows} fork. These include bounded
+coupling scales (via configurable \texttt{scale\_map} and \texttt{scale\_cap}
+parametrizations), constrained base log-scales for Glow-style bases, optional
+ActNorm inside coupling subnetworks, and gradient-norm clipping. Collectively,
+these changes reduce log-det explosions and latent outliers in deep multiscale
+flows while preserving exact likelihoods and invertibility.
+
 Training and validation splits are defined at the subject level, and each
 minibatch contains aligned multiview slices from matched subjects. Image data
 augmentation is performed on-the-fly using the ANTsTorch-based `ImageDataset`
