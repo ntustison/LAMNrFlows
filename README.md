@@ -8,7 +8,7 @@ We introduce Latent-Aligned Multiview Normalizing (LAMNr) Flows, a general frame
 ### RealNVP (tabular data)
 
 <details>
-<summary>Single view, uniform --> diagonal Gaussian</summary>
+<summary>Single view, uniform --> diagonal Gaussian (toy example)</summary>
 
 
 
