@@ -312,7 +312,7 @@ normalizing flows [@stimper2023normflows], which we adapt and extend for the
 LAMNr setting. At the architectural level, we reconfigured the layer ordering to
 match Glow-style multiscale flows (ActNorm $\rightarrow$ invertible
 $1{\times}1(\times1)$ convolution $\rightarrow$ affine coupling).  We also
-implement 3-D variants of the core components (squeeze / unsqueeze, split /
+implemented 3-D variants of the core components (squeeze / unsqueeze, split /
 merge, invertible $1{\times}1{\times}1$ convolutions, and 3-D coupling networks)
 to support volumetric MRI data. These models are exposed through ANTsTorch as
 configurable factories for both image and tabular views: Glow-style flows for
