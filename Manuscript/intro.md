@@ -21,7 +21,7 @@ multimodal and multiview settings, where contrasts or views may be missing or
 heterogeneous and downstream analyses depend on calibrated comparisons and
 coherent cross-view reconstructions.
 
-## Related work in "multiview" learning
+## Related work in multiview learning
 
 A view is a set of measurements on the same subjects that arises from a distinct
 acquisition or feature space (for example, distinct image types or tabular
