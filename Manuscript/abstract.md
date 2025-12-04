@@ -24,4 +24,4 @@ strong linear multiview baselines, and observe improvements in calibrated
 likelihoods, cross-view dependence structure, imputation accuracy, and
 downstream predictive transfer. We release open-source implementations and
 illustrate how latent alignment enables general-purpose reasoning and editing
-across heterogeneous views within a single, exact, and interpretable model.
+across heterogeneous views within a single interpretable model.
