@@ -104,7 +104,16 @@ representation in which shallower levels capture coarse structure while deeper
 levels model fine texture. Our implementation follows the standard Glow
 construction, instantiated via a model factory in ANTsTorch, with configurable
 image size (both 2-D and 3-D), number of levels \(L\), steps per level \(K\),
-and hidden channels. 
+and hidden channels.[^starflow] 
+
+[^starflow]: Recent transformer autoregressive flows such as STARFlow achieve
+strong high-resolution synthesis by operating as a normalizing flow in the
+latent space of a pretrained autoencoder [@gu2025starflow]. This design does not
+provide an exact, per-sample bijection from pixel space to the flow’s latents or
+multiscale per-level latents for analysis, both of which we require for
+per-level alignment and post-hoc Gaussian conditioning.  We therefore adopt
+Glow-style multiscale flows that offer single-pass, exact encoding/decoding in
+image space with explicit latent access [@kingma2018glow].
 
 ### Tabular/IDP views via RealNVP
 
