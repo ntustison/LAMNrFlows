@@ -97,33 +97,34 @@ alignment. For clarity and robustness we therefore report results using a fixed
 \centering
 \includegraphics[width=0.85\textwidth]{Figures/Glow.pdf}
 \caption{Diagrammatic illustration of a generalized multiscale 2-D Glow architecture
-An input image \(x \in \mathbb{R}^{B \times C_0 \times H_0 \times W_0}\) is
-processed through a sequence of levels \(\ell = 0, \dots, N-1\). At each level
-\(\ell < N-1\), a squeeze operation trades spatial resolution for channels
+An input image \(x \in \mathbb{R}^{B \times C_1 \times H_1 \times W_1}\) is
+processed through a sequence of levels \(\ell = 1, \dots, N\). At each level
+\(\ell < N\), a squeeze operation trades spatial resolution for channels
 \(\big([B, C_\ell, H_\ell, W_\ell] \rightarrow [B, 4C_\ell, H_\ell/2,
 W_\ell/2]\big)\), followed by a stack of Glow steps (ActNorm, invertible \(1
 \times 1\) convolution, and affine coupling). The output is then split into (i)
 a factored-out latent block \(z_\ell \in \mathbb{R}^{B \times 2C_\ell \times
 H_\ell/2 \times W_\ell/2}\) and (ii) a remaining block that is passed to the
-next level. At the bottom level \(N-1\), a final squeeze produces the remaining
-latent block \(z_{N-1}\) without further splitting. The complete latent
-representation is the union of all levels, \(z = \{ z_0, \dots, z_{N-1} \}\),
+next level. At the bottom level \(N\), a final squeeze produces the remaining
+latent block \(z_{N}\) without further splitting. The complete latent
+representation is the union of all levels, \(z = \{ z_1, \dots, z_{N} \}\),
 which preserves the dimensionality of the original image and supports per-level
-latent modeling in our LAMNr framework.}   
+latent modeling in our LAMNr framework.}
+\label{fig:glow}
 \end{figure}
 
 For image views we adopt Glow-style discrete normalizing flows with \(L\) levels
-and \(K\) coupling steps per level. Each step comprises: (i) ActNorm layers with
-data-dependent initialization, (ii) invertible \(1 \times 1 (\times 1)\)
-convolutions parameterized with LU factorization for efficient log-determinant
-computation, and (iii) affine coupling layers whose scale and shift fields are
-predicted by shallow convolutional subnetworks with a configurable number of
-hidden channels. Squeeze and split operations provide a multiscale
-representation in which shallower levels capture coarse structure while deeper
-levels model fine texture. Our implementation follows the standard Glow
-construction, instantiated via a model factory in ANTsTorch, with configurable
-image size (both 2-D and 3-D), number of levels \(L\), steps per level \(K\),
-and hidden channels.[^starflow] 
+and \(K\) coupling steps per level (see Figure \ref{fig:glow}). Each step
+comprises: (i) ActNorm layers with data-dependent initialization, (ii)
+invertible \(1 \times 1 (\times 1)\) convolutions parameterized with LU
+factorization for efficient log-determinant computation, and (iii) affine
+coupling layers whose scale and shift fields are predicted by shallow
+convolutional subnetworks with a configurable number of hidden channels. Squeeze
+and split operations provide a multiscale representation in which shallower
+levels capture coarse structure while deeper levels model fine texture. Our
+implementation follows the standard Glow construction, instantiated via a model
+factory in ANTsTorch, with configurable image size (both 2-D and 3-D), number of
+levels \(L\), steps per level \(K\), and hidden channels.[^starflow] 
 
 [^starflow]: Recent transformer autoregressive flows such as STARFlow achieve
 strong high-resolution synthesis by operating as a normalizing flow in the
