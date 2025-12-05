@@ -309,6 +309,13 @@ def parse_args():
                    default=(1.0, 99.0), help="Percentile window to compute KDE grid (default 1 99)")
     p.add_argument("--max-kde-n", type=int, default=20000, help="Subsample size cap for KDE to improve speed on large columns")
     p.add_argument("--counts", action="store_true", help="Plot raw counts instead of probability density (i.e., set density=False)")
+    # Secondary winsorized replot options
+    p.add_argument("--secondary-winsorize-quantiles", type=float, nargs=2, metavar=("QLOW","QHIGH"),
+                   help="If set, create an additional set of figures using winsorized data capped to these percentiles (e.g., 1 99).")
+    p.add_argument("--secondary-standardize", action="store_true",
+                   help="When using --secondary-winsorize-quantiles, z-score standardize the winsorized data before plotting.")
+    p.add_argument("--secondary-tag", type=str, default="winsorized",
+                   help="Tag to append to filenames for the secondary winsorized plots (default: 'winsorized').")
     return p.parse_args()
 
 def main():
@@ -320,6 +327,8 @@ def main():
         if not csv.exists():
             print(f"[ERROR] File not found: {csv}", file=sys.stderr)
             continue
+
+        # Primary plot: uses the main clip/winsor/xlim/standardization options and optional tag.
         plot_csv(
             csv_path=csv,
             out_dir=args.out_dir,
@@ -347,6 +356,44 @@ def main():
             max_kde_n=max(1000, args.max_kde_n),
             density=not args.counts,
         )
+
+        # Optional secondary pass: re-plot using winsorized data (and optional standardization)
+        # to better visualize the bulk of heavy-tailed distributions.
+        if args.secondary_winsorize_quantiles is not None:
+            sec_q = tuple(args.secondary_winsorize_quantiles)
+            # If a primary tag is given, append the secondary tag to keep both sets distinguishable.
+            if args.tag:
+                sec_tag = f"{args.tag}_{args.secondary_tag}"
+            else:
+                sec_tag = args.secondary_tag
+
+            plot_csv(
+                csv_path=csv,
+                out_dir=args.out_dir,
+                bins=bins,
+                ncols=max(1, args.ncols),
+                max_subplots_per_fig=max(1, args.max_subplots_per_fig),
+                sharex=args.sharex,
+                sharey=args.sharey,
+                dropna=not args.keep_na,
+                kde=args.kde,
+                standardize=args.secondary_standardize,
+                dpi=args.dpi,
+                figsize_w=args.figsize[0],
+                figsize_h=args.figsize[1],
+                file_tag=sec_tag,
+                test_gaussianity=args.test_gaussianity,
+                uni_test=args.uni_test,
+                multi_test=args.multi_test,
+                clip_quantiles=None,  # secondary pass uses only winsorization, no dropping
+                winsorize_quantiles=sec_q,
+                xlim_quantiles=tuple(args.xlim_quantiles) if args.xlim_quantiles else None,
+                logx=args.logx,
+                symlogx=args.symlogx,
+                kde_quantiles=tuple(args.kde_quantiles) if args.kde_quantiles else None,
+                max_kde_n=max(1000, args.max_kde_n),
+                density=not args.counts,
+            )
 
 if __name__ == "__main__":
     main()
