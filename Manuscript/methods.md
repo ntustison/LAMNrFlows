@@ -93,6 +93,25 @@ alignment. For clarity and robustness we therefore report results using a fixed
 
 ### Image views via Glow-based multiscale flows
 
+\begin{figure}
+\centering
+\includegraphics[width=0.85\textwidth]{Figures/Glow.pdf}
+\caption{Diagrammatic illustration of a generalized multiscale 2-D Glow architecture
+An input image \(x \in \mathbb{R}^{B \times C_0 \times H_0 \times W_0}\) is
+processed through a sequence of levels \(\ell = 0, \dots, N-1\). At each level
+\(\ell < N-1\), a squeeze operation trades spatial resolution for channels
+\(\big([B, C_\ell, H_\ell, W_\ell] \rightarrow [B, 4C_\ell, H_\ell/2,
+W_\ell/2]\big)\), followed by a stack of Glow steps (ActNorm, invertible \(1
+\times 1\) convolution, and affine coupling). The output is then split into (i)
+a factored-out latent block \(z_\ell \in \mathbb{R}^{B \times 2C_\ell \times
+H_\ell/2 \times W_\ell/2}\) and (ii) a remaining block that is passed to the
+next level. At the bottom level \(N-1\), a final squeeze produces the remaining
+latent block \(z_{N-1}\) without further splitting. The complete latent
+representation is the union of all levels, \(z = \{ z_0, \dots, z_{N-1} \}\),
+which preserves the dimensionality of the original image and supports per-level
+latent modeling in our LAMNr framework.}   
+\end{figure}
+
 For image views we adopt Glow-style discrete normalizing flows with \(L\) levels
 and \(K\) coupling steps per level. Each step comprises: (i) ActNorm layers with
 data-dependent initialization, (ii) invertible \(1 \times 1 (\times 1)\)
