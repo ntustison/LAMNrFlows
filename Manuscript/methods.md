@@ -367,11 +367,8 @@ introduced several additional stability-oriented modifications in both our
 ANTsTorch builders and our \texttt{normflows} fork. These include bounded
 coupling scales (via configurable \texttt{scale\_map} and \texttt{scale\_cap}
 parametrizations), constrained base log-scales for Glow-style bases, optional
-ActNorm inside coupling subnetworks, and gradient-norm clipping. Collectively,
-these changes reduce log-det explosions and latent outliers in deep multiscale
-flows while preserving exact likelihoods and invertibility.
-
-For Gaussian-PCA, we compute the Gaussian log likelihood for the base \(\Sigma =
+ActNorm inside coupling subnetworks, and gradient-norm clipping. We also
+refactored computation of the Gaussian log likelihood for the base \(\Sigma =
 W^\top W + \sigma^2 I\) using a Cholesky factorization with a small adaptive
 jitter, evaluate \(\log|\Sigma|\) as \(2\sum \log \mathrm{diag}(L)\), and form
 the quadratic term via triangular solves rather than explicit matrix inversion.
@@ -382,6 +379,8 @@ scale so that \(\Sigma\) is well conditioned at start, and we learn \(\log
 numerical recommendations for stable positive-definite computations
 [@higham2002accuracy] and pair naturally with shrinkage used elsewhere in our
 conditional-Gaussian step [@ledoit2004well; @schafer2005shrinkage].
+Collectively, these changes reduce log-det explosions and latent outliers in
+deep multiscale flows while preserving exact likelihoods and invertibility.
 
 Training and validation splits are defined at the subject level, and each
 minibatch contains aligned multiview slices from matched subjects. Image data
