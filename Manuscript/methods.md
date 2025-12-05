@@ -352,12 +352,20 @@ distribution as training progresses. For validation, we use the same spatial
 transforms but disable additional noise and histogram warping. This design
 preserves anatomical variability while preventing overfitting to discrete,
 noise-free templates that would otherwise cause flows to collapse onto spiky
-background modes.  For tabular flows we apply a small additive “jitter” noise to
-the features, treated as dequantization rather than biological variation. The
-amplitude is controlled by a scalar schedule \(\alpha(t)\) (linear, cosine, or
-exponential in training time), analogous to the image-domain augmentation
-schedule. This helps regularize the tabular flows and prevents them from
-overfitting to discrete patterns or exact repeated rows in large cohorts.
+background modes.  
+
+For tabular flows we apply a small additive “jitter” noise to the features,
+treated as dequantization rather than biological variation. The amplitude is
+controlled by a scalar schedule \(\alpha(t)\) (linear, cosine, or exponential in
+training time), analogous to the image-domain augmentation schedule. In
+addition, certain views can undergo a per-feature marginal transform prior to
+normalization, such as an elementwise \(\operatorname{asinh}(x)\) for
+heavy-tailed continuous variables or rank-based Gaussianization that maps the
+empirical CDF of each feature to a standard normal. These monotone transforms
+preserve rank information while making marginals more Gaussian and reducing
+extreme tails. Together, marginal transforms and jitter regularize the tabular
+flows and prevent them from overfitting to discrete patterns or exact repeated
+rows in large cohorts.
 
 Glow models are initialized with data-dependent ActNorm, and we perform a
 one-time warm-up pass with real images before starting training to stabilize
