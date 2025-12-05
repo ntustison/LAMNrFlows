@@ -148,16 +148,24 @@ by floor-clamping the standard deviation. Positively skewed, non-negative
 variables can optionally be log or log1p transformed before normalization to
 reduce skewness.
 
-We use two base distributions: a diagonal Gaussian and a Gaussian–PCA base
-(`GaussianPCA`) that performs an additional linear whitening of the flow
-latents. In the latter case, the flow acts as a learnable multiview “whitener”
-that maps each tabular view to a standardized latent \(\varepsilon\) with
-approximately independent components; both the raw flow latents \(z^{(v)}\) and
-the whitened coordinates \(\varepsilon^{(v)}\) can be exported for downstream
-Gaussian modeling and diagnostics. Each tabular view is typically modeled with a
-stack of 8–12 coupling layers with fully connected subnetworks of width 256–512,
-and the resulting latent vector \(z^{(v)}\) is then passed to the same
-projector, screening, and alignment machinery as the image latents.
+We use two base distributions: a diagonal Gaussian and a Gaussian–PCA base that
+performs an additional linear whitening of the flow latents. In the latter case,
+the flow acts as a learnable multiview “whitener” that maps each tabular view to
+a standardized latent \(\varepsilon\) with approximately independent components;
+both the raw flow latents \(z^{(v)}\) and the whitened coordinates
+\(\varepsilon^{(v)}\) can be exported for downstream Gaussian modeling and
+diagnostics. This Gaussian–PCA base is particularly useful when tabular views
+have different numbers of columns. The per-view PCA yields an orthonormal,
+variance-ordered latent in which we can select a common rank $r$ for alignment,
+producing matched- dimension standardized coordinates \(\varepsilon^{(v)} \in
+\mathbb{R}^r\) without altering the exact invertibility of the flow (truncation
+is used only for the alignment head). Whitening also improves the conditioning
+of the covariance estimates used in the conditional-Gaussian step by reducing
+collinearity and stabilizing \(\Sigma_{OO}^{-1}\). Each tabular view is
+typically modeled with a stack of 8–12 coupling layers with fully connected
+subnetworks of width 256–512, and the resulting latent vector \(z^{(v)}\) is
+then passed to the same projector, screening, and alignment machinery as the
+image latents.
 
 ### Projector networks and latent alignment objectives
 
@@ -362,6 +370,18 @@ parametrizations), constrained base log-scales for Glow-style bases, optional
 ActNorm inside coupling subnetworks, and gradient-norm clipping. Collectively,
 these changes reduce log-det explosions and latent outliers in deep multiscale
 flows while preserving exact likelihoods and invertibility.
+
+For Gaussian-PCA, we compute the Gaussian log likelihood for the base \(\Sigma =
+W^\top W + \sigma^2 I\) using a Cholesky factorization with a small adaptive
+jitter, evaluate \(\log|\Sigma|\) as \(2\sum \log \mathrm{diag}(L)\), and form
+the quadratic term via triangular solves rather than explicit matrix inversion.
+This avoids determinant and matrix-inverse calls that are unstable in high
+dimensions and yields fewer NaNs during training. We initialize \(W\) at small
+scale so that \(\Sigma\) is well conditioned at start, and we learn \(\log
+\sigma\) to keep \(\sigma\) strictly positive.  These choices follow standard
+numerical recommendations for stable positive-definite computations
+[@higham2002accuracy] and pair naturally with shrinkage used elsewhere in our
+conditional-Gaussian step [@ledoit2004well; @schafer2005shrinkage].
 
 Training and validation splits are defined at the subject level, and each
 minibatch contains aligned multiview slices from matched subjects. Image data
