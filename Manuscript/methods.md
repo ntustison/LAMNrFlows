@@ -135,6 +135,26 @@ per-level alignment and post-hoc Gaussian conditioning.  We therefore adopt
 Glow-style multiscale flows that offer single-pass, exact encoding/decoding in
 image space with explicit latent access [@kingma2018glow].
 
+Base distribution for image latents (Glow-style channel Gaussian) For image
+views we use a channel-wise diagonal Gaussian (“Glow base”) with one mean and
+one log-scale per channel, broadcast across spatial locations. Let \(z \in
+\mathbb{R}^{C\times N_1\times \dots \times N_S}\) with \(S\in\{2,3\}\) spatial
+dimensions and \(d=C\prod_{i=1}^S N_i\). The log density is
+
+\[
+\log p(z)
+= -\tfrac12\, d\log(2\pi)
+- \Big(\prod_{i=1}^S N_i\Big)\sum_{c=1}^C s_c
+- \tfrac12 \sum_{c}\sum_{\mathbf{x}}\big[(z_{c,\mathbf{x}}-\mu_c)\,e^{-s_c}\big]^2,
+\]
+
+where \(\mu_c\) and \(s_c\) are per-channel parameters broadcast over all
+spatial indices \(\mathbf{x}\). Compared to a conventional per-voxel diagonal
+Gaussian, tying parameters within each channel reduces degrees of freedom,
+matches Glow’s multiscale semantics, and avoids per-voxel scale collapse.
+
+
+
 ### Tabular/IDP views via RealNVP
 
 For imaging-derived phenotypes (IDPs) and other tabular blocks, we use
