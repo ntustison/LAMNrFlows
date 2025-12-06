@@ -35,7 +35,7 @@ methods such as CCA [@Hotelling1936CCA; @Hardoon2004CCAOverview]. Kernel
 dependence measures such as the Hilbert–Schmidt Independence Criterion (HSIC)
 [@gretton2005hsic] or learned alignment objectives such as Barlow Twins, VICReg,
 and InfoNCE [@zbontar2021barlow; @bardes2021vicreg; @oord2018cpc] can also be
-used for broader application to missing-data patterns [@bishop2006prml;
+used for broader application to incomplete data patterns [@bishop2006prml;
 @Murphy2012ML].
 
 ### Similarity-driven multilinear reconstruction
