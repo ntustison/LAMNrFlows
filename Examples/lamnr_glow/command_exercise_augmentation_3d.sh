@@ -1,6 +1,10 @@
+
+
 # super-strong early augmentation
 python exercise_augmentation_3d.py \
-  --view /path/to/T1/*.nii.gz \
+  --view ~/Data/HCPTemplates/*/T_template0.nii.gz \
+  --view ~/Data/HCPTemplates/*/T_template1.nii.gz \
+  --view ~/Data/HCPTemplates/*/T_template2.nii.gz \
   --H 64 --W 64 --D 64 \
   --batch 4 \
   --n-per-view 16 \
@@ -9,7 +13,9 @@ python exercise_augmentation_3d.py \
 
 # mid-training augmentation
 python exercise_augmentation_3d.py \
-  --view /path/to/T1/*.nii.gz \
+  --view ~/Data/HCPTemplates/*/T_template0.nii.gz \
+  --view ~/Data/HCPTemplates/*/T_template1.nii.gz \
+  --view ~/Data/HCPTemplates/*/T_template2.nii.gz \
   --H 64 --W 64 --D 64 \
   --batch 4 \
   --n-per-view 16 \
@@ -18,7 +24,9 @@ python exercise_augmentation_3d.py \
 
 # late / almost-off augmentation
 python exercise_augmentation_3d.py \
-  --view /path/to/T1/*.nii.gz \
+  --view ~/Data/HCPTemplates/*/T_template0.nii.gz \
+  --view ~/Data/HCPTemplates/*/T_template1.nii.gz \
+  --view ~/Data/HCPTemplates/*/T_template2.nii.gz \
   --H 64 --W 64 --D 64 \
   --batch 4 \
   --n-per-view 16 \
