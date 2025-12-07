@@ -46,11 +46,13 @@ sd_deformation:linear:0.0->0.0@${extra},\
 sd_simulated_bias_field:cos:0.00->0.00@${extra},\
 sd_histogram_warping:cos:0.004->0.004@${extra}"
 
+python download_hcp_data.py
+
 # ---------- Phase 1: strong -> weak aug ----------
 python train_cohort_screened_3d.py \
-  --view ~/Data/HCPTemplates/*/T_template0.nii.gz \
-  --view ~/Data/HCPTemplates/*/T_template1.nii.gz \
-  --view ~/Data/HCPTemplates/*/T_template2.nii.gz \
+  --view ~/.antstorch/hcp*T1Template.nii.gz \
+  --view ~/.antstorch/hcp*T2Template.nii.gz \
+  --view ~/.antstorch/hcp*FATemplate.nii.gz \
   --H ${H} --W ${W} --D ${D} \
   --spatial-dims 3 \
   --L ${L} --K ${K} --hidden ${hidden} \

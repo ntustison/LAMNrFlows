@@ -41,11 +41,13 @@ sd_histogram_warping:cos:0.008->0.008@${extra}"
 
 SLICE_IDX=116
 
+python download_hcp_data.py
+
 # ---- Phase 1: strong->weak aug (as in earlier successful runs) ----
 python train_2d.py \
-  --view ~/Data/HCPTemplates/*/T_template0.nii.gz \
-  --view ~/Data/HCPTemplates/*/T_template1.nii.gz \
-  --view ~/Data/HCPTemplates/*/T_template2.nii.gz \
+  --view ~/.antstorch/hcp*T1Template.nii.gz \
+  --view ~/.antstorch/hcp*T2Template.nii.gz \
+  --view ~/.antstorch/hcp*FATemplate.nii.gz \
   --H ${H} --W ${W} --L ${L} --K ${K} --hidden ${hidden} \
   --batch ${BATCH} \
   --slice-idx ${SLICE_IDX} --val-frac 0.0 \
