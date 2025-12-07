@@ -6,6 +6,10 @@ Exercise 3D data augmentation for the HCP T1/T2/FA cohort.
   as train_cohort_screened_3d.py
 - Applies the augmentation (including schedules, if given)
 - Writes augmented 3D volumes per view to disk as NIfTI files
+
+If --step >= 0, we fix the effective "training step" for augmentation
+schedules to that value. If --step < 0, we advance the schedule with
+each batch (step = 1, 2, 3, ...).
 """
 
 import argparse
@@ -81,6 +85,17 @@ def main():
         help="Filename prefix for written volumes.",
     )
 
+    ap.add_argument(
+        "--step",
+        type=int,
+        default=-1,
+        help=(
+            "If >= 0, fix augmentation schedules to this effective training "
+            "step for all volumes. If < 0, advance step with each batch "
+            "(step = 1, 2, 3, ...)."
+        ),
+    )
+
     args = ap.parse_args()
     num_views = len(args.view)
 
@@ -110,13 +125,23 @@ def main():
     per_view_counts = [0 for _ in range(num_views)]
     target_total = args.n_per_view * num_views
 
+    if args.step >= 0:
+        print(f"[info] using fixed augmentation step = {args.step}")
+    else:
+        print("[info] using batch index as augmentation step (1, 2, 3, ...)")
+
     print(f"[info] saving up to {args.n_per_view} augmented volumes per view")
     print(f"[info] output dir: {out_dir}")
 
     for it, batch in enumerate(train_loader, start=1):
-        # keep augmentation scheduler in sync with training-style global_step
+        # Set effective "training step" for the augmentation scheduler.
+        if args.step >= 0:
+            step_val = args.step
+        else:
+            step_val = it
+
         with global_step.get_lock():
-            global_step.value = it
+            global_step.value = step_val
 
         xs = _extract_views_from_batch(batch, num_views=num_views)
 
@@ -150,4 +175,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
