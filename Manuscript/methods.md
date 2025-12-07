@@ -93,18 +93,67 @@ alignment. For clarity and robustness we therefore report results using a fixed
 
 ### Image views via Glow-based multiscale flows
 
+\begin{figure}
+\centering
+\includegraphics[width=0.85\textwidth]{Figures/Glow.pdf}
+\caption{Diagrammatic illustration of a generalized multiscale 2-D Glow architecture
+An input image \(x \in \mathbb{R}^{B \times C_1 \times H_1 \times W_1}\) is
+processed through a sequence of levels \(\ell = 1, \dots, N\). At each level
+\(\ell < N\), a squeeze operation trades spatial resolution for channels
+\(\big([B, C_\ell, H_\ell, W_\ell] \rightarrow [B, 4C_\ell, H_\ell/2,
+W_\ell/2]\big)\), followed by a stack of Glow steps (ActNorm, invertible \(1
+\times 1\) convolution, and affine coupling). The output is then split into (i)
+a factored-out latent block \(z_\ell \in \mathbb{R}^{B \times 2C_\ell \times
+H_\ell/2 \times W_\ell/2}\) and (ii) a remaining block that is passed to the
+next level. At the bottom level \(N\), a final squeeze produces the remaining
+latent block \(z_{N}\) without further splitting. The complete latent
+representation is the union of all levels, \(z = \{ z_1, \dots, z_{N} \}\),
+which preserves the dimensionality of the original image and supports per-level
+latent modeling in our LAMNr framework.}
+\label{fig:glow}
+\end{figure}
+
 For image views we adopt Glow-style discrete normalizing flows with \(L\) levels
-and \(K\) coupling steps per level. Each step comprises: (i) ActNorm layers with
-data-dependent initialization, (ii) invertible \(1 \times 1 (\times 1)\)
-convolutions parameterized with LU factorization for efficient log-determinant
-computation, and (iii) affine coupling layers whose scale and shift fields are
-predicted by shallow convolutional subnetworks with a configurable number of
-hidden channels. Squeeze and split operations provide a multiscale
-representation in which shallower levels capture coarse structure while deeper
-levels model fine texture. Our implementation follows the standard Glow
-construction, instantiated via a model factory in ANTsTorch, with configurable
-image size (both 2-D and 3-D), number of levels \(L\), steps per level \(K\),
-and hidden channels. 
+and \(K\) coupling steps per level (see Figure \ref{fig:glow}). Each step
+comprises: (i) ActNorm layers with data-dependent initialization, (ii)
+invertible \(1 \times 1 (\times 1)\) convolutions parameterized with LU
+factorization for efficient log-determinant computation, and (iii) affine
+coupling layers whose scale and shift fields are predicted by shallow
+convolutional subnetworks with a configurable number of hidden channels. Squeeze
+and split operations provide a multiscale representation in which shallower
+levels capture coarse structure while deeper levels model fine texture. Our
+implementation follows the standard Glow construction, instantiated via a model
+factory in ANTsTorch, with configurable image size (both 2-D and 3-D), number of
+levels \(L\), steps per level \(K\), and hidden channels.[^starflow] 
+
+[^starflow]: Recent transformer autoregressive flows such as STARFlow achieve
+strong high-resolution synthesis by operating as a normalizing flow in the
+latent space of a pretrained autoencoder [@gu2025starflow]. This design does not
+provide an exact, per-sample bijection from pixel space to the flow’s latents or
+multiscale per-level latents for analysis, both of which we require for
+per-level alignment and post-hoc Gaussian conditioning.  We therefore adopt
+Glow-style multiscale flows that offer single-pass, exact encoding/decoding in
+image space with explicit latent access [@kingma2018glow].
+
+Base distribution for image latents (Glow-style channel Gaussian) For image
+views we use a channel-wise diagonal Gaussian (“Glow base”) with one mean and
+one log-scale per channel, broadcast across spatial locations. Let \(z \in
+\mathbb{R}^{C\times N_1\times \dots \times N_S}\) with \(S\in\{2,3\}\) spatial
+dimensions and \(d=C\prod_{i=1}^S N_i\). The log density is
+
+\[
+\log p(z)
+= -\tfrac12\, d\log(2\pi)
+- \Big(\prod_{i=1}^S N_i\Big)\sum_{c=1}^C s_c
+- \tfrac12 \sum_{c}\sum_{\mathbf{x}}\big[(z_{c,\mathbf{x}}-\mu_c)\,e^{-s_c}\big]^2,
+\]
+
+where \(\mu_c\) and \(s_c\) are per-channel parameters broadcast over all
+spatial indices \(\mathbf{x}\). Compared to a conventional per-voxel diagonal
+Gaussian, tying parameters within each channel reduces degrees of freedom,
+matches Glow’s multiscale semantics, and avoids per-voxel scale collapse.
+
+
 
 ### Tabular/IDP views via RealNVP
 
@@ -119,16 +168,24 @@ by floor-clamping the standard deviation. Positively skewed, non-negative
 variables can optionally be log or log1p transformed before normalization to
 reduce skewness.
 
-We use two base distributions: a diagonal Gaussian and a Gaussian–PCA base
-(`GaussianPCA`) that performs an additional linear whitening of the flow
-latents. In the latter case, the flow acts as a learnable multiview “whitener”
-that maps each tabular view to a standardized latent \(\varepsilon\) with
-approximately independent components; both the raw flow latents \(z^{(v)}\) and
-the whitened coordinates \(\varepsilon^{(v)}\) can be exported for downstream
-Gaussian modeling and diagnostics. Each tabular view is typically modeled with a
-stack of 8–12 coupling layers with fully connected subnetworks of width 256–512,
-and the resulting latent vector \(z^{(v)}\) is then passed to the same
-projector, screening, and alignment machinery as the image latents.
+We use two base distributions: a diagonal Gaussian and a Gaussian–PCA base that
+performs an additional linear whitening of the flow latents. In the latter case,
+the flow acts as a learnable multiview “whitener” that maps each tabular view to
+a standardized latent \(\varepsilon\) with approximately independent components;
+both the raw flow latents \(z^{(v)}\) and the whitened coordinates
+\(\varepsilon^{(v)}\) can be exported for downstream Gaussian modeling and
+diagnostics. This Gaussian–PCA base is particularly useful when tabular views
+have different numbers of columns. The per-view PCA yields an orthonormal,
+variance-ordered latent in which we can select a common rank $r$ for alignment,
+producing matched- dimension standardized coordinates \(\varepsilon^{(v)} \in
+\mathbb{R}^r\) without altering the exact invertibility of the flow (truncation
+is used only for the alignment head). Whitening also improves the conditioning
+of the covariance estimates used in the conditional-Gaussian step by reducing
+collinearity and stabilizing \(\Sigma_{OO}^{-1}\). Each tabular view is
+typically modeled with a stack of 8–12 coupling layers with fully connected
+subnetworks of width 256–512, and the resulting latent vector \(z^{(v)}\) is
+then passed to the same projector, screening, and alignment machinery as the
+image latents.
 
 ### Projector networks and latent alignment objectives
 
@@ -330,9 +387,20 @@ introduced several additional stability-oriented modifications in both our
 ANTsTorch builders and our \texttt{normflows} fork. These include bounded
 coupling scales (via configurable \texttt{scale\_map} and \texttt{scale\_cap}
 parametrizations), constrained base log-scales for Glow-style bases, optional
-ActNorm inside coupling subnetworks, and gradient-norm clipping. Collectively,
-these changes reduce log-det explosions and latent outliers in deep multiscale
-flows while preserving exact likelihoods and invertibility.
+ActNorm inside coupling subnetworks, and gradient-norm clipping. We also
+refactored computation of the Gaussian log likelihood for the base \(\Sigma =
+W^\top W + \sigma^2 I\) using a Cholesky factorization with a small adaptive
+jitter, evaluate \(\log|\Sigma|\) as \(2\sum \log \mathrm{diag}(L)\), and form
+the quadratic term via triangular solves rather than explicit matrix inversion.
+This avoids determinant and matrix-inverse calls that are unstable in high
+dimensions and yields fewer NaNs during training. We initialize \(W\) at small
+scale so that \(\Sigma\) is well conditioned at start, and we learn \(\log
+\sigma\) to keep \(\sigma\) strictly positive.  These choices follow standard
+numerical recommendations for stable positive-definite computations
+[@higham2002accuracy] and pair naturally with shrinkage used elsewhere in our
+conditional-Gaussian step [@ledoit2004well; @schafer2005shrinkage].
+Collectively, these changes reduce log-det explosions and latent outliers in
+deep multiscale flows while preserving exact likelihoods and invertibility.
 
 Training and validation splits are defined at the subject level, and each
 minibatch contains aligned multiview slices from matched subjects. Image data
