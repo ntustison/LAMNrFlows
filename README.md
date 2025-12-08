@@ -20,12 +20,13 @@ We introduce Latent-Aligned Multiview Normalizing (LAMNr) Flows, a general frame
 </details>
 
 <details>
-<summary>Single view, [ANTsXUKBB IDPs](https://www.nature.com/articles/s41598-024-59440-6)</summary>
+<summary>Single view, ANTsXUKBB, FreeSurfer, FSL IDPs</summary>
+[Data](https://www.nature.com/articles/s41598-024-59440-6)
 
 <p align="center">
-  <img src="Examples/lamnr_realnvp/ukbb_single_view_analysis/bar_uplift_byK_Age.png" alt="Input" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Age.png" alt="Age" width="75%"><br>
   Input<br>        
-  <img src="Examples/lamnr_realnvp/ukbb_single_view_analysis/bar_uplift_byK_Alcohol.png" alt="Input" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Alcohol.png" alt="Input" width="75%"><br>
   Output
 </p>
 
