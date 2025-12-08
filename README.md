@@ -8,6 +8,46 @@ We introduce Latent-Aligned Multiview Normalizing (LAMNr) Flows, a general frame
 ### RealNVP (tabular data)
 
 <details>
+<summary>Network architecture</summary>
+
+
+              RealNVP flow with alternative base distributions
+              =================================================
+
+                      +------------------------+
+                      |       Input x          |
+                      |        [B, D]          |
+                      +------------------------+
+                                   |
+                                   v
+                      +------------------------+
+                      |  RealNVP block stack   |
+                      |  K coupling steps      |
+                      +------------------------+
+                                   |
+                                   v
+                      +------------------------+
+                      |      Latent z_K        |
+                      |        [B, D]          |
+                      +------------------------+
+                          /               \
+                         /                 \
+                        v                   v
+
+        +--------------------------------+      +-------------------------------------------+
+        |     DiagGaussian base          |      |          GaussianPCA base                |
+        |                                |      |                                           |
+        |   z_K ~ N(0, I_D)              |      |   z_K ~ N(μ, W Wᵀ + σ² I_D)              |
+        |                                |      |   u ~ N(0, I_M),  ε ~ N(0, I_D)          |
+        |   (isotropic / diagonal        |      |   z_K = μ + W u + σ ε                    |
+        |    Gaussian prior)             |      |   (low-rank + isotropic residual)        |
+        +--------------------------------+      +-------------------------------------------+
+
+              Same RealNVP encoder; only the base density p(z_K) differs.
+
+</details>
+
+<details>
 <summary>Single view, uniform --> diagonal Gaussian (toy example)</summary>
 
 <p align="center">
