@@ -20,14 +20,22 @@ We introduce Latent-Aligned Multiview Normalizing (LAMNr) Flows, a general frame
 </details>
 
 <details>
-<summary>Single view, ANTsXUKBB, FreeSurfer, FSL IDPs</summary>
-[Data](https://www.nature.com/articles/s41598-024-59440-6)
+<summary>Single view, ANTsXUKBB IDPs</summary>
+  
+[Data from *ANTsX neuroimaging-derived structural phenotypes of UK Biobank*](https://www.nature.com/articles/s41598-024-59440-6)
 
 <p align="center">
   <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Age.png" alt="Age" width="75%"><br>
-  Input<br>        
   <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Alcohol.png" alt="Input" width="75%"><br>
-  Output
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_BMI.png" alt="BMI" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_FluidIntelligenceScore.png" alt="FIS" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_GeneticSex.png" alt="GeneticSex" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Hearing.png" alt="Hearning" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_NeuroticismScore.png" alt="NeuroticismScore" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_NumericMemory.png" alt="NumericMemory" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_RiskTaking.png" alt="RiskTaking" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_SameSexIntercourse.png" alt="SSI" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_TownsendDeprivationIndex.png" alt="TDI" width="75%"><br>
 </p>
 
 </details>
