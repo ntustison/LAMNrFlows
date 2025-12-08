@@ -20,7 +20,7 @@ We introduce Latent-Aligned Multiview Normalizing (LAMNr) Flows, a general frame
 </details>
 
 <details>
-<summary>Single view, ANTsXUKBB IDPs</summary>
+<summary>Single view, ANTsX/FreeSurfer/FSL UKBB IDPs</summary>
   
 [Data from *ANTsX neuroimaging-derived structural phenotypes of UK Biobank*](https://www.nature.com/articles/s41598-024-59440-6)
 
