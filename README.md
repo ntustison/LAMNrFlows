@@ -10,12 +10,22 @@ We introduce Latent-Aligned Multiview Normalizing (LAMNr) Flows, a general frame
 <details>
 <summary>Single view, uniform --> diagonal Gaussian (toy example)</summary>
 
-
-
 <p align="center">
   <img src="Examples/lamnr_realnvp/Test_SimpleUniform/UniformSimulatedData/uniform_10000x4.png" alt="Input" width="75%"><br>
   Input<br>        
   <img src="Examples/lamnr_realnvp/Test_SimpleUniform/uniform_z_view0.png" alt="Output" width="75%"><br>
+  Output
+</p>
+
+</details>
+
+<details>
+<summary>Single view, [ANTsXUKBB IDPs](https://www.nature.com/articles/s41598-024-59440-6)</summary>
+
+<p align="center">
+  <img src="Examples/lamnr_realnvp/ukbb_single_view_analysis/bar_uplift_byK_Age.png" alt="Input" width="75%"><br>
+  Input<br>        
+  <img src="Examples/lamnr_realnvp/ukbb_single_view_analysis/bar_uplift_byK_Alcohol.png" alt="Input" width="75%"><br>
   Output
 </p>
 
