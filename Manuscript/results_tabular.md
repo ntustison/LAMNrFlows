@@ -6,8 +6,9 @@
 
 To assess whether normalizing flows are useful even for purely tabular imaging
 phenotypes, we first analyzed a single-view setting using UK Biobank
-imaging-derived phenotypes (IDPs). For each software package (ANTsX, FreeSurfer,
-FSL) we treated its structural IDPs as one view and fitted a real-NVP–style flow
+imaging-derived phenotypes (IDPs) from three well-known packages:  ANTsX, 
+FreeSurfer, and FSL [@Tustison:2024aa]. For each software package 
+we treated its structural IDPs as one view and fitted a real-NVP–style flow
 that Gaussianizes the joint feature distribution. Flows were trained in an
 unsupervised fashion with maximum likelihood, using a standard Gaussian base and
 $K$ coupling steps $(K \in {4, 8, 16, 32})$ but no dimensionality reduction. From each
@@ -16,7 +17,7 @@ variables after flow inversion, linearly rescaled to zero mean and unit variance
 so that the dimensionality matches the original IDPs. For each demographic or
 lifestyle target (Age, BMI, Townsend deprivation index, and additional clinical
 variables), we then fitted ridge regression models with 10-fold cross-validation
-using either the raw IDPs, simple z-scores, or the whitened\_full features.
+using either the raw IDPs, simple z-scores, or the whitened features.
 Performance was summarized by cross-validated $R^2$, and we report uplift 
 $\Delta R^2 = R^2(\mathrm{flow}) - R^2(\mathrm{raw})$ as a function of $K$ 
 and package. 
@@ -64,7 +65,7 @@ between adiposity and brain structure and function, including non-linear effects
 and interactions with vascular and metabolic risk [@Dekkers2019ObesityBrain;
 @Kim2015BMIThickness; @Bettcher2013BMIVascularWM; @Morys2021MidlifeObesity;
 @Kullmann2012ObeseBrainRSFC].  In our experiments, $R^2$ for BMI from raw or
-z-scored IDPs was modest, but the whitened\_full representations yielded
+z-scored IDPs was modest, but the whitened representations yielded
 substantial gains, with $\Delta R^2$ increasing steadily with $K$ and reaching
 its maximum at the deepest flows. The pattern was consistent across ANTsX,
 FreeSurfer, and FSL IDPs, though the absolute magnitude varied. This suggests
