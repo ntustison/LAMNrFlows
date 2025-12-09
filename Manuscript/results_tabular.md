@@ -85,6 +85,30 @@ This is consistent with a weak but genuinely non-linear signal: the flows need
 sufficient capacity before any advantage over simple z-scaling appears, and even
 then the gains remain much smaller than for BMI.
 
+Across the three exemplar targets, the uplift analysis paints a consistent
+picture of when single-view tabular flows help and when they hurt. For Age,
+flow-whitened features *always* reduced performance: mean uplift was negative
+for every package and coupling depth, corresponding to drops of roughly 2–7
+percentage points of cross-validated \(R^2\) relative to raw IDPs, and the
+run-wise tests for \(\Delta R^2 > 0\) all yielded one-sided \(p\)-values close
+to 1 (i.e., strong evidence of degradation). In contrast, BMI showed robust
+gains: for FSL and FreeSurfer, mean uplift was positive at all \(K\), with
+increases on the order of \(\sim 0.5\)–\(1.5\) percentage points of \(R^2\) and
+one-sided \(p\)-values for \(\Delta R^2 > 0\) in the range \(\sim 7\times
+10^{-4}\)–\(3\times 10^{-2}\); ANTsX exhibited a smaller but still significant
+mean uplift at \(K = 8\), with shallow (\(K = 4\)) and very deep (\(K = 16,
+32\)) flows either negative or indistinguishable from zero. The Townsend
+deprivation index fell in between: for most package/\(K\) combinations the
+mean uplift was near zero or slightly negative, but the deepest flows (\(K =
+32\)) yielded small yet statistically detectable positive uplifts for ANTsX and
+FreeSurfer (on the order of \(\sim 0.04\)–\(0.15\) percentage points of \(R^2\),
+one-sided \(p \approx 0.01\)–\(0.02\)), while FSL remained effectively flat.
+Taken together, these results support the idea that flow-based Gaussianization
+of tabular IDPs is most beneficial for targets like BMI (and, weakly, Townsend)
+whose relationship to brain structure is non-linear and non-Gaussian, and can
+systematically harm prediction for targets like Age whose mapping is already
+well captured by simple linear trends in the original feature space.
+
 Most of the remaining demographic and clinical variables showed little benefit
 from flow Gaussianization. For many targets, R² from raw IDPs was already very
 low, indicating that the variable is only weakly expressed in the imaging
@@ -99,3 +123,4 @@ already well captured by simple linear models (Age and similar measures). This
 motivates our subsequent focus on multi-view, laminar settings where such
 non-Gaussian structure is common and where flexible Gaussianization layers are
 more likely to be beneficial.
+
