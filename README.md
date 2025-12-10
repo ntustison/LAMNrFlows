@@ -8,15 +8,74 @@ We introduce Latent-Aligned Multiview Normalizing (LAMNr) Flows, a general frame
 ### RealNVP (tabular data)
 
 <details>
+<summary>Network architecture</summary>
+
+
+              RealNVP flow with alternative base distributions
+              =================================================
+
+                      +------------------------+
+                      |       Input x          |
+                      |        [B, D]          |
+                      +------------------------+
+                                   |
+                                   v
+                      +------------------------+
+                      |  RealNVP block stack   |
+                      |  K coupling steps      |
+                      +------------------------+
+                                   |
+                                   v
+                      +------------------------+
+                      |      Latent z_K        |
+                      |        [B, D]          |
+                      +------------------------+
+                          /               \
+                         /                 \
+                        v                   v
+
+        +--------------------------------+      +-------------------------------------------+
+        |     DiagGaussian base          |      |          GaussianPCA base                |
+        |                                |      |                                           |
+        |   z_K ~ N(0, I_D)              |      |   z_K ~ N(μ, W Wᵀ + σ² I_D)              |
+        |                                |      |   u ~ N(0, I_M),  ε ~ N(0, I_D)          |
+        |   (isotropic / diagonal        |      |   z_K = μ + W u + σ ε                    |
+        |    Gaussian prior)             |      |   (low-rank + isotropic residual)        |
+        +--------------------------------+      +-------------------------------------------+
+
+              Same RealNVP encoder; only the base density p(z_K) differs.
+
+</details>
+
+<details>
 <summary>Single view, uniform --> diagonal Gaussian (toy example)</summary>
-
-
 
 <p align="center">
   <img src="Examples/lamnr_realnvp/Test_SimpleUniform/UniformSimulatedData/uniform_10000x4.png" alt="Input" width="75%"><br>
   Input<br>        
   <img src="Examples/lamnr_realnvp/Test_SimpleUniform/uniform_z_view0.png" alt="Output" width="75%"><br>
   Output
+</p>
+
+</details>
+
+<details>
+<summary>Single view, ANTsX/FreeSurfer/FSL UKBB IDPs</summary>
+  
+[Data from *ANTsX neuroimaging-derived structural phenotypes of UK Biobank*](https://www.nature.com/articles/s41598-024-59440-6)
+
+<p align="center">
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Age.png" alt="Age" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Alcohol.png" alt="Input" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_BMI.png" alt="BMI" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_FluidIntelligenceScore.png" alt="FIS" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_GeneticSex.png" alt="GeneticSex" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Hearing.png" alt="Hearning" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_NeuroticismScore.png" alt="NeuroticismScore" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_NumericMemory.png" alt="NumericMemory" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_RiskTaking.png" alt="RiskTaking" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_SameSexIntercourse.png" alt="SSI" width="75%"><br>
+  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_TownsendDeprivationIndex.png" alt="TDI" width="75%"><br>
 </p>
 
 </details>

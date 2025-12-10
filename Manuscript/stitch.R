@@ -8,6 +8,8 @@ rmdFiles <- c( "format.md",
                "abstract.md",
                "intro.md",
                "methods.md",
+               "results.md",
+               "results_tabular.md",
                "acknowledgments.md",
                "references.md"
              )
