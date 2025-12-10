@@ -1352,8 +1352,8 @@ def main():
     ap.add_argument("--init-logvar-nll", type=float, default=0.0, help="Init log variance (s) for NLL in Kendall weighting")
     ap.add_argument("--init-logvar-align", type=float, default=0.0, help="Init log variance (s) for ALIGN in Kendall weighting")
     # VICReg hyperparameters
-    ap.add_argument("--vicreg-inv", type=float, default=25.0, help="VICReg invariance weight (MSE between views)")
-    ap.add_argument("--vicreg-var", type=float, default=25.0, help="VICReg variance weight (keep per-dim std above gamma)")
+    ap.add_argument("--vicreg-inv", type=float, default=1.0, help="VICReg invariance weight (MSE between views)")
+    ap.add_argument("--vicreg-var", type=float, default=1.0, help="VICReg variance weight (keep per-dim std above gamma)")
     ap.add_argument("--vicreg-cov", type=float, default=1.0,  help="VICReg covariance weight (penalize off-diagonals)")
     ap.add_argument("--vicreg-gamma", type=float, default=1.0, help="VICReg variance floor (target std per feature)")
     # HSIC hyperparameters (RBF kernel)
