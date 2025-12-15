@@ -85,19 +85,46 @@ We introduce Latent-Aligned Multiview Normalizing (LAMNr) Flows, a general frame
 ### Glow-based 2-D HCP example
 
 <details>
-<summary>Network architecture</summary>
+<summary>Network architecture/configuration</summary>
 
-* input size: 128×128
-
-* levels: L = 5
-
-* single-channel input per view: C₀ = 1 (you can mentally replace 1 with C₀ if you want it symbolic)
-
-* Squeeze 5 times to go from 128×128 down to 4×4.
-
-* Split at the first 4 levels (0–3).
-
-* The bottom level (L-1 = 4) keeps all its channels as z4.
+```bash
+[run] 2025-12-02 09:17:02 | Py 3.11.9 | torch 2.4.1+cu121 | cuda=true (n=2)
+[note] post-dataset build
+                 out_dir: runs/hcp_t1_t2_fa_128x128_vicreg_K12_H192_vicreg_screen_phase1
+                   views: 3
+                     H×W: 128×128
+          L / K / hidden: 5 / 12 / 192
+                   align: vicreg
+               weighting: fixed
+                   batch: 64
+                max_iter: 120000
+             extra_iters: 0
+             lr / warmup: 0.0001 / 1000
+             ema / decay: true / 0.9997
+               precision: mixed
+                 devices: cuda:0
+               slice_idx: 116
+                val_frac: 0.0
+train_samples / val_samples: 3000 / 128
+             num_workers: 4
+                    seed: 0
+            smooth_alpha: 0.05
+      sample_mode / temp: model / 1.0
+      disable_aug_anneal: false
+           aug_schedules: noise_std:cos:0.05->0.004@160000,sd_affine:cos:0.05->0.00@96000,sd_deformation:linear:12.0->0.6@112000,sd_simulated_bias_field:cos:0.20->0.03@160000,sd_histogram_warping:cos:0.04->0.008@160000
+                  screen: cca
+             screen_frac: 0.5
+ screen_warmup / refresh: 1000 / 0
+               cca_ridge: 0.001
+          prefilter_frac: 0.5
+------------------------------------------------------------
+          subjects_total: n/a
+   train_images_list_len: 3
+     val_images_list_len: 1
+ effective_train_samples: 3000
+   effective_val_samples: 128
+              batch_size: 64
+```
 
 __Single view normalizing flow__
 
@@ -209,88 +236,6 @@ __Latent-aligned multiview__
           |    NLL from each flow     ─→  joint loss    |
           +---------------------------------------------+
 ```
-</details>
-
-<details>
-
-<summary>Command call</summary>
-
-```bash
-#!/usr/bin/env bash
-set -eu pipefail
-
-# total steps
-iterations=120000          # phase 1
-extra=40000               # phase 2
-total=$((iterations + extra))   # horizon for phase-1 aug schedule
-
-# 128×128 high-capacity arch
-H=128; W=128; L=5; K=12; hidden=192
-BATCH=64
-align=vicreg
-align_weight=0.01
-OUTDIR="runs/hcp_t1_t2_fa_${H}x${W}_${align}_K${K}_H${hidden}_${align}_screen_phase1"
-
-# Screening configuration
-SCREEN_METHOD=cca           # options: none | cca | hsic
-SCREEN_FRAC=0.5             # keep top 50% dims for alignment
-SCREEN_WARMUP=1000          # start screening after N iters
-SCREEN_REFRESH=0            # 0 = discover once; else refresh cadence
-CCA_RIDGE=1e-3              # stability for CCA
-PREFILTER_FRAC=0.5          # HSIC Pearson prefilter (ignored for CCA)
-
-# ------------------------------
-# Augmentation schedules
-# ------------------------------
-
-# Phase 1: original decreasing schedule (strong -> weak)
-aug_params_phase1="noise_std:cos:0.05->0.004@${total},\
-sd_affine:cos:0.05->0.00@$((total*3/5)),\
-sd_deformation:linear:12.0->0.6@$((total*7/10)),\
-sd_simulated_bias_field:cos:0.20->0.03@${total},\
-sd_histogram_warping:cos:0.04->0.008@${total}"
-
-# Phase 2: template-focused fine-tune (no shape; mild intensity jitter)
-aug_params_phase2="noise_std:cos:0.004->0.004@${extra},\
-sd_affine:cos:0.00->0.00@${extra},\
-sd_deformation:linear:0.0->0.0@${extra},\
-sd_simulated_bias_field:cos:0.00->0.00@${extra},\
-sd_histogram_warping:cos:0.008->0.008@${extra}"
-
-SLICE_IDX=116
-
-# ---- Phase 1: strong->weak aug (as in earlier successful runs) ----
-python train_cohort_screened.py \
-  --view ~/Data/HCPTemplates/*/T_template0.nii.gz \
-  --view ~/Data/HCPTemplates/*/T_template1.nii.gz \
-  --view ~/Data/HCPTemplates/*/T_template2.nii.gz \
-  --H ${H} --W ${W} --L ${L} --K ${K} --hidden ${hidden} \
-  --batch ${BATCH} \
-  --slice-idx ${SLICE_IDX} --val-frac 0.0 \
-  --max-iter "${iterations}" \
-  --devices cuda:1 --precision mixed --amp-dtype bf16 \
-  --ema --ema-decay 0.9997 \
-  --auto-resume \
-  --aug-schedules "${aug_params_phase1}" \
-  --lr 1e-4 --warmup-iters 1000 \
-  --eval-interval 1000 --plot-interval 1000 \
-  --grad-clip 1.0 \
-  --train-samples 3000 --val-samples 128 \
-  --smooth-alpha 0.05 \
-  --sample-mode model \
-  --weighting fixed \
-  --align "${align}" \
-  --align-weight "${align_weight}" \
-  --screen "${SCREEN_METHOD}" \
-  --screen-warmup "${SCREEN_WARMUP}" \
-  --screen-refresh "${SCREEN_REFRESH}" \
-  --screen-frac "${SCREEN_FRAC}" \
-  --cca-ridge "${CCA_RIDGE}" \
-  --prefilter-frac "${PREFILTER_FRAC}" \
-  --out-dir "${OUTDIR}"
-
-```
-
 </details>
 
 <details>
