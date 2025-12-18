@@ -7,26 +7,31 @@ extra=0                       # phase 2
 total=$((iterations + extra))  # horizon for phase-1 aug schedule
 
 # ---------- 3D arch ----------
-H=32
-W=32
-D=32               # depth for 3D Glow
+H=64
+W=64
+D=64               # depth for 3D Glow
 L=3
-K=16
-hidden=256
-BATCH=32             # start conservative in 3D; bump if VRAM allows
+K=24
+hidden=320
+BATCH=3             # start conservative in 3D; bump if VRAM allows
 
 align=vicreg
 align_weight=0.003
 ALIGN_WARMUP=10000
-OUTDIR="runs3d/hcp_t1_t2_fa_${H}x${W}x${D}_${align}_K${K}_H${hidden}"
+OUTDIR="runs3d/hcp_t1_t2_fa_${H}x${W}x${D}_K${K}_L${L}_H${hidden}_${align}_5"
 
 # ---------- screening configuration ----------
 SCREEN_METHOD=cca           # none | cca | hsic
-SCREEN_FRAC=0.5             # keep top 50% dims for alignment
+SCREEN_FRAC=0.25             # keep top 50% dims for alignment
 SCREEN_WARMUP=10000          # start screening after N iters
 SCREEN_REFRESH=0            # 0 = discover once; else refresh cadence
 CCA_RIDGE=1e-3              # stability for CCA
 PREFILTER_FRAC=0.5          # HSIC Pearson prefilter (ignored for CCA)
+
+# Optimization
+LR=2.5e-5      
+WARMUP=5000  
+
 
 # ---------- augmentation schedules ----------
 
@@ -64,7 +69,7 @@ python train_cohort_screened_3d.py \
   --ema --ema-decay 0.9997 \
   --auto-resume \
   --aug-schedules "${aug_params_phase1}" \
-  --lr 3e-5 --warmup-iters 5000 \
+  --lr ${LR} --warmup-iters ${WARMUP} \
   --lr-decay-gamma 1.0 \
   --lr-decay-steps 0 \
   --eval-interval 1000 --plot-interval 1000 \
@@ -72,16 +77,17 @@ python train_cohort_screened_3d.py \
   --train-samples 3000 --val-samples 128 \
   --smooth-alpha 0.05 \
   --sample-mode model \
-  --sample-temp 0.7 \
+  --sample-temp 1.0 \
   --weighting fixed \
   --align "${align}" \
   --align-weight "${align_weight}" \
   --align-warmup "${ALIGN_WARMUP}" \
+  --proj-hidden 320 --proj-dim 256 \
   --screen "${SCREEN_METHOD}" \
   --screen-warmup "${SCREEN_WARMUP}" \
   --screen-refresh "${SCREEN_REFRESH}" \
   --screen-frac "${SCREEN_FRAC}" \
   --cca-ridge "${CCA_RIDGE}" \
   --prefilter-frac "${PREFILTER_FRAC}" \
-  --out-dir "${OUTDIR}_phase1"
+  --out-dir "${OUTDIR}"
 

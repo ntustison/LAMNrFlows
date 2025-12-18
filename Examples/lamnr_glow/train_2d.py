@@ -576,7 +576,7 @@ def _coerce_nchw_4d(x, target_hw=None):
     return x
 
 @torch.no_grad()
-def _save_samples_grid(model, n, temp, out_path, nrow=10, target_hw=None, warm_x=None):
+def _save_samples_grid(model, n, temp, out_prefix, nrow=10, target_hw=None, warm_x=None, which_type="to01"):
     try:
         try:
             s = model.sample(n, temperature=temp)
@@ -597,10 +597,6 @@ def _save_samples_grid(model, n, temp, out_path, nrow=10, target_hw=None, warm_x
             return False, str(e)
 
     try:
-        try:
-            s = model.sample(n, temperature=temp)   
-        except TypeError:
-            s = model.sample(n)                     
         x = s[0] if isinstance(s, (list, tuple)) else s
         x = _coerce_nchw_4d(x, target_hw=target_hw)
         try:
@@ -621,14 +617,31 @@ def _save_samples_grid(model, n, temp, out_path, nrow=10, target_hw=None, warm_x
                     x = _coerce_nchw_4d(x, target_hw=target_hw)
                 except Exception:
                     pass
-        x = to01(x)
+
         assert torch.isfinite(x).all(), "non-finite in sample grid"
-        if x.shape[0] < n:
-            reps = (n + x.shape[0] - 1) // x.shape[0]
-            x = x.repeat(reps, 1, 1, 1)
-        x = x[:n]
-        grid = _make_grid_canvas(x, nrow=nrow)
-        tv.utils.save_image(grid, str(out_path))
+                
+        valid = {"to01", "clamp", "both"}
+        if which_type not in valid:
+            raise ValueError(f"_save_samples_grid: unrecognized which_type={which_type}")
+
+        x_to01 = to01(x) if which_type in ("to01", "both") else None
+        x_clamp = x.clamp(0, 1) if which_type in ("clamp", "both") else None
+
+        if x_to01 is not None:
+            if x_to01.shape[0] < n:
+                reps = (n + x_to01.shape[0] - 1) // x_to01.shape[0]
+                x_to01 = x_to01.repeat(reps, 1, 1, 1)
+            x_to01 = x_to01[:n]
+            grid = _make_grid_canvas(x_to01, nrow=nrow)
+            tv.utils.save_image(grid, str(out_prefix) + "_to01.png")
+        if x_clamp is not None:
+            if x_clamp.shape[0] < n:
+                reps = (n + x_clamp.shape[0] - 1) // x_clamp.shape[0]
+                x_clamp = x_clamp.repeat(reps, 1, 1, 1)
+            x_clamp = x_clamp[:n]
+            grid = _make_grid_canvas(x_clamp, nrow=nrow)
+            tv.utils.save_image(grid, str(out_prefix) + "_clamp.png")
+
         return True, None
     except Exception as e:
         return False, str(e)
@@ -1436,7 +1449,7 @@ def main():
                     for p_em, p in zip(em.parameters(), m.parameters()):
                         p_em.data.mul_(args.ema_decay).add_(p.data, alpha=1.0 - args.ema_decay)
 
-        if warm is not None:
+        if warm is not None and it <= args.warmup_iters:
             warm.step()
 
         with global_step.get_lock():
@@ -1502,6 +1515,8 @@ def main():
                 vbar.close()
                 avg_bpd = float(np.mean(bpd_acc)) if bpd_acc else float("nan")
             plateau.step(avg_bpd)
+            lr_now = opt.param_groups[0]["lr"]
+
             tqdm.write(f"[eval] iter={it} avg_bpd={avg_bpd:.4f} lr={lr_now:.2e}")
 
             with torch.no_grad():
@@ -1522,9 +1537,10 @@ def main():
                             torch.manual_seed(shared_seed)
                             ok, err = _save_samples_grid(
                                 m, n_samples, args.sample_temp,
-                                run_dir / f"samples_view{vi}_it{it:06d}.png",
+                                run_dir / f"samples_view{vi}_it{it:06d}",
                                 nrow=nrow, target_hw=(args.H, args.W),
-                                warm_x=tmpl_by_view[vi],   # <— add this
+                                warm_x=tmpl_by_view[vi],  
+                                which_type="both"
                             )
                         finally:
                             torch.random.set_rng_state(cpu_state)
