@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eu pipefail
+set -euo pipefail
 
 # ---------- total steps ----------
 iterations=120000              # phase 1
@@ -16,9 +16,9 @@ hidden=320
 BATCH=3             # start conservative in 3D; bump if VRAM allows
 
 align=vicreg
-align_weight=0.003
-ALIGN_WARMUP=10000
-OUTDIR="runs3d/hcp_t1_t2_fa_${H}x${W}x${D}_K${K}_L${L}_H${hidden}_${align}_5"
+align_weight=0.005
+ALIGN_WARMUP=20000
+OUTDIR="runs3d/hcp_t1_t2_fa_${H}x${W}x${D}_K${K}_L${L}_H${hidden}_${align}_6"
 
 # ---------- screening configuration ----------
 SCREEN_METHOD=cca           # none | cca | hsic
@@ -37,8 +37,8 @@ WARMUP=5000
 
 # Phase 1: original decreasing schedule (strong -> weak)
 aug_params_phase1="noise_std:cos:0.05->0.004@${total},\
-sd_affine:cos:0.05->0.00@$((total*3/5)),\
-sd_deformation:linear:12.0->0.6@$((total*7/10)),\
+sd_affine:cos:0.05->0.00@$((total)),\
+sd_deformation:linear:12.0->0.6@$((total)),\
 sd_simulated_bias_field:cos:0.20->0.03@${total},\
 sd_histogram_warping:cos:0.04->0.008@${total}"
 
@@ -74,6 +74,7 @@ python train_cohort_screened_3d.py \
   --lr-decay-steps 0 \
   --eval-interval 1000 --plot-interval 1000 \
   --grad-clip 1.0 \
+  --grad-accum 1 \
   --train-samples 3000 --val-samples 128 \
   --smooth-alpha 0.05 \
   --sample-mode model \
