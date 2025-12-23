@@ -473,3 +473,50 @@ image Glow backbones with RealNVP/MAF stacks while keeping the multiview
 alignment and conditional Gaussian stages unchanged, which allows LAMNr Flows to
 operate uniformly across image contrasts and multiview IDP blocks within the
 same methodological framework.
+
+\begin{figure*}[htb]
+  \centering
+  \captionsetup[subfigure]{justification=centering}
+  \begin{subfigure}[t]{0.19\textwidth}
+    \includegraphics[width=\linewidth]{Figures/aug_step000.png}
+    \caption{Step 1}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.19\textwidth}
+    \includegraphics[width=\linewidth]{Figures/aug_step001.png}
+    \caption{Step 2}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.19\textwidth}
+    \includegraphics[width=\linewidth]{Figures/aug_step002.png}
+    \caption{Step 3}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.19\textwidth}
+    \includegraphics[width=\linewidth]{Figures/aug_step003.png}
+    \caption{Step 4}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.19\textwidth}
+    \includegraphics[width=\linewidth]{Figures/aug_step004.png}
+    \caption{Step 5}
+  \end{subfigure}
+  \caption{
+   Image augmentation schedule preview across five steps (left to right).
+   Schedules used: \texttt{noise\_std:cos:0.06$\rightarrow$0.008},
+   \texttt{sd\_affine:cos:0.05$\rightarrow$0.00},
+   \texttt{sd\_deformation:linear:16.0$\rightarrow$1.0},
+   \texttt{sd\_simulated\_bias\_field:cos:0.25$\rightarrow$0.05},
+   \texttt{sd\_histogram\_warping:cos:0.05$\rightarrow$0.01}. Previews were
+   generated with the ANTsTorch test driver
+   (\texttt{test\_image\_dataset\_and\_scheduler.py}) using a $5\times5$ grid of
+   $128\times128$ tiles. The source image is the HCP young-adult template
+   constructed with ANTsX tools and distributed via ANTsTorch.
+   }
+  \label{fig:aug-schedule}
+\end{figure*}
+
+We apply lightweight, label-free augmentations during maximum-likelihood
+training to improve robustness without changing the model’s exact likelihood
+computation (augmentations act on inputs only) [@Tustison:2024aa] (cf Figure
+\ref{fig:aug-schedule}). For image views (2-D/3-D), we use geometric transforms
+(linear and non-linear transformations) shared across all views of a subject to
+preserve alignment targets, and per-view intensity-based transforms (noise,
+simulated bias-field, histogram warping).
+
