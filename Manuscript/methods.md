@@ -171,8 +171,8 @@ reduce skewness.
 We use two base distributions: a diagonal Gaussian and a Gaussian–PCA base that
 performs an additional linear whitening of the flow latents. In the latter case,
 the flow acts as a learnable multiview “whitener” that maps each tabular view to
-a standardized latent \(\varepsilon\) with approximately independent components;
-both the raw flow latents \(z^{(v)}\) and the whitened coordinates
+a standardized latent \(\varepsilon\) with approximately independent components.
+Both the raw flow latents \(z^{(v)}\) and the whitened coordinates
 \(\varepsilon^{(v)}\) can be exported for downstream Gaussian modeling and
 diagnostics. This Gaussian–PCA base is particularly useful when tabular views
 have different numbers of columns. The per-view PCA yields an orthonormal,
@@ -422,6 +422,8 @@ preserves anatomical variability while preventing overfitting to discrete,
 noise-free templates that would otherwise cause flows to collapse onto spiky
 background modes.  
 
+### Tabular-specific implementation details
+
 For tabular flows we apply a small additive “jitter” noise to the features,
 treated as dequantization rather than biological variation. The amplitude is
 controlled by a scalar schedule \(\alpha(t)\) (linear, cosine, or exponential in
@@ -435,6 +437,8 @@ extreme tails. Together, marginal transforms and jitter regularize the tabular
 flows and prevent them from overfitting to discrete patterns or exact repeated
 rows in large cohorts.
 
+### Glow-specific implementation details
+
 Glow models are initialized with data-dependent ActNorm, and we perform a
 one-time warm-up pass with real images before starting training to stabilize
 statistics. We train with Adamax, mixed precision, and optional exponential
@@ -442,6 +446,25 @@ moving averages of model parameters. Learning rates follow a warm-up plus decay
 schedule with a plateau-based reducer. We monitor exact negative log-likelihood
 in bits-per-dimension, view-wise breakdowns, and alignment loss values, and
 periodically log reconstructions and samples for visual inspection.
+
+To accommodate 3-D volumes under constrained VRAM, we enable gradient
+accumulation (microbatching). With an accumulation factor \(A\) and microbatch
+size \(B_{\mu}\), the effective batch is \(B_{\mathrm{eff}} = A \cdot B_{\mu}\).
+We compute per-sample losses on each microbatch, accumulate their gradients, and
+perform a single optimizer step every \(A\) microbatches. Likelihood terms are
+summed in natural units and normalized by the total number of samples across the
+\(A\) microbatches.  Alignment losses (Pearson, Barlow Twins, VICReg, InfoNCE,
+HSIC) are accumulated with microbatch-size weighting so the effective objective
+matches the non-accumulated baseline. Under mixed precision, gradients are
+accumulated in scaled form and unscaled once before a single global-norm clip
+and optimizer step.  EMA updates and learning-rate schedulers advance once per
+effective batch. ActNorm uses fixed statistics after warm-up, so accumulation
+does not change normalization. For InfoNCE, negatives are limited to the current
+microbatch by default. When larger negative sets are required, we optionally
+maintain a cross-microbatch queue to approximate large-batch behavior. In
+practice, \(A \in \{2,4,8\}\) trades memory for step latency while preserving
+likelihood calibration and alignment strength for 3-D flows.
+
 The same training loop supports multiple views by instantiating one flow per
 view, computing per-view log-likelihoods and latents for each minibatch,
 flattening the multiscale latents, and applying the projector plus alignment and
