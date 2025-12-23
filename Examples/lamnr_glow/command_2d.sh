@@ -3,23 +3,32 @@ set -eu pipefail
 
 # total steps
 iterations=120000          # phase 1
-extra=40000               # phase 2
+extra=0                    # phase 2
 total=$((iterations + extra))   # horizon for phase-1 aug schedule
 
 # 128×128 high-capacity arch
-H=128; W=128; L=5; K=12; hidden=192
-BATCH=64
+# H=128; W=128; L=5; K=12; hidden=192
+# BATCH=64
+
+# 256x256 high-capacity arch
+H=256; W=256; L=6; K=10; hidden=192
+BATCH=16
 align=vicreg
-align_weight=0.01
-OUTDIR="runs/hcp_t1_t2_fa_${H}x${W}_${align}_K${K}_H${hidden}_${align}_screen_phase1_rerun"
+align_weight=0.003
+ALIGN_WARMUP=20000
+OUTDIR="runs/hcp_t1_t2_fa_${H}x${W}_K${K}_L${L}_H${hidden}_${align}_5"
 
 # Screening configuration
-SCREEN_METHOD=cca           # options: none | cca | hsic
+SCREEN_METHOD=none           # options: none | cca | hsic
 SCREEN_FRAC=0.5             # keep top 50% dims for alignment
-SCREEN_WARMUP=1000          # start screening after N iters
+SCREEN_WARMUP=0             # start screening after N iters
 SCREEN_REFRESH=0            # 0 = discover once; else refresh cadence
 CCA_RIDGE=1e-3              # stability for CCA
 PREFILTER_FRAC=0.5          # HSIC Pearson prefilter (ignored for CCA)
+
+# Optimization
+LR=5e-5          # half of the 128×128 LR
+WARMUP=5000      # longer warmup than 128×128
 
 # ------------------------------
 # Augmentation schedules
@@ -41,37 +50,59 @@ sd_histogram_warping:cos:0.008->0.008@${extra}"
 
 SLICE_IDX=116
 
+
 python download_hcp_data.py
 
-# ---- Phase 1: strong->weak aug (as in earlier successful runs) ----
+# ---------- Phase 1: strong -> weak aug ----------
 python train_2d.py \
   --view ~/.antstorch/hcp*T1Template.nii.gz \
   --view ~/.antstorch/hcp*T2Template.nii.gz \
   --view ~/.antstorch/hcp*FATemplate.nii.gz \
   --H ${H} --W ${W} --L ${L} --K ${K} --hidden ${hidden} \
   --batch ${BATCH} \
-  --slice-idx ${SLICE_IDX} --val-frac 0.0 \
+  --slice-idx ${SLICE_IDX} --val-frac 0.05 \
   --max-iter "${iterations}" \
-  --devices cuda:0 --precision mixed --amp-dtype bf16 \
+  --devices cuda:1 --precision mixed --amp-dtype bf16 \
   --ema --ema-decay 0.9997 \
   --auto-resume \
   --aug-schedules "${aug_params_phase1}" \
-  --lr 1e-4 --warmup-iters 1000 \
-  --eval-interval 1000 --plot-interval 1000 \
+  --lr ${LR} --warmup-iters ${WARMUP} \
+  --eval-interval 5000 --plot-interval 5000 \
   --grad-clip 1.0 \
   --train-samples 3000 --val-samples 128 \
   --smooth-alpha 0.05 \
   --sample-mode model \
+  --sample-temp 0.85 \
   --weighting fixed \
   --align "${align}" \
   --align-weight "${align_weight}" \
+  --align-warmup "${ALIGN_WARMUP}" \
   --screen "${SCREEN_METHOD}" \
   --screen-warmup "${SCREEN_WARMUP}" \
   --screen-refresh "${SCREEN_REFRESH}" \
   --screen-frac "${SCREEN_FRAC}" \
   --cca-ridge "${CCA_RIDGE}" \
   --prefilter-frac "${PREFILTER_FRAC}" \
+  --scale-cap 1.5 \
+  --glowbase-max-log 2.0 \
+  --glowbase-min-log -2.0 \
   --out-dir "${OUTDIR}"
+
+CKPT="${OUTDIR}/training_state.pt"
+
+for T in 0.7 0.85 1.0; do
+  python train_2d.py \
+    --resume "$CKPT" --use-ckpt-config \
+    --view ~/.antstorch/hcp*T1Template.nii.gz \
+    --view ~/.antstorch/hcp*T2Template.nii.gz \
+    --view ~/.antstorch/hcp*FATemplate.nii.gz \
+    --devices cuda:1 --precision mixed --amp-dtype bf16 \
+    --sample-mode model --sample-temp "$T" \
+    --lr 0 --warmup-iters 0 \
+    --extra-iters 1 --eval-interval 1 \
+    --out-dir "${OUTDIR}_tempsweep_T${T}"
+done
+
 
 # ---- Phase 2: resume, template-only fine-tune ----
 # python train_2d.py \

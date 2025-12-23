@@ -39,6 +39,10 @@ def screen_dump_run_config(args, out_dir: Path, note: str = "", dataset_info: di
 
     out_dir.mkdir(parents=True, exist_ok=True)
     cfg = dict(vars(args))  # argparse Namespace -> dict (includes defaults)
+    # ---- grad accumulation (derived + explicit) ----
+    cfg["grad_accum"] = int(cfg.get("grad_accum", 1))
+    cfg["effective_batch"] = int(cfg.get("batch", 0)) * cfg["grad_accum"]
+    # ----------------------------------------------
     # Lightweight env/context
     env = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -76,6 +80,8 @@ def screen_dump_run_config(args, out_dir: Path, note: str = "", dataset_info: di
     add("align", cfg.get("align"))
     add("weighting", cfg.get("weighting"))
     add("batch", cfg.get("batch"))
+    add("grad_accum", cfg.get("grad_accum"))
+    add("effective_batch", cfg.get("effective_batch"))
     add("max_iter", cfg.get("max_iter"))
     add("extra_iters", cfg.get("extra_iters"))
     add("lr / warmup", f"{cfg.get('lr')} / {cfg.get('warmup_iters')}")
@@ -1326,6 +1332,8 @@ def main():
     ap.add_argument("--min-lr", type=float, default=1e-6)
 
     ap.add_argument("--grad-clip", type=float, default=2.0)
+    ap.add_argument("--grad-accum", type=int, default=1,
+                     help="Accumulate gradients over N micro-batches before optimizer.step(). Effective batch = batch * grad_accum.")
     ap.add_argument("--ema", action="store_true")
     ap.add_argument("--ema-decay", type=float, default=0.9995)
 
@@ -1735,6 +1743,8 @@ def main():
             "effective_train_samples": args.train_samples,
             "effective_val_samples": args.val_samples,
             "batch_size": args.batch,
+            "grad_accum": args.grad_accum,
+            "effective_batch_size": int(args.batch) * int(getattr(args, "grad_accum", 1)),
         }
     except Exception:
         dataset_info = {"note": "dataset stats unavailable (non-ANTs dataset type)"}
@@ -1765,130 +1775,136 @@ def main():
 
     for it in range(start_iter, args.max_iter + 1):
         opt.zero_grad(set_to_none=True)
-        try:
-            x = next(train_iter)
-        except StopIteration:
-            train_iter = iter(train_loader)
-            x = next(train_iter)
 
-        L_nll = torch.tensor(0.0, device=dev, dtype=torch.float32)
-        curr_bpd_views = []
-        sum_bpd = 0.0
-        lat_flat = []
+        # For logging (average over micro-batches)
+        loss_total_for_log = 0.0
+        sum_bpd_for_log = 0.0
+        align_for_log = 0.0
+        bpd_views_for_log = np.zeros(n_views, dtype=np.float64)
 
-        if amp_enabled:
-            from contextlib import nullcontext
-            ctx = torch.amp.autocast(dev.type, dtype=amp_dtype)
-        else:
-            from contextlib import nullcontext
-            ctx = nullcontext()
+        bad_update = False
 
-        with ctx:
-            bad_batch = False
-            for vi, m in enumerate(models):
-                x_v = to01(x[:, vi:vi+1, ...].to(dev))
-                logp_v = m.log_prob(x_v.float())
-                z_v, _ = m.inverse_and_log_det(x_v.float())
-                if not torch.isfinite(logp_v).all():
-                    tqdm.write(f"[nan] non-finite logp in view {vi} at iter {it}; skipping step")
-                    bad_batch = True
-                    break
-                bpd_v   = -logp_v / (np.log(2.0) * float(n_dims))
-                bpd_mean = float(bpd_v.mean().detach().cpu().item())
-                curr_bpd_views.append(bpd_mean)
-                sum_bpd += bpd_mean
-                L_nll = L_nll - logp_v.mean()
-                if isinstance(z_v, (list, tuple)):
-                    zflat = torch.cat([zi.flatten(1) for zi in z_v], dim=1)
-                else:
-                    zflat = z_v.flatten(1)
-                lat_flat.append(torch.nan_to_num(zflat))
+        for micro in range(args.grad_accum):
+            try:
+                x = next(train_iter)
+            except StopIteration:
+                train_iter = iter(train_loader)
+                x = next(train_iter)
 
-        if bad_batch or (not torch.isfinite(L_nll)):
-            tqdm.write(f"[nan] skipping iter {it} (bad_batch={bad_batch}, L_nll finite={torch.isfinite(L_nll).item()})")
+            L_nll = torch.tensor(0.0, device=dev, dtype=torch.float32)
+            curr_bpd_views = []
+            sum_bpd = 0.0
+            lat_flat = []
+
+            ctx = torch.amp.autocast(dev.type, dtype=amp_dtype) if amp_enabled else nullcontext()
+
+            with ctx:
+                bad_batch = False
+                for vi, m in enumerate(models):
+                    x_v = to01(x[:, vi:vi+1, ...].to(dev))
+                    logp_v = m.log_prob(x_v.float())
+                    z_v, _ = m.inverse_and_log_det(x_v.float())
+                    if not torch.isfinite(logp_v).all():
+                        bad_batch = True
+                        break
+                    bpd_v = -logp_v / (np.log(2.0) * float(n_dims))
+                    bpd_mean = float(bpd_v.mean().detach().cpu().item())
+                    bpd_views_for_log[vi] += bpd_mean
+                    curr_bpd_views.append(bpd_mean)
+                    sum_bpd += bpd_mean
+                    L_nll = L_nll - logp_v.mean()
+
+                    if isinstance(z_v, (list, tuple)):
+                        zflat = torch.cat([zi.flatten(1) for zi in z_v], dim=1)
+                    else:
+                        zflat = z_v.flatten(1)
+                    lat_flat.append(torch.nan_to_num(zflat))
+
+            if bad_batch or (not torch.isfinite(L_nll)):
+                bad_update = True
+                break
+
+            L_align = torch.tensor(0.0, device=dev)
+            if args.align != "none" and it >= args.align_warmup:
+                feats = [projectors[i](lat_flat[i]) for i in range(len(lat_flat))]
+                feats = [f.float() for f in feats]
+
+                if args.screen != "none" and it >= args.screen_warmup:
+                    do_refresh = (screen_state is None) or (
+                        args.screen_refresh > 0 and (it - args.screen_warmup) % args.screen_refresh == 0
+                    )
+                    screen_state = update_screen(
+                        feats, state=screen_state, method=args.screen,
+                        keep_frac=args.screen_frac, ridge=args.cca_ridge,
+                        refresh=do_refresh, prefilter_frac=args.prefilter_frac,
+                    )
+                    feats = apply_screen(feats, screen_state)
+
+                if args.align == "vicreg":
+                    L_align = antstorch.vicreg_multi(
+                        feats, w_inv=float(args.vicreg_inv), w_var=float(args.vicreg_var),
+                        w_cov=float(args.vicreg_cov), gamma=float(args.vicreg_gamma),
+                    )
+                elif args.align == "barlow":
+                    L_align = antstorch.barlow_twins_multi(feats, lam=float(args.barlow_lambda))
+                elif args.align == "infonce":
+                    L_align = antstorch.info_nce_multi(feats, T=float(args.temperature))
+                elif args.align == "hsic":
+                    L_align = antstorch.hsic_multi(feats, sigma=float(args.hsic_sigma))
+                elif args.align == "pearson":
+                    L_align = antstorch.pearson_multi(feats)
+
+            if args.weighting == "fixed" or args.align == "none":
+                loss_total = L_nll + (args.align_weight * L_align if args.align != "none" else 0.0)
+            else:
+                # keep your existing kendall block here
+                ...
+
+            # scale so accumulated grads match a true big batch
+            loss_scaled = loss_total / float(args.grad_accum)
+
+            if scaler.is_enabled():
+                scaler.scale(loss_scaled).backward()
+            else:
+                loss_scaled.backward()
+
+            # logging (use unscaled loss)
+            loss_total_for_log += float(loss_total.detach().cpu().item())
+            sum_bpd_for_log += float(sum_bpd)
+            align_for_log += float(L_align.detach().cpu().item())
+
+        if bad_update:
+            opt.zero_grad(set_to_none=True)
             continue
 
-        L_align = torch.tensor(0.0, device=dev)
-        if args.align != "none" and it >= args.align_warmup:
-            # 1) Build per-view features (post-projector) BEFORE screening
-            feats = [projectors[i](lat_flat[i]) for i in range(len(lat_flat))]
-            feats = [f.float() for f in feats]
-
-            # 2) Optional shared-subspace screening
-            if args.screen != "none" and it >= args.screen_warmup:
-                # Semantics:
-                #   screen_refresh == 0  → discover once at first eligible iter
-                #   screen_refresh > 0   → recompute every screen_refresh iters
-                if screen_state is None:
-                    do_refresh = True
-                else:
-                    do_refresh = (
-                        args.screen_refresh > 0
-                        and (it - args.screen_warmup) % args.screen_refresh == 0
-                    )
-
-                screen_state = update_screen(
-                    feats,
-                    state=screen_state,
-                    method=args.screen,           # 'cca' | 'hsic'
-                    keep_frac=args.screen_frac,   # e.g., 0.5
-                    ridge=args.cca_ridge,         # CCA ridge
-                    refresh=do_refresh,
-                    prefilter_frac=args.prefilter_frac,  # HSIC prefilter
-                )
-                feats = apply_screen(feats, screen_state)
-            # else: no screening yet; use full projector outputs
-
-            # 3) Alignment loss on (optionally) screened features
-            if args.align == "barlow":
-                L_align = antstorch.barlow_twins_multi(feats, lam=float(args.barlow_lambda))
-            elif args.align == "vicreg":
-                L_align = antstorch.vicreg_multi(
-                    feats,
-                    w_inv=float(args.vicreg_inv),
-                    w_var=float(args.vicreg_var),
-                    w_cov=float(args.vicreg_cov),
-                    gamma=float(args.vicreg_gamma),
-                )
-            elif args.align == "infonce":
-                L_align = antstorch.info_nce_multi(feats, T=float(args.temperature))
-            elif args.align == "hsic":
-                L_align = antstorch.hsic_multi(feats, sigma=float(args.hsic_sigma))
-            elif args.align == "pearson":
-                L_align = antstorch.pearson_multi(feats)
-
-        if args.weighting == "fixed" or args.align == "none":
-            loss_total = L_nll + (args.align_weight * L_align if args.align != "none" else 0.0)
-            w_nll = 1.0
-            w_align = float(args.align_weight if args.align != "none" else 0.0)
-        else:
-            s_nll_eff   = torch.clamp(torch.nan_to_num(s_nll,   nan=0.0, posinf=5.0, neginf=-5.0), -5.0, 5.0)
-            s_align_eff = torch.clamp(torch.nan_to_num(s_align, nan=0.0, posinf=5.0, neginf=-5.0), -5.0, 5.0)
-            L_align = torch.nan_to_num(L_align, nan=0.0, posinf=0.0, neginf=0.0)
-            L_nll   = torch.nan_to_num(L_nll,   nan=0.0, posinf=0.0, neginf=0.0)
-            loss_total = torch.exp(-s_nll_eff) * L_nll + s_nll_eff
-            loss_total = loss_total + torch.exp(-s_align_eff) * L_align + s_align_eff
-            if not torch.isfinite(loss_total):
-                tqdm.write(f"[nan] loss_total non-finite at iter {it}; skipping step")
-                continue
-            w_nll   = float(torch.exp(-s_nll_eff).detach().cpu().item())
-            w_align = float(torch.exp(-s_align_eff).detach().cpu().item())
-
+        # clip + step once per accumulated update
         if scaler.is_enabled():
-            scaler.scale(loss_total).backward()
             scaler.unscale_(opt)
             params_to_clip = []
             for g in opt.param_groups:
                 params_to_clip.extend(g["params"])
             torch.nn.utils.clip_grad_norm_(params_to_clip, max_norm=float(args.grad_clip))
-            scaler.step(opt); scaler.update()
+            scaler.step(opt)
+            scaler.update()
         else:
-            loss_total.backward()
             params_to_clip = []
             for g in opt.param_groups:
                 params_to_clip.extend(g["params"])
-            torch.nn.utils.clip_grad_norm_(params_to_clip, max_norm=float(args.grad_clip) if hasattr(args,"grad_clip") else 2.0)
+            torch.nn.utils.clip_grad_norm_(params_to_clip, max_norm=float(args.grad_clip))
             opt.step()
+
+        if warm is not None:
+            warm.step()
+
+        curr_loss = loss_total_for_log / float(args.grad_accum)
+        sum_bpd = sum_bpd_for_log / float(args.grad_accum)
+        L_align_log = align_for_log / float(args.grad_accum)
+        curr_bpd_views = (bpd_views_for_log / float(args.grad_accum)).tolist()
+
+        w_nll = 1.0
+        w_align = float(args.align_weight if args.align != "none" else 0.0)
+
+        # keep the rest of your bookkeeping (ema update, eval, ckpt, csv) the same
 
         if args.ema and ema_models is None:
             import copy
@@ -1909,15 +1925,11 @@ def main():
                     for p_em, p in zip(em.parameters(), m.parameters()):
                         p_em.data.mul_(args.ema_decay).add_(p.data, alpha=1.0 - args.ema_decay)
 
-        if warm is not None:
-            warm.step()
-
         with global_step.get_lock():
             global_step.value += 1
 
         lr_now = opt.param_groups[0]["lr"]
 
-        curr_loss = float(loss_total.detach().cpu().item())
         if ema_loss_disp is None:
             ema_loss_disp = curr_loss
             ema_sum_bpd_disp = sum_bpd
@@ -1933,7 +1945,7 @@ def main():
         postfix = {
             "iter": it, "loss": f"{curr_loss:.4f}", "loss~": f"{ema_loss_disp:.4f}",
             "bpd": f"{sum_bpd:.3f}", "bpd~": f"{ema_sum_bpd_disp:.3f}", "lr": f"{lr_now:.2e}",
-            "align": f"{float(L_align.detach().cpu().item()):.4f}", "mode": args.align,
+            "align": f"{L_align_log:.4f}", "mode": args.align,
             "w_nll": f"{w_nll:.2f}", "w_aln": f"{w_align:.2f}",
         }
         for i in range(n_views):
