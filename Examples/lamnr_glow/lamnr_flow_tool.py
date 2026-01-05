@@ -89,6 +89,15 @@ __version__ = "0.3.9"
 from antstorch import create_glow_normalizing_flow_model_2d
 
 # ------------------------- utils ----------------------------
+
+def _ensure_int_or_list(val: Any, default: Union[int, List[int]]) -> Union[int, List[int]]:
+    """Handles int or list retrieval from checkpoint configs."""
+    if val is None: return default
+    if isinstance(val, (list, tuple)): return list(val)
+    if isinstance(val, str) and "," in val:
+        return [int(x) for x in val.split(",") if x.strip()]
+    return int(val)
+
 def parse_hw(spec: str) -> Tuple[int, int]:
     try:
         a, b = spec.lower().split("x")
@@ -538,8 +547,8 @@ def build_model_from_config(cfg: dict, device: torch.device):
     m = create_glow_normalizing_flow_model_2d(
         input_shape=input_shape,
         L=int(cfg.get("L", 4)),
-        K=int(cfg.get("K", 3)),
-        hidden_channels=int(cfg.get("hidden", 96)),
+        K=_ensure_int_or_list(cfg.get("K"), 3),
+        hidden_channels=_ensure_int_or_list(cfg.get("hidden"), 96),
         base=str(cfg.get("base", "glow")),
         glowbase_logscale_factor=float(cfg.get("glowbase_logscale_factor", 3.0)),
         glowbase_min_log=float(cfg.get("glowbase_min_log", -5.0)),

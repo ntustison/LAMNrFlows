@@ -121,6 +121,15 @@ def screen_dump_run_config(args, out_dir: Path, note: str = "", dataset_info: di
 
 # ------------------------- small utils -------------------------
 
+def parse_int_or_list(v):
+    """Parses '32' -> 32 or '16,32,64' -> [16, 32, 64]."""
+    if isinstance(v, (list, tuple)): 
+        return v # already parsed by argparse in some envs
+    s = str(v).strip()
+    if "," in s:
+        return [int(x) for x in s.split(",") if x.strip()]
+    return int(s)
+
 def set_deterministic(seed: int):
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -1295,8 +1304,10 @@ def main():
         help="Number of spatial dimensions: 2 for 2D slices, 3 for 3D volumes",
     )
     ap.add_argument("--L", type=int, default=4)
-    ap.add_argument("--K", type=int, default=3)
-    ap.add_argument("--hidden", type=int, default=96)
+    ap.add_argument("--K", type=parse_int_or_list, default=3, 
+                    help="Flow depth. Int (constant) or comma-list (per-level, e.g. '16,32,64').")
+    ap.add_argument("--hidden", type=parse_int_or_list, default=96,
+                    help="Hidden channels. Int (constant) or comma-list (per-level).")
 
     ap.add_argument("--base", type=str, default="glow", choices=["glow","diag"])
     ap.add_argument("--glowbase-logscale-factor", type=float, default=3.0)

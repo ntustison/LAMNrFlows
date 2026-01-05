@@ -1,9 +1,9 @@
 
 
-/Users/ntustison/miniconda3/bin/python3 download_hcp_data.py
+python download_hcp_data.py
 
 # super-strong early augmentation
-/Users/ntustison/miniconda3/bin/python3 exercise_augmentation_3d.py \
+python exercise_augmentation_3d.py \
   --view ~/.antstorch/hcp*T1Template.nii.gz \
   --view ~/.antstorch/hcp*T2Template.nii.gz \
   --view ~/.antstorch/hcp*FATemplate.nii.gz \
@@ -14,7 +14,7 @@
   --out-dir aug_step000000
 
 # mid-training augmentation
-/Users/ntustison/miniconda3/bin/python3 exercise_augmentation_3d.py \
+python exercise_augmentation_3d.py \
   --view ~/.antstorch/hcp*T1Template.nii.gz \
   --view ~/.antstorch/hcp*T2Template.nii.gz \
   --view ~/.antstorch/hcp*FATemplate.nii.gz \
@@ -25,7 +25,7 @@
   --out-dir aug_step060000
 
 # late / almost-off augmentation
-/Users/ntustison/miniconda3/bin/python3 exercise_augmentation_3d.py \
+python exercise_augmentation_3d.py \
   --view ~/.antstorch/hcp*T1Template.nii.gz \
   --view ~/.antstorch/hcp*T2Template.nii.gz \
   --view ~/.antstorch/hcp*FATemplate.nii.gz \
