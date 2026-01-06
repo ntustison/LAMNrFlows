@@ -395,6 +395,10 @@ def main():
     ap.add_argument("--base-distribution", default="GaussianPCA", choices=["GaussianPCA", "DiagGaussian"])
     ap.add_argument("--pca-latent-dimension", type=int, default=4)
     ap.add_argument("--K", type=int, default=64)
+    ap.add_argument("--hidden-channels", type=int, default=None,
+                   help="Hidden width for coupling nets inside lamnr_flows_whitener (if supported).")
+    ap.add_argument("--hidden", type=int, default=None,
+                   help="Alias for --hidden-channels (if supported).")
     ap.add_argument("--leaky-relu-negative-slope", type=float, default=0.2)
 
 
@@ -650,6 +654,13 @@ def main():
         actnorm_every=args.actnorm_every,
         mask_mode=args.mask_mode,
     )
+
+    # Optional coupling network width (swept as hidden_channels).
+    _hidden_val = args.hidden_channels if args.hidden_channels is not None else args.hidden
+    if _hidden_val is not None:
+        # Pass both common spellings; unsupported keys will be dropped by signature filtering below.
+        flow_kwargs["hidden_channels"] = int(_hidden_val)
+        flow_kwargs["hidden"] = int(_hidden_val)
 
     # Normalization flags → trainer kwargs
     norm_mode = None if args.normalization == "none" else args.normalization
