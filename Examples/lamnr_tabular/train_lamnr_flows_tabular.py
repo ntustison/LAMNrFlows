@@ -754,6 +754,25 @@ def main():
         for k, v in result.get("metrics", {}).items():
             print(f"{k}: {v}")
 
+    # Persist selection metric and full metrics for sweep ranking
+    base_prefix = Path(args.output_prefix)
+    metrics_path = base_prefix.with_name(base_prefix.name + "_metrics.json")
+    os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
+
+    metrics_dict = result.get("metrics", {})
+    # Also record the selector for clarity
+    payload = {
+        "best_selection_metric": args.best_selection_metric,  # e.g., "val_bpd"
+        "best_selection_value": metrics_dict.get(args.best_selection_metric, None),
+        "metrics": metrics_dict,
+    }
+
+    with open(metrics_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+    if verbose:
+        print(f"[metrics] wrote {metrics_path}")
+
     # If trainer didn't dump JSON and user asked for it, try to write from returned stats
     if args.dataset_normalizers_json and os.path.dirname(args.dataset_normalizers_json):
         dn = result.get("dataset_normalizers", None)
