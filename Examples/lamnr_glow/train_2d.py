@@ -115,15 +115,6 @@ def screen_dump_run_config(args, out_dir: Path, note: str = "", dataset_info: di
 
 # ------------------------- small utils -------------------------
 
-def parse_int_or_list(v):
-    """Parses '32' -> 32 or '16,32,64' -> [16, 32, 64]."""
-    if isinstance(v, (list, tuple)): 
-        return v # already parsed by argparse in some envs
-    s = str(v).strip()
-    if "," in s:
-        return [int(x) for x in s.split(",") if x.strip()]
-    return int(s)
-
 def set_deterministic(seed: int):
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -885,10 +876,8 @@ def main():
     ap.add_argument("--H", type=int, default=128)
     ap.add_argument("--W", type=int, default=128)
     ap.add_argument("--L", type=int, default=4)
-    ap.add_argument("--K", type=parse_int_or_list, default=3, 
-                    help="Flow depth. Int (constant) or comma-list (per-level, e.g. '16,32,64').")
-    ap.add_argument("--hidden", type=parse_int_or_list, default=96,
-                    help="Hidden channels. Int (constant) or comma-list (per-level).")
+    ap.add_argument("--K", type=int, default=3)
+    ap.add_argument("--hidden", type=int, default=96)
 
     ap.add_argument("--base", type=str, default="glow", choices=["glow","diag"])
     ap.add_argument("--glowbase-logscale-factor", type=float, default=3.0)
@@ -976,7 +965,7 @@ def main():
                     help="How to produce preview grids during eval: model sampling, random val batch, or skip")
     ap.add_argument("--sample-temp", type=float, default=1.0,
                 help="Sampling temperature: scales prior noise (z = T·ε) when --sample-mode model")
-
+    ap.add_argument("--sample-grid-norm", type=str, choices=["to01","clamp","both"], default="to01")
 
     # --- Screening (shared subspace discovery) ---
     ap.add_argument("--screen", type=str, default="none", choices=["none","cca","hsic"],
@@ -1551,7 +1540,7 @@ def main():
                                 run_dir / f"samples_view{vi}_it{it:06d}",
                                 nrow=nrow, target_hw=(args.H, args.W),
                                 warm_x=tmpl_by_view[vi],  
-                                which_type="both"
+                                which_type=args.sample_grid_norm, 
                             )
                         finally:
                             torch.random.set_rng_state(cpu_state)
