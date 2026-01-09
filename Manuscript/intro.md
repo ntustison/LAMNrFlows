@@ -4,167 +4,178 @@
 # Introduction
 
 Medical imaging data and their representative latent spaces are essential for
-insight into biological structure and function. Deep learning workflows have
-become foundational for learning and leveraging such spaces. Many widely used
-approaches either provide no tractable data likelihood, optimize only a
-surrogate bound, or lack an invertible latent mapping, which complicates
-calibration, comparison, and precise latent edits. GANs, for example, are
-implicit samplers trained with divergence surrogates rather than likelihoods,
-so calibration by exact probabilities is unavailable [@papamakarios2021nfreview];
-VAEs optimize an evidence lower bound rather than the exact log likelihood
-[@kobyzev2020nfsurvey]; and diffusion and score models train via denoising or
-score-matching objectives, with likelihoods obtained indirectly
-[@croitoru2023diffusion_vision_survey]. Although autoregressive decoders
-provide exact likelihoods, they do not yield a one-shot invertible latent
-representation [@papamakarios2021nfreview]. These limitations become acute in
-multimodal and multiview settings, where contrasts or views may be missing or
-heterogeneous and downstream analyses depend on calibrated comparisons and
+gaining insight into biological structure and function. While deep learning
+workflows have become foundational for leveraging these spaces, many widely used
+approaches lack tractable data likelihoods, optimize only surrogate bounds, or
+fail to provide invertible latent mappings. These deficiencies complicate
+calibration, objective comparison, and precise latent manipulations. For
+instance, Generative Adversarial Networks (GANs) are implicit samplers trained
+with divergence surrogates rather than likelihoods, precluding calibration by
+exact probabilities [@papamakarios2021nfreview]. Similarly, Variational
+Autoencoders (VAEs) optimize an evidence lower bound rather than the exact
+log-likelihood [@kobyzev2020nfsurvey], while diffusion and score-based models
+rely on denoising or score-matching objectives with likelihoods obtained only
+indirectly [@croitoru2023diffusion_vision_survey]. Furthermore, although
+autoregressive decoders offer exact likelihoods, they do not yield a one-shot
+invertible latent representation [@papamakarios2021nfreview]. Such limitations
+become particularly acute in multimodal and multiview settings, where
+heterogeneous or missing data views necessitate calibrated comparisons and
 coherent cross-view reconstructions.
 
 ## Related work in multiview learning
 
-A view is a set of measurements on the same subjects that arises from a distinct
-acquisition or feature space (for example, distinct image types or tabular
-blocks of imaging-derived phenotypes). Views typically differ in scale, noise,
-and confounders. Multiview analysis exploits two complementary notions. First,
-each view contributes view-specific information that should be retained. Second,
-the overlap of information across views can be distilled into lower-dimensional
-shared projections that improve calibration and cross-cohort comparability.
-These shared projections can be estimated with classical correlation-based
-methods such as CCA [@Hotelling1936CCA; @Hardoon2004CCAOverview]. Kernel
-dependence measures such as the Hilbert–Schmidt Independence Criterion (HSIC)
-[@gretton2005hsic] or learned alignment objectives such as Barlow Twins, VICReg,
-and InfoNCE [@zbontar2021barlow; @bardes2021vicreg; @oord2018cpc] can also be
-used for broader application to incomplete data patterns [@bishop2006prml;
-@Murphy2012ML].
+A "view" represents a set of measurements on a common set of subjects derived
+from a distinct acquisition or feature space (e.g., disparate image modalities
+or tabular blocks of imaging-derived phenotypes). These views typically vary in
+scale, noise characteristics, and confounding factors. Multiview analysis
+leverages two complementary principles: first, that each view contributes
+unique, view-specific information and second, that shared information across
+views can be distilled into lower-dimensional projections to improve calibration
+and cross-cohort comparability. Traditionally, these shared projections have
+been estimated using classical correlation-based methods such as Canonical
+Correlation Analysis (CCA) [@Hotelling1936CCA; @Hardoon2004CCAOverview]. More
+recently, kernel-based measures like the Hilbert–Schmidt Independence Criterion
+(HSIC) [@gretton2005hsic] and learned alignment objectives, such as Barlow Twins,
+VICReg, and InfoNCE [@zbontar2021barlow; @bardes2021vicreg; @oord2018cpc], have
+expanded these capabilities to accommodate complex, incomplete data patterns
+[@bishop2006prml; @Murphy2012ML].
+
 
 ### Similarity-driven multilinear reconstruction
 
-Similarity-driven multilinear reconstruction (SiMLR) makes this decomposition
-explicit in a linear, low-rank setting by factorizing multiview data into
+Similarity-driven multilinear reconstruction (SiMLR) formalizes this
+decomposition in a linear, low-rank setting by factorizing multiview data into
 shared and view-specific components under subject-level similarity constraints
-[@Avants2021NatCompSci]. In SiMLR, each view is expressed as the sum of a
-low-rank shared representation and a private residual, with the shared factors
-regularized to respect an external similarity structure (for example, derived
-from clinical, cognitive, or exposure variables). This coupling to a
-subject-similarity kernel encourages shared components that are both
-statistically coherent across views and aligned with downstream phenotypes,
-while private components capture contrast- or modality-specific variation. The
-resulting embeddings support tasks such as cross-view harmonization,
-visualization, and prediction in a way that cleanly separates common and
-idiosyncratic effects [@Stone2020BreachersNeuroimaging; @Stone2024USSOCOM].
+[@Avants2021NatCompSci]. In the SiMLR framework, each view is modeled as the sum
+of a low-rank shared representation and a private residual. These shared factors
+are regularized to respect an external similarity structure often derived from
+clinical, cognitive, or exposure variables, which encourages the emergence of
+components that are both statistically coherent across views and aligned with
+downstream phenotypes. Consequently, private components capture contrast- or
+modality-specific variation. This separation supports robust cross-view
+harmonization, visualization, and prediction by isolating common effects from
+idiosyncratic noise (e.g., [@Stone2020BreachersNeuroimaging; @Stone2024USSOCOM]).
 
-LAMNr Flows can be viewed as a deep, likelihood-based extension of this SiMLR
-framework to nonlinear, invertible latent spaces. Rather than performing an
-explicit linear factorization in the observation domain, LAMNr first maps each
-view into a shared multiscale latent space using normalizing flows with exact
+LAMNr Flows extend the SiMLR framework into a deep, likelihood-based
+architecture capable of modeling nonlinear, invertible latent spaces. Instead of
+an explicit linear factorization in the observation domain, LAMNr maps each view
+into a shared multiscale latent space using normalizing flows, ensuring exact
 log-likelihoods and bijective mappings. Latent-alignment objectives (e.g.,
-VICReg, InfoNCE) identify a subset of coordinates that play the role of SiMLR’s
-shared component, while remaining coordinates act as view-specific latents.
-Modeling the joint latents with a Gaussian and using conditional Gaussian
-formulas recovers the same style of shared/private decomposition, cross-view
-imputation, and phenotype-guided reasoning as SiMLR, but now with nonlinear
-representational capacity, calibrated likelihoods, and the ability to generate
-realistic reconstructions in the original data space, including images.
+VICReg, InfoNCE) identify specific coordinates that function as the shared
+components, while the remaining coordinates serve as view-specific latents. By
+modeling the joint latents with a Gaussian distribution and utilizing
+conditional Gaussian formulations, LAMNr recovers the interpretability of
+SiMLR’s shared/private decomposition while providing nonlinear representational
+capacity, calibrated likelihoods, and the ability to generate high-fidelity
+reconstructions in the original data space.
 
 ### Shared and private representations
 
-Beyond linear methods, a broad range of multiview representation-learning
-approaches also target shared and private structure. In medical imaging,
-cross-modal translation and imputation have been studied with supervised CNNs
-and adversarial or cycle-consistent mappings [@han2017dcnn; @florkow2020mrm;
-@yang2018structurecyclegan; @lei2019densecyclegan]. Methods such as HeMIS learn
-latent spaces that can be averaged across available modalities to obtain robust
-predictions under missing views [@havaei2016hemis], and diffusion-based models
-have recently been adapted to imputation and reconstruction with strong priors
-and uncertainty summaries [@yuan2024remind; @webber2024bjrai]. Parallel efforts
-in multiview representation learning aim to disentangle explicit shared and
-private factors using autoencoders and contrastive losses [@Chartsias2018MILR;
-@Chartsias2019SDNet], while flow-based multimodal models have linked latent
-spaces across paired modalities via conditional couplings [@sun2019dualglow].
-These methods highlight the importance of separating view-invariant content from
-view-specific variation, but they typically lack the combination of exact
-likelihoods, a one-shot invertible map, and explicit Gaussian latent structure
-that enables closed-form conditional queries for both image and multiview
-tabular data.
+Beyond linear methods, various multiview representation-learning approaches
+target shared and private structures. In medical imaging, cross-modal
+translation and imputation have been explored via supervised CNNs and
+adversarial or cycle-consistent mappings [@han2017dcnn; @florkow2020mrm;
+@yang2018structurecyclegan; @lei2019densecyclegan]. Frameworks like HeMIS
+(Hetero-Modal Image Segmentation) learn latent spaces that can be averaged
+across modalities to handle missing views [@havaei2016hemis], while
+diffusion-based models provide strong priors for imputation with uncertainty
+quantification [@yuan2024remind; @webber2024bjrai]. Other efforts aim to
+disentangle shared and private factors using autoencoders and contrastive losses
+[@Chartsias2018MILR; @Chartsias2019SDNet], or link paired modalities via
+conditional couplings in flow-based models [@sun2019dualglow]. While these
+methods emphasize the separation of view-invariant content, they generally lack
+the unique combination of exact likelihoods, one-shot invertible mapping, and
+explicit Gaussian latent structure that enables the closed-form conditional
+queries for both image and tabular data provided by LAMNr.
 
 ## Normalizing flows for latent-aligned multiview modeling
 
-Normalizing flows model data by composing invertible transformations that map
-inputs to tractable base distributions. This yields three properties that are
-difficult to obtain together in other families: exact likelihoods via the
-change-of-variables formula, single-pass inversion, and direct access to latent
-variables that can be manipulated and decoded without approximation
-[@papamakarios2021nfreview; @kobyzev2020nfsurvey]. Early work developed both
-invertible networks and flow-based density models
-[@Gomez2017RevNet; @Jacobsen2018iRevNet; @dinh2014nice; @rezende2015variational;
-@dinh2016realnvp; @kingma2016iaf; @papamakarios2017maf]. Glow combined
-data-dependent normalization, invertible $1 \times 1 (\times 1)$ convolutions, and a multiscale
-architecture suited to large images [@kingma2018glow]. Subsequent variants
-improved coupling transforms, stability, and parameterization while keeping
-exact likelihoods [@ho2019flowpp; @durkan2019nsf; @behrmann2019resflow;
-@grathwohl2019ffjord]. Recent results show that flows scale to resolutions and
-sample quality comparable to popular generative models, supporting their use as
+Normalizing flows model complex data distributions by composing invertible
+transformations that map inputs to tractable base distributions. This
+architecture yields three properties that are seldom obtained simultaneously in
+other model families: exact likelihoods via the change-of-variables formula,
+single-pass inversion, and direct access to latent variables that can be
+manipulated and decoded without approximation [@papamakarios2021nfreview;
+@kobyzev2020nfsurvey]. Early developments established both invertible networks
+and flow-based density models [@Gomez2017RevNet; @Jacobsen2018iRevNet;
+@dinh2014nice; @rezende2015variational; @dinh2016realnvp; @kingma2016iaf;
+@papamakarios2017maf]. Notably, the Glow architecture introduced data-dependent
+normalization, invertible $1 \times 1 (\times 1)$ convolutions, and a multiscale
+structure specifically suited for high-resolution imaging [@kingma2018glow].
+Subsequent variants have further refined coupling transforms, stability, and
+parameterization while maintaining exact likelihoods [@ho2019flowpp;
+@durkan2019nsf; @behrmann2019resflow; @grathwohl2019ffjord]. Recent advances
+demonstrate that flows now scale to resolutions and sample qualities comparable
+to other state-of-the-art generative models, establishing them as robust,
 first-class probabilistic backbones [@croitoru2023diffusion_vision_survey;
-@zhai2024tarflow; @gu2025starflow].
-
-For our purposes, these properties make flows a natural foundation for multiview
-learning. A single flow provides a bijection between an observed view and a
-latent representation with a known base density, which allows exact
-log-likelihoods, principled comparison of subjects and cohorts, and closed-form
-Gaussian conditioning once a latent Gaussian model is determined. Because flows can
-be parameterized with convolutional architectures for images or multilayer
-perceptrons for tabular variables, the same machinery can be applied across
-multimodal imaging, imaging-derived phenotypes, and broader multiview tabular
-settings.
+@zhai2024tarflow; @gu2025starflow].  For our framework, these bijective
+properties render flows a natural foundation for multiview learning. A single
+flow provides a precise mapping between an observed view and a latent
+representation with a known base density. This allows for exact log-likelihood
+estimation, principled comparison of subjects or cohorts, and closed-form
+Gaussian conditioning once the joint latent model is established. Furthermore,
+because flows can be flexibly parameterized using convolutional architectures
+for images or multilayer perceptrons for tabular variables, the same underlying
+machinery can be seamlessly applied across multimodal imaging, imaging-derived
+phenotypes (IDPs), and broader multiview tabular datasets.
 
 ## Contributions
 
-We introduce latent-aligned multiview normalizing (LAMNr) flows, a general
-framework that learns shared and private latent structure across multiple views
-while preserving exact likelihoods and invertibility. Each view is equipped with
-its own flow that maps observations to a latent space.  Multiview structure is
-encoded by aligning selected latent coordinates across views while allowing the
-remaining coordinates to remain view-specific. For images we adopt Glow-style
-multiscale architectures to retain spatial detail and access to latent features at
-multiple resolutions. For imaging-derived phenotypes and other tabular blocks we
-use per-view flows with the same alignment and inference machinery, so that
-continuous-valued views are treated in a unified way.
+We introduce Latent-Aligned Multiview Normalizing (LAMNr) Flows, a general
+framework that learns shared and private latent structures across multiple views
+while preserving exact likelihoods and invertibility. Within LAMNr, each view is
+equipped with a dedicated flow that maps observations to a latent space.
+Multiview structure is encoded by aligning selected latent coordinates across
+views, while allowing the remaining coordinates to capture view-specific
+variation. For imaging data, we adopt Glow-style multiscale architectures to
+retain spatial detail and access latent features at multiple resolutions
+[@kingma2018glow]. For imaging-derived phenotypes (IDPs) and other tabular
+blocks, we utilize per-view flows integrated with the same alignment and
+inference machinery, ensuring a unified treatment of all continuous-valued
+views. Specifically, we employ a Gaussian-based PCA base distribution to enforce
+a consistent latent dimensionality and geometric structure across views,
+providing a shared coordinate system that facilitates direct alignment.
 
-Given subject-matched batches, we encourage shared representations with
-alignment losses. We optionally identify candidate shared coordinates with a
-short CCA or HSIC screen, then restrict alignment to those directions, leaving
-the orthogonal complement as view-specific. On top of maximum-likelihood
-training, we estimate per-level moments of the joint latents and add a
-conditional Gaussian layer, which provides closed-form posteriors over arbitrary
-latent subsets. This combination of aligned flows and Gaussian latent structure
-yields the same style of shared/private decomposition and conditional reasoning
-as SiMLR, but in a nonlinear, invertible latent space.
+Using subject-matched batches, we encourage shared representations via a library
+of alignment losses. We optionally identify candidate shared coordinates through
+a short CCA [@Hotelling1936CCA] or HSIC [@gretton2005hsic] screen, restricting
+alignment to those directions and leaving the orthogonal complement as
+view-specific. Beyond maximum-likelihood training, we estimate per-level moments
+of the joint latents and incorporate a conditional Gaussian layer. This provides
+closed-form posteriors over arbitrary latent subsets, yielding a nonlinear,
+invertible extension of the shared/private decomposition and conditional
+reasoning found in SiMLR [@Avants2021NatCompSci].
 
-For images, replacing private latents by their conditional means produces
+For images, substituting private latents with their conditional means produces
 shared-latent reconstructions that preserve anatomy or identity while
-suppressing view-specific contrast. These shared-latent images can act as
+suppressing view-specific contrast. These shared-latent images serve as
 contrast-robust surrogates for downstream tasks. For tabular IDPs and other
-multiview blocks, the same conditional layer supports calibrated queries,
-harmonization, and model-based counterfactuals. The framework is designed to be
-general: it applies to multiple imaging contrasts, multiview IDP blocks, and
-multimodal tabular datasets where each view comprises a coherent set of
-variables.
+multiview blocks, the same conditional layer facilitates calibrated queries,
+harmonization, and model-based counterfactuals. The framework is inherently
+general, applying to multiple imaging contrasts, multiview IDP blocks, and
+multimodal tabular datasets.
 
 In summary, our contributions are:
-1) We extend linear shared/private decompositions such as SiMLR to nonlinear,
-   multiscale normalizing flows, yielding a deep, likelihood-based multiview
-   model with explicit shared and view-specific latent coordinates.
-2) We develop a practical training recipe that combines per-view flows, latent
-   alignment losses, and optional CCA or HSIC screening with a Gaussian latent
-   layer, providing closed-form conditional posteriors for arbitrary subsets of
-   views and latent variables.
-3) We show how the same framework applies to images and multiview tabular data:
-   shared-latent reconstructions act as contrast-robust surrogates for image
-   views, while conditional queries enable calibrated harmonization and
-   counterfactual reasoning for imaging-derived phenotypes and related IDPs.
-4) We provide an open-source implementation with 2D and 3D architectures and
-   evaluate on multimodal MRI and multiview IDP datasets, comparing against
-   linear baselines emphasizing predictability, interpretability,
-   and reproducibility [@papamakarios2021nfreview; @kobyzev2020nfsurvey;
-   @kingma2018glow; @Avants2021NatCompSci; @Tustison:2024aa].
+
+1) __Nonlinear Extension of Shared/Private Decompositions:__ We extend linear
+models like SiMLR to nonlinear, multiscale normalizing flows, providing a deep,
+likelihood-based multiview model with explicit shared and view-specific latent
+coordinates.
+
+2) __Practical Training and Inference Recipe:__ We develop a robust training
+protocol that combines per-view flows, latent alignment losses, and optional
+CCA/HSIC screening with a Gaussian latent layer for closed-form conditional
+posteriors.
+
+3) __Unified Framework for Heterogeneous Data:__ We demonstrate that
+shared-latent reconstructions act as contrast-robust surrogates for images,
+while conditional queries enable calibrated harmonization and counterfactual
+reasoning for IDPs.
+
+4) __Open-Source Implementation and Validation:__ We provide an open-source
+implementation featuring 2D and 3D architectures. We evaluate LAMNr Flows on
+multimodal MRI and multiview IDP datasets, comparing performance against linear
+baselines with an emphasis on predictability, interpretability, and
+reproducibility [@papamakarios2021nfreview; @kobyzev2020nfsurvey;
+@Tustison:2024aa].
+
