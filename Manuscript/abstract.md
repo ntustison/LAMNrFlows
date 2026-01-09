@@ -3,24 +3,23 @@
 
 # Abstract {-}
 
-Normalizing flows provide exact-likelihood, bijective mappings between data and
-their latent representations, making them well-suited to multiview learning. In
-this context, we introduce Latent-Aligned Multiview Normalizing (LAMNr) Flows, a
-general framework that learns a shared latent subspace across views, thereby
-treating the orthogonal complement as view-specific variation. Using
-subject-matched batches, we implement a library of latent-alignment constraints
-optionally screened to identify latent directions that are statistically shared
-across views, restricting alignment to those coordinates. After
-maximum-likelihood training, we model the joint latents as Gaussian, estimate
-per-level moments, and use the conditional Gaussian formulation to obtain
-closed-form posteriors for any subset. This enables principled cross-view
-imputation and, more generally, latent manipulations that preserve anatomy or
-identity while modulating view-specific factors.  For images, replacing private
-components by their conditional means produces shared-latent images that act as
-contrast-robust surrogates. We evaluate on multimodal MRI cohorts and multiview
-imaging-derived phenotype datasets, comparing against strong linear multiview
-baselines, and observe improvements in calibrated likelihoods, cross-view
-dependence structure, imputation accuracy, and downstream prediction capability.
-We release open-source implementations and illustrate how latent alignment
-enables general-purpose reasoning and editing across heterogeneous views within
-a single interpretable model.
+Normalizing flows provide exact-likelihood, bijective, and non-linear mappings
+between data and their latent representations, making them well-suited for
+multiview learning and generative modeling. We introduce Latent-Aligned
+Multiview Normalizing (LAMNr) Flows, a flexible framework designed to learn a
+shared latent subspace across disparate data views. By employing subject-matched
+batches and a library of alignment constraints, we identify and restrict latent
+alignment to statistically shared coordinates, treating the orthogonal
+complement as view-specific variation. Post-training, we model the joint latent
+space as Gaussian, utilizing conditional Gaussian formulations to derive
+closed-form posteriors. This facilitates principled cross-view imputation and
+identity-preserving latent manipulations. In imaging applications, substituting
+private components with conditional means generates contrast-robust surrogates.
+We evaluate LAMNr Flows using multimodal MRI and imaging-derived phenotype
+datasets, comparing performance against established linear multiview baselines.
+Our results demonstrate that while linear methods remain effective for simpler
+associations, LAMNr Flows provide improved likelihood calibration and capture
+complex non-linear dependencies, leading to gains in imputation accuracy and
+downstream prediction for high-dimensional data. Our open-source implementation
+enables the construction of unified, multiview models for general-purpose
+reasoning and editing across heterogeneous data types.
