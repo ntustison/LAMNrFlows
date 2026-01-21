@@ -2,6 +2,48 @@
 
 # Future work
 
+## Imputing Missing Data with LAMNr
+
+We see two natural extensions of our framework to missing-data imputation, both
+consistent with the way LAMNr models views as invertible mappings into a shared
+latent structure. The first targets cross-view imputation, where one or more
+views are absent for a subject but companion views are available. Because
+training already aligns per-view latents on subject-matched batches and fits
+per-level Gaussian statistics, inference becomes straightforward: we encode the
+observed views, evaluate the closed-form conditional over the missing view’s
+latent coordinates, and then invert that view’s flow to obtain an imputed sample
+in input space. This pathway requires no new networks, preserves exact
+likelihoods at each step, and yields imputations that are calibrated by
+construction. In practice, we will report accuracy against held-out ground truth
+together with conditional log-likelihoods, coverage of posterior intervals, and
+sensitivity to the pattern and rate of missingness.
+
+The second extension addresses intra-view gaps, where individual features are
+missing within a single tabular block. Here we plan to start with a maximum a
+posteriori approach that treats missing entries as optimization variables and
+maximizes the joint log-density with respect to those coordinates. The
+computation is simple—autodiff through the bijection—and benefits from good
+initialization and early stopping, providing a competitive baseline without
+retraining. Beyond that baseline, we will introduce mask-aware training that
+randomly withholds features during learning and encourages the model to
+reconstruct the masked coordinates from the observed ones. This amortizes the
+conditional at test time and typically improves calibration. For views that use
+a Gaussian–PCA base, we will also explore a lightweight refinement
+loop—initialize the missing features, encode to latents, enforce Gaussian
+consistency in the whitened coordinates, and invert back—repeating a small
+number of times until convergence.
+
+Across both regimes, our evaluation will mirror the rest of the paper: we will
+select hyperparameters upstream using validation bits-per-dimension, then assess
+imputation with error metrics (NRMSE, MAE, rank correlations), uncertainty
+diagnostics (PIT, empirical coverage), and downstream utility (predictive
+performance of simple models trained on complete data and tested on imputed
+sets). The central advantage is conceptual continuity: imputation follows the
+same exact, invertible modeling assumptions used elsewhere in LAMNr, allowing
+ablations and comparisons to be scored on a common likelihood scale and
+reproduced with identical train, validation, and test splits.
+
+
 ## Flow-based latent regions for ordered clinical categories
 
 An important direction is to use normalizing flows to define and interrogate

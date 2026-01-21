@@ -2,127 +2,153 @@
 
 ## Tabular LAMNr Flows
 
-### Single-view tabular Gaussianization of UK Biobank IDPs
+### Single-view tabular likelihood training on UK Biobank IDPs
 
-To assess whether normalizing flows are useful even for purely tabular imaging
-phenotypes, we first analyzed a single-view setting using UK Biobank
-imaging-derived phenotypes (IDPs) from three well-known packages:  ANTsX, 
-FreeSurfer, and FSL [@Tustison:2024aa]. For each software package 
-we treated its structural IDPs as one view and fitted a real-NVP–style flow
-that Gaussianizes the joint feature distribution. Flows were trained in an
-unsupervised fashion with maximum likelihood, using a standard Gaussian base and
-$K$ coupling steps $(K \in {4, 8, 16, 32})$ but no dimensionality reduction. From each
-trained model we extracted a "whitened representation", i.e., the latent
-variables after flow inversion, linearly rescaled to zero mean and unit variance
-so that the dimensionality matches the original IDPs. For each demographic or
-lifestyle target (Age, BMI, Townsend deprivation index, and additional clinical
-variables), we then fitted ridge regression models with 10-fold cross-validation
-using either the raw IDPs, simple z-scores, or the whitened features.
-Performance was summarized by cross-validated $R^2$, and we report uplift 
-$\Delta R^2 = R^2(\mathrm{flow}) - R^2(\mathrm{raw})$ as a function of $K$ 
-and package. 
+To establish a stable single-view likelihood baseline for tabular LAMNr flows,
+we evaluated UK Biobank structural imaging-derived phenotypes (IDPs) produced by
+three standard processing packages: ANTsX, FreeSurfer, and FSL [@Tustison:2024aa].
+In this setting, each package defines an independent view, and we trained
+separate RealNVP-style normalizing flows *unsupervised* by maximum likelihood to
+model the joint feature distribution of each view.
 
-\begin{figure}
-  \centering
-  \begin{tabular}{cc}
-  \includegraphics[width=0.475\textwidth]{Figures/full_byK_Age_ridge.png} &
-  \includegraphics[width=0.475\textwidth]{Figures/full_byK_BMI_ridge.png} \\
-  (a) & (b)
-  \end{tabular}
-  \caption{Uplift in cross-validated \(R^2\) from flow-whitened features
-  relative to raw imaging-derived phenotypes (IDPs) for two example targets in
-  UK Biobank. Each panel shows \(\Delta R^2 = R^2_{\text{flow, full, ridge}} -
-  R^2_{\text{raw}}\) as a function of the number of coupling steps \(K\) in the
-  single-view real-NVP flow, for ANTsX, FreeSurfer, and FSL IDPs. (a) For
-  Age, all curves lie below the dashed zero line, indicating that
-  Gaussianization consistently worsens linear prediction, with degradation
-  increasing at higher \(K\). (b) For BMI, flows substantially improve
-  prediction, with positive uplift that grows with depth up to about \(K = 16\)
-  for all three packages, illustrating that non-linear flow-based
-  representations are most beneficial for targets whose relation to brain
-  structure is not well captured by simple linear trends.
-}
-\end{figure}
+**Likelihood objective and evaluation metric.**  Models were selected using
+validation bits-per-dimension (val_bpd), i.e. held-out negative log-likelihood
+expressed per input dimension (lower is better). To isolate architectural
+effects across sweeps, we fixed the base distribution to a GaussianPCA model
+with latent dimension $\texttt{pca\_latent\_dimension}=31$, consistent with our
+earlier SiMLR/NNHEmbed-aligned validation setting. For each run, we tracked the
+full validation trajectory (val_history) and recorded the best checkpoint
+(best_step) according to val_bpd.
 
-Across packages, chronological age serves as a useful negative control. Age is
-already known to exhibit strong, largely monotonic associations with global and
-regional brain structure in large cohorts, including UK Biobank, where linear or
-low-order non-linear models explain substantial variance in cortical thickness
-and subcortical volumes [@tustison_antsx_2021;
-@Bethlehem2022BrainChartsLifespan; @Dong2022UKBBStructuralCovariance;
-@Tustison:2024aa]. Consistent with this, raw and z-scored IDPs achieved high
-$R^2$ for Age, and flow-whitened features consistently *reduced* performance:
-$\Delta R^2$ was negative for all $K$ and all three packages. Increasing $K$
-further decreased $R^2$ in some cases. This suggests that, when the target is
-already well approximated by a linear function of the original IDPs, an
-unconstrained unsupervised flow tends to bend that linear manifold in ways that
-are not aligned with the Age prediction task.  The downstream ridge decoder then
-has to “undo” these warps and cannot fully recover the original signal.
+Flow capacity is primarily controlled by (i) coupling depth ($K$), i.e. how many
+affine coupling transforms are composed, and (ii) the hidden width
+($\texttt{hidden\_channels}$) of the conditioner networks within each coupling
+layer. Larger $K$ increases the number of invertible transformations applied to
+the input, while larger $\texttt{hidden\_channels}$ increases the function class
+used to predict scale/shift parameters, typically improving fit at higher
+computational cost. Because these parameters trade off expressivity versus
+stability and generalization, we swept them and selected settings using val_bpd
+under equal-weighted aggregation across packages.
 
-In contrast, body-mass index (BMI) showed the largest and most robust positive
-uplift. Prior work has reported complex, spatially heterogeneous associations
-between adiposity and brain structure and function, including non-linear effects
-and interactions with vascular and metabolic risk [@Dekkers2019ObesityBrain;
-@Kim2015BMIThickness; @Bettcher2013BMIVascularWM; @Morys2021MidlifeObesity;
-@Kullmann2012ObeseBrainRSFC].  In our experiments, $R^2$ for BMI from raw or
-z-scored IDPs was modest, but the whitened representations yielded
-substantial gains, with $\Delta R^2$ increasing steadily with $K$ and reaching
-its maximum at the deepest flows. The pattern was consistent across ANTsX,
-FreeSurfer, and FSL IDPs, though the absolute magnitude varied. This suggests
-that Gaussianizing and whitening the joint IDP distribution helps straighten out
-a curved, non-Gaussian manifold relating BMI to brain structure, making the
-residual dependence more amenable to linear decoding.
+**Aggregation strategy for robust selection.**  Because feature composition
+differs across packages, we ranked configurations using a two-stage aggregation:
+(i) within each package, we averaged val_bpd across random seeds; (ii) across
+packages, we computed an overall score with *equal package weighting* (mean of
+the per-package means).
 
-The Townsend deprivation index, an area-level measure of socioeconomic
-deprivation, produced intermediate behavior. Socioeconomic status is only
-indirectly encoded in brain structure and is known to relate to cumulative
-environmental exposures, health behaviors, and comorbidities
-[@Tan2023TownsendCorticalThickness; @Brito2014SESBrianDevReview;
-@Farah2017NeuroscienceSES; @Klee2023TownsendDeprivationHealth;
-@Pampel2010SESHlthBehaviors]. For Townsend we observed small or near-zero uplift
-at low $K$, with modest positive $\Delta R^2$ emerging only for deeper flows.
-This is consistent with a weak but genuinely non-linear signal the flows need
-sufficient capacity before any advantage over simple z-scaling appears, and even
-then the gains remain much smaller than for BMI.
+* **Stage 1 (coarse localization).**  We first localized a promising region in
+($K$, hidden width) using a coarse grid: $K \in \{1, 4, 12, 32\}$ and
+$\texttt{hidden\_channels} \in \{96, 192, 320\}$. Each configuration was
+repeated across the three packages and two random seeds (72 runs total) with
+$\texttt{max\_steps}=1500$ and $\texttt{val\_interval}=200$. Under
+equal-weighted package aggregation, the best single-view setting was
+$(K,\texttt{hidden\_channels})=(4,96)$. The overall differences among near-top
+settings were small, indicating a relatively flat likelihood landscape around
+the optimum.  Given the very small val_bpd differences among near-top
+configurations, we adopt a parsimony bias i.e., when performance is statistically
+indistinguishable, we prefer the smallest model (lower $K$ and narrower hidden
+width). This choice is motivated by Occam/MDL-style arguments, improved
+optimization stability across seeds/packages, and reduced computational cost,
+enabling more replication at fixed budget.
 
-Across the three exemplar targets, the uplift analysis paints a consistent
-picture of when single-view tabular flows help and when they hurt. For Age,
-flow-whitened features *always* reduced performance: mean uplift was negative
-for every package and coupling depth, corresponding to drops of roughly 2–7
-percentage points of cross-validated \(R^2\) relative to raw IDPs, and the
-run-wise tests for \(\Delta R^2 > 0\) all yielded one-sided \(p\)-values close
-to 1 (i.e., strong evidence of degradation). In contrast, BMI showed robust
-gains: for FSL and FreeSurfer, mean uplift was positive at all \(K\), with
-increases on the order of \(\sim 0.5\)–\(1.5\) percentage points of \(R^2\) and
-one-sided \(p\)-values for \(\Delta R^2 > 0\) in the range \(\sim 7\times
-10^{-4}\)–\(3\times 10^{-2}\); ANTsX exhibited a smaller but still significant
-mean uplift at \(K = 8\), with shallow (\(K = 4\)) and deep (\(K = 16,
-32\)) flows either negative or indistinguishable from zero. The Townsend
-deprivation index fell in between: for most package/\(K\) combinations the
-mean uplift was near zero or slightly negative, but the deepest flows (\(K =
-32\)) yielded small yet statistically detectable positive uplifts for ANTsX and
-FreeSurfer (on the order of \(\sim 0.04\)–\(0.15\) percentage points of \(R^2\),
-one-sided \(p \approx 0.01\)–\(0.02\)), while FSL remained effectively flat.
-Taken together, these results support the idea that flow-based Gaussianization
-of tabular IDPs is most beneficial for targets like BMI (and, weakly, Townsend)
-whose relationship to brain structure is non-linear and non-Gaussian, and can
-systematically harm prediction for targets like Age whose mapping is already
-well captured by simple linear trends in the original feature space.
+* **Stage 2 (refinement and confirmation).**  Because the Stage 1 optimum lay near
+the lower edge of the tested hidden widths, we expanded toward smaller models
+and performed a two-phase refinement.
 
-Most of the remaining demographic and clinical variables showed little benefit
-from flow Gaussianization. For many targets, R² from raw IDPs was already very
-low, indicating that the variable is only weakly expressed in the imaging
-features; in that regime, an unsupervised representation step tends mainly to
-add variance, leading to slightly negative $\Delta R^2$. For a few targets with clearer
-linear structure, the behavior resembled Age, with mild degradation after
-applying flows. Taken together, these single-view results indicate that tabular
-normalizing flows are selectively useful: they provide the largest gains when
-the target’s relationship to IDPs is strongly non-linear and non-Gaussian (BMI,
-partially Townsend), but can modestly harm performance when the mapping is
-already well captured by simple linear models (Age and similar measures). This
-motivates our subsequent focus on multi-view, latent-aligned normalizing flow
-models, where non-Gaussian view-specific structure is common and flexible
-Gaussianization layers are more likely to be beneficial.
+    * *Phase 1 (screen).*  We screened a denser local grid around the Stage 1 optimum:
+$K \in \{2,3,4,5,6\}$ and
+$\texttt{hidden\_channels} \in \{64,80,96,112,128\}$,
+using one seed per package (75 runs) and increasing the training budget to
+$\texttt{max\_steps}=3000$ (val_interval = 200). The best overall screen results
+favored smaller widths (hidden = 64–80) with $K \approx 3$–4, while preserving
+the same pattern of weak absolute differences among the top configurations.
+
+    * *Phase 2 (confirm).*  We confirmed the top region using the compact grid
+$K \in \{3,4\}$ and $\texttt{hidden\_channels} \in \{64,80\}$ with three seeds per
+package (36 runs) and $\texttt{max\_steps}=6000$. After equal-weighted
+aggregation, the most stable and best-performing configuration was
+$(K,\texttt{hidden\_channels})=(4,80)$.
+
+* **Final confirmation at extended training budget.**  Finally, we trained the
+hyperparameter configuration 
+$(K,\texttt{hidden\_channels})=(4,80)$ with $\texttt{max\_steps}=10000$
+(3 packages × 3 seeds = 9 runs). The best checkpoints were no longer at the
+maximum step (best_step typically occurred around 6.8k–7.6k), consistent with
+approaching a plateau at this budget and validating the stability of the
+selected setting. We therefore adopt $(K,\texttt{hidden\_channels})=(4,80)$ as
+the default single-view likelihood configuration used in subsequent analyses.
+
+### Single-view uplift analysis on clinical targets
+
+\begin{table}[t]
+\centering
+\caption{Mean uplift ($\Delta R^2$) for OLS prediction of each clinical target, computed as $R^2(\text{transformed}) - R^2(\text{raw})$ using the single-view optimal configuration ($K{=}4$, \texttt{hidden\_channels}{=}80) for each package (ANTsX, FSL, FreeSurfer).}
+\label{tab:singleview_uplift_ols}
+\begin{tabular}{lrrr}
+\hline
+Target & ANTsX & FSL & FreeSurfer \\
+\hline
+Age & -8.297777 & -10.302203 & -11.539360 \\
+Alcohol & -0.223586 & -0.325940 & -0.228319 \\
+BMI & 1.403918 & 1.196208 & 2.123617 \\
+FluidIntelligenceScore & -0.836901 & -0.605497 & -0.779686 \\
+GeneticSex & -0.167546 & -0.219868 & -0.171760 \\
+Hearing & -0.009873 & -0.010447 & -0.014611 \\
+NeuroticismScore & -1.000343 & -1.030090 & -1.056362 \\
+NumericMemory & -0.057217 & -0.095999 & -0.090725 \\
+RiskTaking & -0.005101 & -0.005806 & -0.005586 \\
+SameSexIntercourse & -0.000361 & -0.001562 & -0.001782 \\
+Smoking & -0.015583 & -0.017823 & -0.008923 \\
+TownsendDeprivationIndex & 0.062532 & 0.041367 & -0.053258 \\
+\hline
+\end{tabular}
+\end{table}
+
+To quantify downstream utility of the single-view likelihood models, we
+performed an “uplift” analysis that measures the change in predictive
+performance on UK Biobank clinical/demographic targets when replacing raw
+tabular inputs with the learned single-view representations. We focused on the
+final single-view configuration selected by likelihood refinement,
+$(K,\texttt{hidden\_channels})=(4,80)$, and evaluated each of the three IDP
+packages (ANTsX, FSL, and FreeSurfer) separately.
+
+For each package, we generated transformed single-view features from the trained
+flow for three random seeds. These
+transformed features are in a 31-dimensional PCA space. Since the PCA
+projection used during flow training was not serialized, we constructed a
+matched “raw” baseline by refitting a PCA ($k=31$) projection of the original
+package-specific IDPs and using those PC scores as \texttt{view\_csv} in the
+evaluation. This ensured that raw and transformed inputs had identical
+dimensionality (31) for a fair comparison.
+
+We evaluated ordinary least squares (OLS) models for each target using 10-fold
+cross-validation, defining uplift as $\Delta R^2 = R^2(\text{transformed}) -
+R^2(\text{raw})$. Despite the fact that ANTsX, FSL, and FreeSurfer compute
+unique sets of structural brain measurements, the uplift patterns
+were broadly consistent across packages (Table~\ref{tab:singleview_uplift_ols}).
+This cross-package agreement provides an internal sanity check in that if the results
+were dominated by noise or an implementation artifact, we would expect
+substantially less concordance across independently derived feature sets.
+
+Most targets exhibited negative uplift under this linear evaluator. Negative
+uplift does not imply that the learned representation is universally “worse”;
+rather, it indicates that under a linear probe and a strong PCA ($k=31$) baseline,
+the likelihood-trained transform does not systematically increase supervised
+signal for these endpoints. This is not unexpected for at least three reasons.
+First, the likelihood-trained transformation is optimized to improve density
+modeling (val\_bpd), not to preserve or amplify linear predictive signal for
+arbitrary downstream phenotypes; in general, maximum-likelihood representation
+learning does not guarantee improved $R^2$ for a supervised task. Second, our
+baseline already uses PCA, which tends to concentrate the strongest
+low-dimensional linear structure in the raw IDPs; relative to this strong
+baseline, there is limited headroom for a purely unsupervised transform to
+improve linear prediction, so small negative shifts can occur. Third, OLS is
+sensitive to small changes in conditioning and signal-to-noise: if the learned
+representation redistributes variance or deemphasizes weak but linearly
+informative components, it can reduce $R^2$ even while improving likelihood.
+Notably, BMI showed positive uplift across all three packages, suggesting that
+for some phenotypes the learned representation can better capture brain–body
+associations even within this unsupervised, likelihood-only setting.
 
 ### Nonlinear LAMNr Extension of the NNHEmbed Framework
 

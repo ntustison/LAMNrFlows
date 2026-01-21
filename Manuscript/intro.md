@@ -107,7 +107,7 @@ parameterization while maintaining exact likelihoods [@ho2019flowpp;
 @durkan2019nsf; @behrmann2019resflow; @grathwohl2019ffjord]. Recent advances
 demonstrate that flows now scale to resolutions and sample qualities comparable
 to other state-of-the-art generative models, establishing them as robust,
-first-class probabilistic backbones [@croitoru2023diffusion_vision_survey;
+first-class probabilistic options [@croitoru2023diffusion_vision_survey;
 @zhai2024tarflow; @gu2025starflow].  For our framework, these bijective
 properties render flows a natural foundation for multiview learning. A single
 flow provides a precise mapping between an observed view and a latent
