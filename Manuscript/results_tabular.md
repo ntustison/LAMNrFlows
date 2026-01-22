@@ -82,8 +82,6 @@ the default single-view likelihood configuration used in subsequent analyses.
 
 \begin{table}[t]
 \centering
-\caption{Mean uplift ($\Delta R^2$) for OLS prediction of each clinical target, computed as $R^2(\text{transformed}) - R^2(\text{raw})$ using the single-view optimal configuration ($K{=}4$, \texttt{hidden\_channels}{=}80) for each package (ANTsX, FSL, FreeSurfer).}
-\label{tab:singleview_uplift_ols}
 \begin{tabular}{lrrr}
 \hline
 Target & ANTsX & FSL & FreeSurfer \\
@@ -102,6 +100,11 @@ Smoking & -0.015583 & -0.017823 & -0.008923 \\
 TownsendDeprivationIndex & 0.062532 & 0.041367 & -0.053258 \\
 \hline
 \end{tabular}
+\caption{Mean uplift ($\Delta R^2$) for OLS prediction of each clinical target,
+computed as $R^2(\text{transformed}) - R^2(\text{raw})$ using the single-view
+optimal configuration ($K{=}4$, \texttt{hidden\_channels}{=}80) for each package
+(ANTsX, FSL, FreeSurfer).}
+\label{tab:singleview_uplift_ols}
 \end{table}
 
 To quantify downstream utility of the single-view likelihood models, we
