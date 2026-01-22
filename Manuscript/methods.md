@@ -427,7 +427,7 @@ background modes.
 For tabular flows we apply a small additive “jitter” noise to the features,
 treated as dequantization rather than biological variation. The amplitude is
 controlled by a scalar schedule \(\alpha(t)\) (linear, cosine, or exponential in
-training time), analogous to the image-domain augmentation schedule. In
+training time). In
 addition, certain views can undergo a per-feature marginal transform prior to
 normalization, such as an elementwise \(\operatorname{asinh}(x)\) for
 heavy-tailed continuous variables or rank-based Gaussianization that maps the
@@ -505,7 +505,7 @@ same methodological framework.
    \texttt{sd\_simulated\_bias\_field:cos:0.25$\rightarrow$0.05},
    \texttt{sd\_histogram\_warping:cos:0.05$\rightarrow$0.01}. Previews were
    generated with the ANTsTorch test driver
-   (\texttt{test\_image\_dataset\_and\_scheduler.py}) using a $5\times5$ grid of
+   (\texttt{test\_image\_dataset\_and\_scheduler.py}) using a $3\times3$ grid of
    $128\times128$ tiles. The source image is the HCP young-adult template
    constructed with ANTsX tools and distributed via ANTsTorch.
    }
@@ -514,9 +514,11 @@ same methodological framework.
 
 We apply lightweight, label-free augmentations during maximum-likelihood
 training to improve robustness without changing the model’s exact likelihood
-computation (augmentations act on inputs only) [@Tustison:2024aa] (cf Figure
+computation (augmentations act on inputs only) [@Tustison:2024aa;@Tustison:2025aa] (cf Figure
 \ref{fig:aug-schedule}). For image views (2-D/3-D), we use geometric transforms
 (linear and non-linear transformations) shared across all views of a subject to
 preserve alignment targets, and per-view intensity-based transforms (noise,
-simulated bias-field, histogram warping).
+simulated bias-field, histogram warping).  Similar to the tabular case, the amplitude is
+controlled by a scalar schedule \(\alpha(t)\) (linear, cosine, or exponential in
+training time).
 
