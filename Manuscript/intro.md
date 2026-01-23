@@ -56,7 +56,7 @@ modality-specific variation. This separation supports robust cross-view
 harmonization, visualization, and prediction by isolating common effects from
 idiosyncratic noise (e.g., [@Stone2020BreachersNeuroimaging; @Stone2024USSOCOM]).
 
-LAMNr Flows extend the SiMLR framework into a deep, likelihood-based
+LAMNr flows extend the SiMLR framework into a deep, likelihood-based
 architecture capable of modeling nonlinear, invertible latent spaces. Instead of
 an explicit linear factorization in the observation domain, LAMNr maps each view
 into a shared multiscale latent space using normalizing flows, ensuring exact
@@ -64,7 +64,7 @@ log-likelihoods and bijective mappings. Latent-alignment objectives (e.g.,
 VICReg, InfoNCE) identify specific coordinates that function as the shared
 components, while the remaining coordinates serve as view-specific latents. By
 modeling the joint latents with a Gaussian distribution and utilizing
-conditional Gaussian formulations, LAMNr recovers the interpretability of
+conditional Gaussian formulations, LAMNr flows recover the interpretability of
 SiMLR’s shared/private decomposition while providing nonlinear representational
 capacity, calibrated likelihoods, and the ability to generate high-fidelity
 reconstructions in the original data space.
@@ -86,7 +86,7 @@ conditional couplings in flow-based models [@sun2019dualglow]. While these
 methods emphasize the separation of view-invariant content, they generally lack
 the unique combination of exact likelihoods, one-shot invertible mapping, and
 explicit Gaussian latent structure that enables the closed-form conditional
-queries for both image and tabular data provided by LAMNr.
+queries for both image and tabular data provided by LAMNr flows.
 
 ## Normalizing flows for latent-aligned multiview modeling
 
@@ -107,7 +107,7 @@ parameterization while maintaining exact likelihoods [@ho2019flowpp;
 @durkan2019nsf; @behrmann2019resflow; @grathwohl2019ffjord]. Recent advances
 demonstrate that flows now scale to resolutions and sample qualities comparable
 to other state-of-the-art generative models, establishing them as robust,
-first-class probabilistic options [@croitoru2023diffusion_vision_survey;
+probabilistic options [@croitoru2023diffusion_vision_survey;
 @zhai2024tarflow; @gu2025starflow].  For our framework, these bijective
 properties render flows a natural foundation for multiview learning. A single
 flow provides a precise mapping between an observed view and a latent
@@ -121,9 +121,9 @@ phenotypes (IDPs), and broader multiview tabular datasets.
 
 ## Contributions
 
-We introduce Latent-Aligned Multiview Normalizing (LAMNr) Flows, a general
+We introduce Latent-Aligned Multiview Normalizing (LAMNr) flows, a general
 framework that learns shared and private latent structures across multiple views
-while preserving exact likelihoods and invertibility. Within LAMNr, each view is
+while preserving exact likelihoods and invertibility. Within LAMNr flows, each view is
 equipped with a dedicated flow that maps observations to a latent space.
 Multiview structure is encoded by aligning selected latent coordinates across
 views, while allowing the remaining coordinates to capture view-specific
@@ -173,7 +173,7 @@ while conditional queries enable calibrated harmonization and counterfactual
 reasoning for IDPs.
 
 4) __Open-Source Implementation and Validation:__ We provide an open-source
-implementation featuring 2D and 3D architectures. We evaluate LAMNr Flows on
+implementation featuring 2D and 3D architectures. We evaluate LAMNr flows on
 multimodal MRI and multiview IDP datasets, comparing performance against linear
 baselines with an emphasis on predictability, interpretability, and
 reproducibility [@papamakarios2021nfreview; @kobyzev2020nfsurvey;
