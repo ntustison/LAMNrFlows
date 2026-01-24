@@ -91,71 +91,28 @@ alignment. For clarity and robustness we therefore report results using a fixed
 
 ## View-specific flow architectures
 
-### Image views via Glow-based multiscale flows
-
-\begin{figure}
-\centering
-\includegraphics[width=0.85\textwidth]{Figures/Glow.pdf}
-\caption{Diagrammatic illustration of a generalized multiscale 2-D Glow architecture
-An input image \(x \in \mathbb{R}^{B \times C_1 \times H_1 \times W_1}\) is
-processed through a sequence of levels \(\ell = 1, \dots, N\). At each level
-\(\ell < N\), a squeeze operation trades spatial resolution for channels
-\(\big([B, C_\ell, H_\ell, W_\ell] \rightarrow [B, 4C_\ell, H_\ell/2,
-W_\ell/2]\big)\), followed by a stack of Glow steps (ActNorm, invertible \(1
-\times 1\) convolution, and affine coupling). The output is then split into (i)
-a factored-out latent block \(z_\ell \in \mathbb{R}^{B \times 2C_\ell \times
-H_\ell/2 \times W_\ell/2}\) and (ii) a remaining block that is passed to the
-next level. At the bottom level \(N\), a final squeeze produces the remaining
-latent block \(z_{N}\) without further splitting. The complete latent
-representation is the union of all levels, \(z = \{ z_1, \dots, z_{N} \}\),
-which preserves the dimensionality of the original image and supports per-level
-latent modeling in our LAMNr framework.}
-\label{fig:glow}
-\end{figure}
-
-For image views we adopt Glow-style discrete normalizing flows with \(L\) levels
-and \(K\) coupling steps per level (see Figure \ref{fig:glow}). Each step
-comprises: (i) ActNorm layers with data-dependent initialization, (ii)
-invertible \(1 \times 1 (\times 1)\) convolutions parameterized with LU
-factorization for efficient log-determinant computation, and (iii) affine
-coupling layers whose scale and shift fields are predicted by shallow
-convolutional subnetworks with a configurable number of hidden channels. Squeeze
-and split operations provide a multiscale representation in which shallower
-levels capture coarse structure while deeper levels model fine texture. Our
-implementation follows the standard Glow construction, instantiated via a model
-factory in ANTsTorch, with configurable image size (both 2-D and 3-D), number of
-levels \(L\), steps per level \(K\), and hidden channels.[^starflow] 
-
-[^starflow]: Recent transformer autoregressive flows such as STARFlow achieve
-strong high-resolution synthesis by operating as a normalizing flow in the
-latent space of a pretrained autoencoder [@gu2025starflow]. This design does not
-provide an exact, per-sample bijection from pixel space to the flow’s latents or
-multiscale per-level latents for analysis, both of which we require for
-per-level alignment and post-hoc Gaussian conditioning.  We therefore adopt
-Glow-style multiscale flows that offer single-pass, exact encoding/decoding in
-image space with explicit latent access [@kingma2018glow].
-
-Base distribution for image latents (Glow-style channel Gaussian) For image
-views we use a channel-wise diagonal Gaussian (“Glow base”) with one mean and
-one log-scale per channel, broadcast across spatial locations. Let \(z \in
-\mathbb{R}^{C\times N_1\times \dots \times N_S}\) with \(S\in\{2,3\}\) spatial
-dimensions and \(d=C\prod_{i=1}^S N_i\). The log density is
-
-\[
-\log p(z)
-= -\tfrac12\, d\log(2\pi)
-- \Big(\prod_{i=1}^S N_i\Big)\sum_{c=1}^C s_c
-- \tfrac12 \sum_{c}\sum_{\mathbf{x}}\big[(z_{c,\mathbf{x}}-\mu_c)\,e^{-s_c}\big]^2,
-\]
-
-where \(\mu_c\) and \(s_c\) are per-channel parameters broadcast over all
-spatial indices \(\mathbf{x}\). Compared to a conventional per-voxel diagonal
-Gaussian, tying parameters within each channel reduces degrees of freedom,
-matches Glow’s multiscale semantics, and avoids per-voxel scale collapse.
-
 
 
 ### Tabular/IDP views via RealNVP
+
+\begin{figure}
+\centering
+\includegraphics[width=0.65\textwidth]{Figures/realnvp.pdf}
+\caption{Diagrammatic illustration of a single-scale RealNVP architecture for
+tabular data.  An input vector $x \in \mathbb{R}^{B \times D}$ representing a
+tabular block of features (e.g., imaging-derived phenotypes) is processed
+through a stack of $K$ coupling steps. The RealNVP block stack maps the input to
+a latent representation $z_K$ of the same dimensionality $[B, D]$. We support
+two base distributions for the latent space: (i) a **DiagGaussian**, where $z_K
+\sim \mathcal{N}(0, I_D)$, and (ii) a **GaussianPCA** base. The latter models
+the latent distribution as $z_K \sim \mathcal{N}(\mu, WW^\top + \sigma^2 I_D)$,
+where $z_K = \mu + W\mu + \sigma\epsilon$ with $\epsilon \sim \mathcal{N}(0,
+I_D)$. This architecture provides a robust, invertible mapping for tabular
+views, where the GaussianPCA base acts as a learnable, geometrically-informed
+coordinate system that facilitates alignment across different views within the
+LAMNr framework.}
+\label{fig:realnvp}
+\end{figure}
 
 For imaging-derived phenotypes (IDPs) and other tabular blocks, we use
 single-scale flows based on RealNVP and masked autoregressive flows (MAF) with
@@ -229,6 +186,69 @@ alignment is reserved for settings where we expect predominantly non-linear
 cross-modality relations as it can capture richer dependencies than correlations
 but carries an $O(B^2)$ kernel cost and is more sensitive to kernel and
 bandwidth choices.
+
+### Image views via Glow-based multiscale flows
+
+\begin{figure}
+\centering
+\includegraphics[width=0.85\textwidth]{Figures/Glow.pdf}
+\caption{Diagrammatic illustration of a generalized multiscale 2-D Glow architecture
+An input image \(x \in \mathbb{R}^{B \times C_1 \times H_1 \times W_1}\) is
+processed through a sequence of levels \(\ell = 1, \dots, N\). At each level
+\(\ell < N\), a squeeze operation trades spatial resolution for channels
+\(\big([B, C_\ell, H_\ell, W_\ell] \rightarrow [B, 4C_\ell, H_\ell/2,
+W_\ell/2]\big)\), followed by a stack of Glow steps (ActNorm, invertible \(1
+\times 1\) convolution, and affine coupling). The output is then split into (i)
+a factored-out latent block \(z_\ell \in \mathbb{R}^{B \times 2C_\ell \times
+H_\ell/2 \times W_\ell/2}\) and (ii) a remaining block that is passed to the
+next level. At the bottom level \(N\), a final squeeze produces the remaining
+latent block \(z_{N}\) without further splitting. The complete latent
+representation is the union of all levels, \(z = \{ z_1, \dots, z_{N} \}\),
+which preserves the dimensionality of the original image and supports per-level
+latent modeling in our LAMNr framework.}
+\label{fig:glow}
+\end{figure}
+
+For image views we adopt Glow-style discrete normalizing flows with \(L\) levels
+and \(K\) coupling steps per level (see Figure \ref{fig:glow}). Each step
+comprises: (i) ActNorm layers with data-dependent initialization, (ii)
+invertible \(1 \times 1 (\times 1)\) convolutions parameterized with LU
+factorization for efficient log-determinant computation, and (iii) affine
+coupling layers whose scale and shift fields are predicted by shallow
+convolutional subnetworks with a configurable number of hidden channels. Squeeze
+and split operations provide a multiscale representation in which shallower
+levels capture coarse structure while deeper levels model fine texture. Our
+implementation follows the standard Glow construction, instantiated via a model
+factory in ANTsTorch, with configurable image size (both 2-D and 3-D), number of
+levels \(L\), steps per level \(K\), and hidden channels.[^starflow] 
+
+[^starflow]: Recent transformer autoregressive flows such as STARFlow achieve
+strong high-resolution synthesis by operating as a normalizing flow in the
+latent space of a pretrained autoencoder [@gu2025starflow]. This design does not
+provide an exact, per-sample bijection from pixel space to the flow’s latents or
+multiscale per-level latents for analysis, both of which we require for
+per-level alignment and post-hoc Gaussian conditioning.  We therefore adopt
+Glow-style multiscale flows that offer single-pass, exact encoding/decoding in
+image space with explicit latent access [@kingma2018glow].
+
+Base distribution for image latents (Glow-style channel Gaussian) For image
+views we use a channel-wise diagonal Gaussian (“Glow base”) with one mean and
+one log-scale per channel, broadcast across spatial locations. Let \(z \in
+\mathbb{R}^{C\times N_1\times \dots \times N_S}\) with \(S\in\{2,3\}\) spatial
+dimensions and \(d=C\prod_{i=1}^S N_i\). The log density is
+
+\[
+\log p(z)
+= -\tfrac12\, d\log(2\pi)
+- \Big(\prod_{i=1}^S N_i\Big)\sum_{c=1}^C s_c
+- \tfrac12 \sum_{c}\sum_{\mathbf{x}}\big[(z_{c,\mathbf{x}}-\mu_c)\,e^{-s_c}\big]^2,
+\]
+
+where \(\mu_c\) and \(s_c\) are per-channel parameters broadcast over all
+spatial indices \(\mathbf{x}\). Compared to a conventional per-voxel diagonal
+Gaussian, tying parameters within each channel reduces degrees of freedom,
+matches Glow’s multiscale semantics, and avoids per-voxel scale collapse.
+
 
 ### Shared-subspace screening with CCA and HSIC
 
