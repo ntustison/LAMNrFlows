@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-lam_flow_tool.py — Sample M×N image grids from trained LAM-Flow (Glow 2D) checkpoints.
+lamnr_glow_tool.py — Sample M×N image grids from trained LAM-Flow (Glow 2D) checkpoints.
 
 v0.3.1 (2025-11-09)
 - v0.3.8: Add `--cov-estimator lowrank` with `--rank` and `--sigma2`,
@@ -12,7 +12,7 @@ v0.3.1 (2025-11-09)
   Quick usage:
   
   ```bash
-  python lam_flow_tool.py gauss-fit \
+  python lamnr_glow_tool.py gauss-fit \
     --ckpt runs/t1_t2_fa_128x128_vicreg/training_state.pt \
     --manifest /data/lam/manifest.csv \
     --views T1,T2,FA \
@@ -33,7 +33,7 @@ v0.3.1 (2025-11-09)
 Usage examples
 --------------
 # 6×8 grid, 192×192 tiles, sample at ckpt-native size, then resample tiles to 0.8×0.8 mm (ANTs), then save:
-python lam_flow_tool.py \
+python lamnr_glow_tool.py \
   --ckpt runs/t1_t2_fa_256x256_vicreg/training_state.pt \
   --view-index 1 \
   --grid-size 6x8 \
@@ -42,7 +42,7 @@ python lam_flow_tool.py \
   --out samples_view1.png
 
 # If native spacing is not in the checkpoint, provide it:
-python lam_flow_tool.py \
+python lamnr_glow_tool.py \
   --ckpt runs/t1_t2_fa_256x256_vicreg/training_state.pt \
   --view-index 1 \
   --grid-size 6x8 \
@@ -51,7 +51,7 @@ python lam_flow_tool.py \
   --resample-spacing 0.7x0.7
 
 # Resample by voxel count (use_voxels=True) to 192×192 before final grid save:
-python lam_flow_tool.py \
+python lamnr_glow_tool.py \
   --ckpt runs/t1_t2_fa_256x256_vicreg/training_state.pt \
   --view-index 0 \
   --grid-size 5x10 \
@@ -89,15 +89,6 @@ __version__ = "0.3.9"
 from antstorch import create_glow_normalizing_flow_model_2d
 
 # ------------------------- utils ----------------------------
-
-def _ensure_int_or_list(val: Any, default: Union[int, List[int]]) -> Union[int, List[int]]:
-    """Handles int or list retrieval from checkpoint configs."""
-    if val is None: return default
-    if isinstance(val, (list, tuple)): return list(val)
-    if isinstance(val, str) and "," in val:
-        return [int(x) for x in val.split(",") if x.strip()]
-    return int(val)
-
 def parse_hw(spec: str) -> Tuple[int, int]:
     try:
         a, b = spec.lower().split("x")
@@ -415,17 +406,32 @@ def _coerce_nchw_4d(x, target_hw=None):
             x = F.interpolate(x, size=(Ht, Wt), mode="bilinear", align_corners=False)
     return x
 
-
 def save_grid(x: torch.Tensor, out_path: Path, nrow: int, target_hw: Tuple[int, int] | None):
-    """
-    Save a grid image. Accepts (N,C,H,W) tensor in [0,1]. If target_hw is given, tiles are resized for saving.
-    """
+
     x = _coerce_nchw_4d(x, target_hw=target_hw)
     x = torch.clamp(x, 0.0, 1.0)
-    tv.utils.save_image(x, str(out_path), nrow=int(nrow))
+    
+    out_path = Path(out_path)
+    ext = "".join(out_path.suffixes).lower()
 
+    if ".nii" in ext:
+        import ants
+        import numpy as np
 
+        arr = x.detach().cpu().numpy()
+        
+        if arr.shape[0] > 1:
+            arr_ants = np.transpose(arr.squeeze(1), (1, 2, 0))
+        else:
+            arr_ants = arr[0, 0]
+            
+        ants_img = ants.from_numpy(np.flip(arr_ants, axis=1)) 
+        ants.image_write(ants_img, str(out_path))
 
+    else:
+        import torchvision as tv
+        tv.utils.save_image(x, str(out_path), nrow=int(nrow))
+      
 # ---------------------- data loading helpers ----------------------
 
 def _read_image_any(path: Path, slice_axis: int, slice_index: int) -> torch.Tensor:
@@ -547,8 +553,8 @@ def build_model_from_config(cfg: dict, device: torch.device):
     m = create_glow_normalizing_flow_model_2d(
         input_shape=input_shape,
         L=int(cfg.get("L", 4)),
-        K=_ensure_int_or_list(cfg.get("K"), 3),
-        hidden_channels=_ensure_int_or_list(cfg.get("hidden"), 96),
+        K=int(cfg.get("K", 3)),
+        hidden_channels=int(cfg.get("hidden", 96)),
         base=str(cfg.get("base", "glow")),
         glowbase_logscale_factor=float(cfg.get("glowbase_logscale_factor", 3.0)),
         glowbase_min_log=float(cfg.get("glowbase_min_log", -5.0)),
@@ -1130,7 +1136,7 @@ def main_sample():
     device = torch.device("cpu") if args.devices.lower() == "cpu" else torch.device(args.devices.split(",")[0])
     set_deterministic(args.seed)
 
-    print(f"[info] lam_flow_tool {__version__}")
+    print(f"[info] lamnr_glow_tool {__version__}")
     print(f"[info] loading checkpoint: {ckpt_path}")
 
     # torch.load with safe default when possible
@@ -1479,7 +1485,7 @@ def main_recon(argv=None):
     # Metadata sidecar JSON
     try:
         meta = {
-            "tool": "lam_flow_tool",
+            "tool": "lamnr_glow_tool",
             "mode": "recon",
             "version": __version__,
             "ckpt": str(ckpt_path),
@@ -2192,29 +2198,45 @@ def main_gauss_fit(argv: List[str] | None = None):
         print(f"[scrub] dropped {len(bad)} subjects; new N={len(keep)}")
         return z_clean, per_paths_clean, keep, bad_paths
 
-
     ap = argparse.ArgumentParser("LAM-Flow conditional Gaussian fitter (gauss-fit)")
-    ap.add_argument("--ckpt", type=str, required=True)
-    ap.add_argument("--manifest", type=str, required=True)
-    ap.add_argument("--views", type=str, default=None)
-    ap.add_argument("--slice-axis", type=int, required=True)
-    ap.add_argument("--slice-index", type=int, required=True)
-    ap.add_argument("--batch", type=int, default=64)
-    ap.add_argument("--devices", type=str, default="cuda:0")
+    ap.add_argument("--ckpt", type=str, required=True, 
+                    help="Path to the trained model checkpoint (.pt).")
+    ap.add_argument("--manifest", type=str, required=True, 
+                    help="CSV file listing image paths for each view.")
+    ap.add_argument("--views", type=str, default=None, 
+                    help="Comma-separated list of views to include (e.g., T1,FA). Defaults to all columns in the manifest.")
+    ap.add_argument("--slice-axis", type=int, required=True, 
+                    help="Axis for slice extraction (0, 1, or 2) using ANTs.")
+    ap.add_argument("--slice-index", type=int, required=True, 
+                    help="Index of the slice to extract along the specified axis.")
+    ap.add_argument("--batch", type=int, default=64, 
+                    help="Batch size for encoding images into latent vectors.")
+    ap.add_argument("--devices", type=str, default="cuda:0", 
+                    help="Computing device (e.g., 'cuda:0', 'cpu', 'mps').")
 
     # Gaussian options
-    ap.add_argument("--cov-mode", type=str, choices=["perlevel","merged"], default="perlevel")
-    ap.add_argument("--cov-estimator", type=str, choices=["full","diag","oas","lw","lowrank"], default="full")
-    ap.add_argument("--rank", type=int, default=64)
-    ap.add_argument("--sigma2", type=str, default="auto")
-    ap.add_argument("--shrinkage", type=str, default="1e-6")
-    ap.add_argument("--cov-lam", type=float, default=1e-6)
-    ap.add_argument("--jitter", type=float, default=1e-4)  # stored for impute
+    ap.add_argument("--cov-mode", type=str, choices=["perlevel","merged"], default="perlevel",
+                    help="Covariance mode: per resolution level (perlevel) or concatenated (merged).")
+    ap.add_argument("--cov-estimator", type=str, choices=["full","diag","oas","lw","lowrank"], default="full",
+                    help="Method for estimating the covariance matrix.")
+    ap.add_argument("--rank", type=int, default=64, 
+                    help="Matrix rank for the 'lowrank' estimator.")
+    ap.add_argument("--sigma2", type=str, default="auto", 
+                    help="Residual variance for 'lowrank' (numeric value or 'auto' for the mean of the remaining eigenvalues).")
+    ap.add_argument("--shrinkage", type=str, default="1e-6", 
+                    help="Shrinkage factor for regularizing the covariance.")
+    ap.add_argument("--cov-lam", type=float, default=1e-6, 
+                    help="Tikhonov (ridge) regularization added to the diagonal.")
+    ap.add_argument("--jitter", type=float, default=1e-4, 
+                    help="Numerical stability noise added during conditional imputation.")
 
     # Outputs
-    ap.add_argument("--gauss-out", type=str, required=True)
-    ap.add_argument("--gauss-summary", type=str, default="")
-    ap.add_argument("--save-fp", type=int, default=64)
+    ap.add_argument("--gauss-out", type=str, required=True, 
+                    help="Output path for the serialized Gaussian model (.npz or .pt).")
+    ap.add_argument("--gauss-summary", type=str, default="", 
+                    help="Path to save a JSON summary of the covariance statistics.")
+    ap.add_argument("--save-fp", type=int, default=64, 
+                    help="Numerical precision for saving matrices (32 or 64-bit).")
     args = ap.parse_args(argv)
 
     @torch.no_grad()
@@ -2643,106 +2665,6 @@ def _load_gaussian_model(gauss_path: Path) -> Dict[str, Any]:
     raise RuntimeError(f"Unrecognized NPZ contents in {gauss_path}; keys={sorted(keys)}")
 
 
-# ---------- helpers (lowrank + robust SPD solve + torch cov-space solver) ----------
-def _spd_solve_cholesky(SOO: np.ndarray, B: np.ndarray, base_ridge: float = 0.0, max_tries: int = 8):
-    SOO = np.asarray(SOO, dtype=np.float64)
-    B   = np.asarray(B,   dtype=np.float64)
-    SOO = 0.5 * (SOO + SOO.T)
-    D = SOO.shape[0]
-    I = np.eye(D, dtype=np.float64)
-    lam = max(float(base_ridge), 1e-8 * (np.trace(SOO) / max(D, 1)))
-    for _ in range(max_tries):
-        try:
-            L = np.linalg.cholesky(SOO + lam * I)
-            Y = np.linalg.solve(L, B)
-            X = np.linalg.solve(L.T, Y)
-            if np.all(np.isfinite(X)):
-                return X, lam
-        except np.linalg.LinAlgError:
-            pass
-        lam *= 10.0
-    X, *_ = np.linalg.lstsq(SOO + lam * I, B, rcond=None)
-    return X, lam
-
-def _cond_mean_block_lowrank(U: np.ndarray, eig: np.ndarray, sigma2: float,
-                             idx_U: list[int], idx_O: list[int],
-                             mu: np.ndarray, ZO: np.ndarray,
-                             base_ridge: float = 0.0, max_tries: int = 10):
-    U   = np.asarray(U,   dtype=np.float64)
-    eig = np.asarray(eig, dtype=np.float64)
-    mu  = np.asarray(mu,  dtype=np.float64).ravel()
-    ZO  = np.asarray(ZO,  dtype=np.float64)
-    U_O = U[idx_O, :]    # (D_O, r)
-    U_U = U[idx_U, :]    # (D_U, r)
-    Lam = np.diag(eig) if eig.ndim == 1 else eig
-    SOO = U_O @ Lam @ U_O.T
-    if sigma2 > 0.0:
-        SOO = SOO + float(sigma2) * np.eye(SOO.shape[0], dtype=np.float64)
-    dO = (ZO - mu[idx_O][None, :]).T  # (D_O, N)
-    X, lam = _spd_solve_cholesky(SOO, dO, base_ridge=base_ridge, max_tries=max_tries)
-    Y  = U_O.T @ X       # (r,N)
-    TY = Lam @ Y         # (r,N)
-    add = U_U @ TY       # (D_U,N)
-    zU = mu[idx_U][:, None] + add  # (D_U,N)
-    return zU.T, lam, SOO  # (N,D_U), lam, SOO
-
-@torch.no_grad()
-def _torch_conditional_gaussian_impute(
-    z_obs_np, idx_obs, idx_mis, mu_np, Sigma_np,
-    jitter: float = 1e-4, sample: bool = False, tau: float = 1.0, max_tries: int = 7,
-):
-    device = torch.device("cpu")
-    z_obs = torch.as_tensor(z_obs_np, dtype=torch.double, device=device)      # (B, d_O)
-    mu    = torch.as_tensor(mu_np,    dtype=torch.double, device=device).view(-1)
-    S     = torch.as_tensor(Sigma_np, dtype=torch.double, device=device)
-    idx_O = torch.as_tensor(idx_obs, dtype=torch.long, device=device)
-    idx_M = torch.as_tensor(idx_mis, dtype=torch.long, device=device)
-
-    mu_O, mu_M = mu[idx_O], mu[idx_M]
-    S_OO = 0.5*(S.index_select(0, idx_O).index_select(1, idx_O) +
-                S.index_select(0, idx_O).index_select(1, idx_O).T)
-    S_MO = S.index_select(0, idx_M).index_select(1, idx_O)
-    S_MM = 0.5*(S.index_select(0, idx_M).index_select(1, idx_M) +
-                S.index_select(0, idx_M).index_select(1, idx_M).T)
-
-    I = torch.eye(S_OO.shape[0], dtype=S_OO.dtype, device=device)
-    jj = float(jitter)
-    for _ in range(max_tries):
-        try:
-            L = torch.linalg.cholesky(S_OO + jj*I)
-            break
-        except RuntimeError:
-            jj *= 10.0
-
-    d = (z_obs - mu_O.unsqueeze(0)).T
-    y = torch.linalg.solve_triangular(L, d, upper=False)
-    alpha = torch.linalg.solve_triangular(L.T, y, upper=True).T  # (B, d_O)
-    mean_cond = mu_M.unsqueeze(0) + alpha @ S_MO.T               # (B, d_M)
-
-    if not sample:
-        return mean_cond.to(torch.float32).cpu().numpy()
-
-    S_OM = S_MO.T
-    yK = torch.linalg.solve_triangular(L, S_OM, upper=False)
-    K  = torch.linalg.solve_triangular(L.T, yK, upper=True)
-    S_cond = 0.5*((S_MM - S_MO @ K) + (S_MM - S_MO @ K).T)
-
-    Iu = torch.eye(S_cond.shape[0], dtype=S_cond.dtype, device=device)
-    jj2 = float(jitter)
-    for _ in range(max_tries):
-        try:
-            Lc = torch.linalg.cholesky(S_cond + jj2*Iu)
-            break
-        except RuntimeError:
-            jj2 *= 10.0
-
-    B = z_obs.shape[0]
-    eps = torch.randn((B, Lc.shape[0]), dtype=S_cond.dtype, device=device)
-    samples = mean_cond + (eps @ Lc.T)*float(tau)
-    return samples.to(torch.float32).cpu().numpy()
-
-
-
 def main_gauss_impute(argv=None):
     """
     Impute one or more target modalities given observed modalities, using a Gaussian
@@ -2856,32 +2778,33 @@ def main_gauss_impute(argv=None):
 
         raise RuntimeError(f"Unrecognized NPZ contents in {gauss_path}; keys={sorted(keys)}")
 
-
     # ---------- helpers (lowrank + robust SPD solve + torch cov-space solver) ----------
-    def _spd_solve_cholesky(SOO: np.ndarray, B: np.ndarray, base_ridge: float = 0.0, max_tries: int = 8):
-        SOO = np.asarray(SOO, dtype=np.float64)
-        B   = np.asarray(B,   dtype=np.float64)
-        SOO = 0.5 * (SOO + SOO.T)
-        D = SOO.shape[0]
-        I = np.eye(D, dtype=np.float64)
-        lam = max(float(base_ridge), 1e-8 * (np.trace(SOO) / max(D, 1)))
-        for _ in range(max_tries):
-            try:
-                L = np.linalg.cholesky(SOO + lam * I)
-                Y = np.linalg.solve(L, B)
-                X = np.linalg.solve(L.T, Y)
-                if np.all(np.isfinite(X)):
-                    return X, lam
-            except np.linalg.LinAlgError:
-                pass
-            lam *= 10.0
-        X, *_ = np.linalg.lstsq(SOO + lam * I, B, rcond=None)
-        return X, lam
 
     def _cond_mean_block_lowrank(U: np.ndarray, eig: np.ndarray, sigma2: float,
                                  idx_U: list[int], idx_O: list[int],
                                  mu: np.ndarray, ZO: np.ndarray,
                                  base_ridge: float = 0.0, max_tries: int = 10):
+
+        def _spd_solve_cholesky(SOO: np.ndarray, B: np.ndarray, base_ridge: float = 0.0, max_tries: int = 8):
+            SOO = np.asarray(SOO, dtype=np.float64)
+            B   = np.asarray(B,   dtype=np.float64)
+            SOO = 0.5 * (SOO + SOO.T)
+            D = SOO.shape[0]
+            I = np.eye(D, dtype=np.float64)
+            lam = max(float(base_ridge), 1e-8 * (np.trace(SOO) / max(D, 1)))
+            for _ in range(max_tries):
+                try:
+                    L = np.linalg.cholesky(SOO + lam * I)
+                    Y = np.linalg.solve(L, B)
+                    X = np.linalg.solve(L.T, Y)
+                    if np.all(np.isfinite(X)):
+                        return X, lam
+                except np.linalg.LinAlgError:
+                    pass
+                lam *= 10.0
+            X, *_ = np.linalg.lstsq(SOO + lam * I, B, rcond=None)
+            return X, lam
+
         U   = np.asarray(U,   dtype=np.float64)
         eig = np.asarray(eig, dtype=np.float64)
         mu  = np.asarray(mu,  dtype=np.float64).ravel()
@@ -2958,24 +2881,44 @@ def main_gauss_impute(argv=None):
     # ---------------------------------- args ----------------------------------
     import argparse
     ap = argparse.ArgumentParser("LAM-Flow Gaussian imputation (gauss-impute)")
-    ap.add_argument("--ckpt", type=str, required=True)
-    ap.add_argument("--gauss", type=str, required=True)
-    ap.add_argument("--manifest", type=str, required=True)
-    ap.add_argument("--views", type=str, required=True)
-    ap.add_argument("--observed", type=str, required=True)
-    ap.add_argument("--target", type=str, required=True)
-    ap.add_argument("--slice-axis", type=int, required=True)
-    ap.add_argument("--slice-index", type=int, required=True)
-    ap.add_argument("--devices", type=str, default="cuda:0")
-    ap.add_argument("--batch", type=int, default=64)
-    ap.add_argument("--strategy", type=str, choices=["mean", "sample"], default="mean")
-    ap.add_argument("--samples", type=int, default=1)
-    ap.add_argument("--temperature", type=float, default=1.0)
-    ap.add_argument("--outdir", type=str, required=True)
-    ap.add_argument("--pairs-csv", type=str, default=None)
-    ap.add_argument("--seed", type=int, default=1234)
-    ap.add_argument("--safe-latent", type=str, choices=["none","clamp"], default="none")
-    ap.add_argument("--safe-k", type=float, default=2.0)
+    ap.add_argument("--ckpt", type=str, required=True,
+                    help="Path to the trained Glow model checkpoint (.pt).")
+    ap.add_argument("--gauss", type=str, required=True,
+                    help="Path to the serialized Gaussian model (.npz or .pt) generated by gauss-fit.")
+    ap.add_argument("--manifest", type=str, required=True,
+                    help="CSV manifest containing paths to the observed images.")
+    ap.add_argument("--views", type=str, required=True,
+                    help="Comma-separated list of all views in the Gaussian model (must match fit order).")
+    ap.add_argument("--observed", type=str, required=True,
+                    help="Comma-separated list of views used as predictors (e.g., 'T1').")
+    ap.add_argument("--target", type=str, required=True,
+                    help="Comma-separated list of views to be imputed (e.g., 'FA').")
+    ap.add_argument("--slice-axis", type=int, required=True,
+                    help="Axis index for slicing NIfTI images (0, 1, or 2).")
+    ap.add_argument("--slice-index", type=int, required=True,
+                    help="Slice index to extract from the input volumes.")
+    ap.add_argument("--devices", type=str, default="cuda:0",
+                    help="Computing device to use (e.g., 'cuda:0' or 'cpu').")
+    ap.add_argument("--batch", type=int, default=64,
+                    help="Batch size for processing. Reduce to 1-4 if experiencing memory issues.")
+    ap.add_argument("--strategy", type=str, choices=["mean", "sample"], default="mean",
+                    help="Imputation strategy: 'mean' for conditional mean (sharp/clean) or 'sample' for stochastic sampling (textured).")
+    ap.add_argument("--samples", type=int, default=1,
+                    help="Number of stochastic samples to generate per subject if strategy is 'sample'.")
+    ap.add_argument("--temperature", type=float, default=1.0,
+                    help="Scaling factor for the latent variance during stochastic sampling.")
+    ap.add_argument("--outdir", type=str, required=True,
+                    help="Directory where the imputed images will be saved.")
+    ap.add_argument("--output-format", type=str, choices=["nii","nii.gz","png"], default="nii.gz",
+                    help="File format for saving the results. NIfTI (.nii.gz) is recommended for medical data.")
+    ap.add_argument("--pairs-csv", type=str, default=None,
+                    help="Optional path to save a CSV mapping observed files to their imputed counterparts.")
+    ap.add_argument("--seed", type=int, default=1234,
+                    help="Random seed for reproducible stochastic sampling.")
+    ap.add_argument("--safe-latent", type=str, choices=["none","clamp"], default="none",
+                    help="Optional safety mechanism to prevent extreme values in the imputed latent space.")
+    ap.add_argument("--safe-k", type=float, default=2.0,
+                    help="The k-sigma threshold used if safe-latent is set to 'clamp'.")
     args = ap.parse_args(argv)
 
     views = [v.strip() for v in args.views.split(",") if v.strip()]
@@ -3311,11 +3254,14 @@ def main_gauss_impute(argv=None):
         print(f"[decode] pre-to01 min/max: {float(xh.min()):.3f}/{float(xh.max()):.3f}")
         xh = to01(xh).detach().cpu()
 
-        out_dir = Path(args.outdir); out_dir.mkdir(parents=True, exist_ok=True)
-        for i in range(N):
-            save_grid(xh[i:i+1], out_dir / f"{i:06d}_{tname}.png", nrow=1, target_hw=(Hc, Wc))
-        print(f"[gauss-impute] wrote {N} images for target={tname} -> {out_dir}")
+        out_dir = Path(args.outdir)
+        out_dir.mkdir(parents=True, exist_ok=True)
 
+        for i in range(N):
+            file_name = f"{i:06d}_{tname}.{args.output_format}" 
+            save_grid(xh[i:i+1], out_dir / file_name, nrow=1, target_hw=(Hc, Wc))
+
+        print(f"[gauss-impute] wrote {N} NIfTI images for target={tname} -> {out_dir}")
 
 
 if __name__ == "__main__":
