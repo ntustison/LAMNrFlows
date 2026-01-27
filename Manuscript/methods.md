@@ -94,9 +94,8 @@ alignment. For clarity and robustness we therefore report results using a fixed
 \begin{figure}
 \centering
 \begin{tabular}{cc}
-% On remonte l'image de gauche. Ajustez la valeur (ex: 2cm) selon vos besoins.
-\raisebox{1.25cm}{\includegraphics[width=0.425\textwidth]{Figures/realnvp.pdf}} &
-\includegraphics[width=0.55\textwidth]{Figures/Glow.pdf} \\
+\raisebox{1.25cm}{\includegraphics[width=0.4\textwidth]{Figures/realnvp.pdf}} &
+\includegraphics[width=0.6\textwidth]{Figures/Glow.pdf} \\
 (a) & (b)
 \end{tabular}
 \caption{
@@ -139,7 +138,7 @@ reduce skewness.
 
 We use two base distributions: a diagonal Gaussian and a Gaussian–PCA base that
 performs an additional linear whitening of the flow latents (see Figure
-\ref{fig:lamnr_diagrams(b)}). In the latter case, the flow acts as a learnable
+\ref{fig:lamnr_diagrams}(a)). In the latter case, the flow acts as a learnable
 multiview “whitener” that maps each tabular view to a standardized latent
 \(\varepsilon\) with approximately independent components. Both the raw flow
 latents \(z^{(v)}\) and the whitened coordinates \(\varepsilon^{(v)}\) can be
@@ -203,7 +202,7 @@ bandwidth choices.
 ### Image views via Glow-based multiscale flows
 
 For image views we adopt Glow-style discrete normalizing flows with \(L\) levels
-and \(K\) coupling steps per level (see Figure \ref{fig:lamnr_diagrams(b)}). Each step
+and \(K\) coupling steps per level (see Figure \ref{fig:lamnr_diagrams}(b)). Each step
 comprises: (i) ActNorm layers with data-dependent initialization, (ii)
 invertible \(1 \times 1 (\times 1)\) convolutions parameterized with LU
 factorization for efficient log-determinant computation, and (iii) affine
