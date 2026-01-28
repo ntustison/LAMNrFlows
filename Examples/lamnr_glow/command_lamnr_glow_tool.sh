@@ -20,12 +20,15 @@ runs_dir="${base_dir}/runs/ppmi_t1_fa_128x128_K12_L5_HC192_align-vicreg_screen-c
 # Destination for all generated images, Gaussian models, and JSON summaries.
 out_dir="${base_dir}/output/"
 
+manifest_dir="${base_dir}/manifests/"
+
 # The specific PyTorch checkpoint containing model weights (EMA/State Dict).
 ckpt="${runs_dir}/training_state.pt"
 
 # Manifest CSVs: These link subject IDs to their respective T1 and FA image paths.
-manifest="${base_dir}/manifest_ppmi.csv"
-manifest_short="${base_dir}/manifest_ppmi_short.csv"
+manifest="${manifest_dir}/manifest_ppmi.csv"
+manifest_short="${manifest_dir}/manifest_ppmi_short.csv"
+manifest_lesions="${manifest_dir}/manifest_brats_short.csv"  
 
 # Numerical parameters for slice extraction and computational batching.
 SLICE_INDEX=138
@@ -135,39 +138,52 @@ gaussian_lr_summary=${out_dir}/t1_fa_lowrank_summary.json
 # to produce a high-fidelity, denoised 'average' brain anatomy.
 ########################################
 
-${WHICH_PYTHON} lamnr_glow_tool.py recon-template \
-  --ckpt ${ckpt} \
-  --gauss ${gaussian_lr} \
-  --views T1,FA \
-  --view-index 0 \
-  --mc-samples 10 \
-  --mc-temp 0.01 \
-  --devices ${DEVICE} \
-  --out ${out_dir}/template_T1_mu_sharpened.png \
-  --sharpen-image True \
-  --seed ${RANDOM}
-
-
 # ${WHICH_PYTHON} lamnr_glow_tool.py recon-template \
-# --ckpt runs/t1_fa_128x128_vicreg_K12_H192_vicreg/training_state.pt \
-# --gauss /home/ntustison/Desktop/deep_simr_glow/output/t1_fa_lowrank.npz \
-# --views T1,T2,FA \
-# --view-index 0 \
-# --devices ${DEVICE} \
-# --mc-samples 32 \
-# --mc-temp 0.25 \
-# --seed 12345 \
-# --out ${out_dir}/template_T1_mu_mc.png
+#   --ckpt ${ckpt} \
+#   --gauss ${gaussian_lr} \
+#   --views T1,FA \
+#   --view-index 0 \
+#   --mc-samples 32 \
+#   --mc-temp 0.25 \
+#   --devices ${DEVICE} \
+#   --out ${out_dir}/template_T1_mu_sharpened.png \
+#   --sharpen-image \
+#   --seed ${RANDOM}
 
+########################################
+# Performs 'Pseudo-Healthy Synthesis' via latent winsorization.
+# Detects and clamps latent vectors that fall outside the learned distribution
+# (e.g., tumors, lesions, or artifacts).
+# Supports global thresholds (quantile or hard limit) and granular per-level
+# control (e.g., aggressively clamping shape at L4 while preserving texture at L0).
+########################################
 
+  
+for quantile in 0.01 0.10 0.20 0.30 0.40 0.50 0.60 0.70 0.80 0.90 0.95 0.99 0.999 1.00 ;
+  do
+    echo "Winsorizing at quantile: ${quantile}"
+    ${WHICH_PYTHON} lamnr_glow_tool.py recon-winsorize \
+      --ckpt ${ckpt} \
+      --manifest ${manifest_lesions} \
+      --views T1 \
+      --slice-axis 2 --slice-index ${SLICE_INDEX} \
+      --devices ${DEVICE} \
+      --out ${out_dir}/latent_winsorization/lesion_winsor_quantile_${quantile}.nii.gz \
+      --quantile ${quantile}
 
-
-
-
-
-
-
-
+  # for level in 0 1 2 3 4 ;
+  #   do
+  #     echo "Winsorizing at level: ${level}"
+  #     ${WHICH_PYTHON} lamnr_glow_tool.py recon-winsorize \
+  #       --ckpt ${ckpt} \
+  #       --manifest ${manifest_lesions} \
+  #       --views T1 \
+  #       --slice-axis 2 --slice-index ${SLICE_INDEX} \
+  #       --devices ${DEVICE} \
+  #       --out ${out_dir}/latent_winsorization/lesion_winsor_level_${level}_${quantile}.nii.gz \
+  #       --winsorize-level ${level},${quantile} 
+  #   done
+  done
 
 # ${WHICH_PYTHON} lamnr_glow_tool.py recon \
 #   --ckpt ${ckpt} \
