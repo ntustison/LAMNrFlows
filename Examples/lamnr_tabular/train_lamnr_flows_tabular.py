@@ -765,6 +765,7 @@ def main():
         "best_selection_metric": args.best_selection_metric,  # e.g., "val_bpd"
         "best_selection_value": metrics_dict.get(args.best_selection_metric, None),
         "metrics": metrics_dict,
+        "val_history": result.get("val_history", []),
     }
 
     with open(metrics_path, "w", encoding="utf-8") as f:
