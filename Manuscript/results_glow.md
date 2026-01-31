@@ -1,7 +1,10 @@
 
-# Glow-based LAMNr Flows
 
-## Leveraging approximate template $\leftrightsquigarrow$ subject geodesic linearity for image registration via latent winsorization
+\clearpage
+
+## Glow-based LAMNr Flows
+
+### Leveraging approximate template $\leftrightsquigarrow$ subject geodesic linearity for image registration via latent winsorization
 
 To evaluate the utility of the learned latent representations for downstream
 geometric tasks, we applied LAMNr Flows to the challenge of deformable image

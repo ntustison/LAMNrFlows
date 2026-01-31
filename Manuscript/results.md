@@ -3,38 +3,28 @@
 
 # Results
 
-We structure the results to progress from single-view tabular modeling to
-multiview tabular alignment and finally to image-based flows. We begin with
-single-view experiments on UK Biobank imaging-derived phenotypes (IDPs) produced
-by three standard processing suites (FSL, FreeSurfer, ANTsX) reported in our
-previous work [@Tustison:2024aa]. Within each IDP block, we train RealNVP
-tabular flows across a grid of $K$ coupling steps and coupling-MLP width, using a
-Gaussian–PCA base with a fixed latent rank to standardize comparisons. Model
-selection is based on validation bits per dimension averaged over multiple
-random seeds, with ties broken by lower variance across seeds. This phase yields
-one well-calibrated configuration per IDP source and establishes a
-likelihood-calibrated baseline for downstream comparisons.
+We demonstrate our proposed framework by comparing established linear multiview
+baselines with invertible flow models using both tabular and image data. Our
+initial set of experiments uses UK Biobank imaging-derived phenotypes (IDPs) to
+demonstrate statistical significance uplift with LAMNr flows over SiMLR-based
+analysis.  The second set of experiments showcase the utility of LAMNr flows
+built from Glow networks for parametrically characterizing multi-modal imaging
+distributions.
 
-We then hold those single-view hyperparameters fixed and move to multiview IDPs
-by jointly training per-view flows with latent-alignment objectives on
-subject-matched batches. Here the only additional degrees of freedom are the
-alignment choice and, when enabled, CCA or HSIC screening to restrict alignment
-to directions that are statistically shared across views. We evaluate both
-generative fit and utility: validation bits per dimension aggregated across
-views, inter-view dependence in latent space, cross-view imputation accuracy and
-calibration under controlled missingness, and simple predictive transfer where a
-linear readout fit on one view is applied to another. Throughout, we compare to
-strong linear multiview baselines to quantify gains beyond correlation-based
-projections.
+Our tabular-based experiments is performed in two phases.  Both phases utilize
+UKBB IDPs from previous research.  In prior work [@Tustison:2024aa], UKBB IDPs
+generated from structural MRI data (i.e., T1-weighted) using three widely used
+processing suites (FSL, FreeSurfer, and ANTsX).  More recently [@Avants:2025aa],
+UKBB IDPs derived from T1-weighted, diffusion tensor imaging, and resting state
+fMRI were used to perform a large-scale evaluation of the SiMLR framework.  We
+use both sets of results to guide hyperparameter selection for a fair comparison
+between LAMNr flows and SiMLR in predicting clinical variables of interest while
+simultaneously exploring the effects of latent alignment.  
 
-Finally, we evaluate Glow-based LAMNr models on paired MRI. We reuse the
-selection principles above, report per-level likelihoods and stability
-diagnostics, and exploit the exact inverse to construct shared-latent images by
-replacing private coordinates with their conditional means. These
-reconstructions provide contrast-robust surrogates that simplify downstream
-operations such as cross-modal registration. Imaging results include synthesis
-quality, calibration of conditional uncertainty, and registration performance
-when transforms are estimated on shared-latent images and applied back to the
-originals. All experiments use consistent subject-wise train, validation, and
-test splits, identical normalization and input imputation policies, and multiple
-seeds with mean and interval reporting to facilitate reproducibility.
+We also evaluate Glow-based LAMNr flow models using multi-modal MRI.  Using
+publicly available multimodal MRI data from the Parkinson Progression Marker
+Initiative (PPMI) [@PPMI:2011aa] and the Normative Neurological Library (NNL)
+[@Gage:2024aa].  We demonstrate the utility of invertible flows by exploiting
+simplified editing in latent space and conditional Gaussian modeling for
+navigating between views (e.g., image imputation).  
+
