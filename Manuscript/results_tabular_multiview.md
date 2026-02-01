@@ -111,60 +111,6 @@ likelihood alone may not identify the configurations that maximize downstream
 predictive utility, especially when alignment terms are introduced primarily to
 shape representational structure rather than to improve density fit.
 
-### Downstream results: LAMNr consistently improves over SiMLR on continuous traits
-
-Despite near-ties in best_val_bpd among the best-performing flow configurations,
-downstream evaluation revealed a clearer separation between nonlinear and linear
-representations. In paired bootstrap comparisons against **SiMLR**, the **LAMNr
-+ VICReg (\(\lambda=0.01\))** model produced statistically significant
-improvements (FDR-corrected) for several continuous endpoints. The strongest
-gains were observed for **BMI** and the hearing-derived measures (SRT left/right
-and mean SRT), along with smaller but significant improvements for **fluid
-intelligence** and **neuroticism**. These results suggest that even a shallow
-invertible nonlinearity—constrained to the same 31-dimensional latent space used
-by the linear baseline—can yield latents that retain additional predictive
-structure.
-
-Categorical endpoints showed a more nuanced pattern. For smoking status,
-improvements depended on the metric: LAMNr variants could provide modest gains
-in accuracy, whereas **macro-AUC** was not consistently improved relative to
-SiMLR (and in some cases SiMLR remained numerically better). For alcohol status,
-several flow configurations improved accuracy, and some penalties provided
-sizable gains in macro-AUC for specific parameterizations. Overall, these trends
-are consistent with the idea that some categorical separations may be adequately
-captured by linear multiview embeddings, while other endpoints benefit from
-modest nonlinearity and/or alignment shaping.
-
-### Incremental value of explicit alignment beyond “flow-only” training
-
-When comparing aligned flows to the **LAMNr `none`** baseline (same architecture
-and dimensionality), the incremental effect of alignment was present but more
-target-specific and generally smaller than the overall LAMNr vs SiMLR gap. The
-clearest and most robust incremental gain from alignment in our evaluation set
-was for **BMI**, where **VICReg (\(\lambda=0.01\))** improved R² relative to the
-unaligned flow baseline. Other targets showed mixed behavior: certain dependence
-penalties improved specific endpoints while degrading others, and some penalties
-that harmed likelihood could still improve selected downstream metrics. This
-decoupling reinforces the view that alignment penalties function primarily as
-representational regularizers, and that their value should be judged by
-downstream goals rather than likelihood alone.
-
-### Summary and implications
-
-Taken together, these experiments support two practical conclusions. First, in a
-near-Gaussian UKB IDP regime with matched latent dimensionality, a shallow
-multiview normalizing flow can provide **measurable and statistically robust**
-improvements over a linear PCA/SiMLR baseline for several clinically relevant
-continuous outcomes. Second, explicit cross-view alignment offers
-**incremental** gains for some endpoints but is not universally beneficial; its
-impact is strongly metric- and target-dependent, and it can decouple density fit
-from predictive utility. In practice, this suggests a two-stage strategy for
-multiview generative modeling in tabular neuroimaging phenotypes: select stable
-configurations by likelihood, but tune (or select) alignment penalties by
-downstream utility when the scientific objective prioritizes prediction or
-interpretable cross-view structure.
-
-
 \begin{table*}[t]
 \centering
 \scriptsize
@@ -223,3 +169,58 @@ Alcohol status & AUC$_{macro}$ (OVR) & hsic (0.01) & 0.0582 & [0.0279, 0.0866] &
 \end{subtable}
 
 \end{table*}
+
+### Downstream results: LAMNr consistently improves over SiMLR on continuous traits
+
+Despite near-ties in best_val_bpd among the best-performing flow configurations,
+downstream evaluation revealed a clearer separation between nonlinear and linear
+representations. In paired bootstrap comparisons against **SiMLR**, the 
+**LAMNr + VICReg (\(\lambda=0.01\))** model produced statistically significant
+improvements (FDR-corrected) for several continuous endpoints. The strongest
+gains were observed for **BMI** and the hearing-derived measures (SRT left/right
+and mean SRT), along with smaller but significant improvements for **fluid
+intelligence** and **neuroticism**. These results suggest that even a shallow
+invertible nonlinearity—constrained to the same 31-dimensional latent space used
+by the linear baseline—can yield latents that retain additional predictive
+structure.
+
+Categorical endpoints showed a more nuanced pattern. For smoking status,
+improvements depended on the metric: LAMNr variants could provide modest gains
+in accuracy, whereas **macro-AUC** was not consistently improved relative to
+SiMLR (and in some cases SiMLR remained numerically better). For alcohol status,
+several flow configurations improved accuracy, and some penalties provided
+sizable gains in macro-AUC for specific parameterizations. Overall, these trends
+are consistent with the idea that some categorical separations may be adequately
+captured by linear multiview embeddings, while other endpoints benefit from
+modest nonlinearity and/or alignment shaping.
+
+### Incremental value of explicit alignment beyond “flow-only” training
+
+When comparing aligned flows to the **LAMNr `none`** baseline (same architecture
+and dimensionality), the incremental effect of alignment was present but more
+target-specific and generally smaller than the overall LAMNr vs SiMLR gap. The
+clearest and most robust incremental gain from alignment in our evaluation set
+was for **BMI**, where **VICReg (\(\lambda=0.01\))** improved R² relative to the
+unaligned flow baseline. Other targets showed mixed behavior: certain dependence
+penalties improved specific endpoints while degrading others, and some penalties
+that harmed likelihood could still improve selected downstream metrics. This
+decoupling reinforces the view that alignment penalties function primarily as
+representational regularizers, and that their value should be judged by
+downstream goals rather than likelihood alone.
+
+### Summary and implications
+
+Taken together, these experiments support two practical conclusions. First, in a
+near-Gaussian UKB IDP regime with matched latent dimensionality, a shallow
+multiview normalizing flow can provide **measurable and statistically robust**
+improvements over a linear PCA/SiMLR baseline for several clinically relevant
+continuous outcomes. Second, explicit cross-view alignment offers
+**incremental** gains for some endpoints but is not universally beneficial; its
+impact is strongly metric- and target-dependent, and it can decouple density fit
+from predictive utility. In practice, this suggests a two-stage strategy for
+multiview generative modeling in tabular neuroimaging phenotypes: select stable
+configurations by likelihood, but tune (or select) alignment penalties by
+downstream utility when the scientific objective prioritizes prediction or
+interpretable cross-view structure.
+
+
