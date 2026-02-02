@@ -32,17 +32,3 @@ leveraging the structured latent space of LAMNr, we achieve a registration that
 is robust to focal pathology without requiring manual lesion masking,
 effectively using the latent space as a prior for anatomical consistency.
 
-__Relationship to the population Fréchet mean__.  The generative capacity of
-LAMNr Flows provides a direct link to classical anatomical template
-construction. In the context of symmetric normalization (SyN) and diffeomorphic
-mapping, a population template is formally defined as the Fréchet mean of the
-group—the image that minimizes the sum of squared geodesic distances to all
-subjects within a given population [@Avants:2010aa]. In the LAMNr framework, the
-latent space is anchored by a centered Gaussian distribution where the origin
-($z=0$) represents the statistical mode and mean.  Mapping this origin back to the
-image domain yields a "latent-mean" reconstruction that captures the shared
-anatomical features of the cohort, effectively serving as an approximation of
-the Fréchet mean. Furthermore, due to the approximate geodesic linearity of the
-learned latent space, the linear path from any subject's latent representation
-$z_i$ toward the origin approximates the geodesic deformation toward the
-population average. 
