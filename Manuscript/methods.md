@@ -104,7 +104,7 @@ Overview of the LAMNr flows architectures.
 input vector $x \in \mathbb{R}^{B \times D}$ (e.g., imaging-derived phenotypes)
 is processed through $K$ coupling steps to produce a latent representation $z_K$
 of the same dimensionality. In addition to a diagonal Gaussian distribution, 
-a **GaussianPCA** base distribution is also supported where 
+a $\texttt{GaussianPCA}$ base distribution is also supported where 
 $z \sim \mathcal{N}(\mu, WW^\top + \sigma^2 I_D)$, which acts as a
 learnable, geometrically-informed coordinate system. This unified approach
 ensures exact invertibility and facilitates principled latent alignment across
