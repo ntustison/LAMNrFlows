@@ -115,50 +115,52 @@ providing nonlinear representational capacity, calibrated likelihoods, and the
 ability to generate high-fidelity reconstructions in the original data space.
 
 
-## LAMNr flows:  a computational anatomy perspective
+## A computational anatomy perspective
 
-In the image setting, a single Glow-style normalizing flow yields a
-likelihood-calibrated single template via the latent mean $f^{-1}(0)$.  LAMNr
-flows extend this to multiple views.  By aligning shared latent coordinates and
-placing a conditional Gaussian over per-level latents, one can construct
-contrast-robust shared-latent images and move analytically between
-modality-specific representations. This demonstrates a potential link to the
-field of computational anatomy (CA) [@GrenanderMiller1998CA], where such shared
-representatives function as practical proxies for population templates and,
-among other utilities, reduce diffeomorphic effort in registration.
+The mathematical foundation of computational anatomy (CA) has long relied on
+Riemannian geometry to define population templates and statistical variations
+[@GrenanderMiller1998CA;@Trouve1998DiffeoPatternMatching;@Miller2002LDDMMOverview]. Within
+this framework, a template is formally defined as the Fréchet mean, i.e., the
+point on a curved manifold that minimizes the sum of squared geodesic distances
+to all subjects in a cohort [@Avants:2010aa]. However, as noted by Fletcher et
+al. [@Fletcher2009aa], the intrinsic curvature of image spaces typically causes
+a divergence between the Fréchet mean (the variance minimizer), the Karcher mean
+(a local stationary point), and the mode (the most probable individual). This
+necessitates complex, non-linear mathematical machinery to preserve anatomical
+consistency.  In implementation, Large Deformation Diffeomorphic Metric Mapping
+(LDDMM) [@Beg2005LDDMM] and Symmetric Normalization [@Avants:2008aa] are two
+popular approaches.  Their population template estimates are fixed points of a
+barycentric optimization with respect to the induced geodesic distance.
 
-CA treats anatomical variability as the action of diffeomorphisms on a template
-with a Riemannian metric on velocity fields that induces a geodesic distance
-between images [@Trouve1998DiffeoPatternMatching; @GrenanderMiller1998CA].
-Within this framework, a population template is a Fréchet mean, i.e., the image
-that minimizes the sum of squared geodesic distances to all subjects under that
-metric [@Avants:2010aa]. Foundational work formalizes this orbit model and links
-statistical estimation to geometric deformation via flows on shape spaces,
-motivating modern diffeomorphic registration and template construction
-[@Miller2002LDDMMOverview]. In implementation, Large Deformation Diffeomorphic
-Metric Mapping (LDDMM) [@Beg2005LDDMM] and Symmetric Normalization
-[@Avants:2008aa] are two popular approaches.  Their population template estimates
-are fixed points of a barycentric optimization with respect to the induced
-geodesic distance.
+Normalizing flows offer a transformative perspective by effectively linearizing
+the anatomical manifold through a bijective mapping to a symmetric, centered
+Gaussian base distribution. In this latent space, the properties of the Gaussian
+prior ensure that the mean, mode, and median coincide at the origin ($z=0$).
+Consequently, the inverse mapping of this origin, $f^{-1}(0)$, provides a
+principled approximation of the population Fréchet mean in the image domain. By
+anchoring the cohort to this "latent-mean" template, the framework establishes
+an approximate geodesic linearity where the deformation path from any subject to
+the center is represented as a straight line. This perspective reconciles
+high-dimensional anatomical complexity with the simplicity of Euclidean
+statistics, providing a robust, likelihood-based alternative to traditional
+iterative group-wise registration.
 
-Normalizing flows (via the Glow architecture) formalize from this geometric
-viewpoint with an exact, invertible statistical modeling approach. Each image is
-mapped bijectively to a latent vector $z$ whose distribution is characterized by
-a centered Gaussian with unit variance (i.e., the base distribution). The
-inverse $f^{-1}$ maps latent coordinates back to image space. Because the base
-distribution is Gaussian, the origin $z=0$ is both the mean and the mode in
-latent space. Mapping this origin inversely through the network yields a
-latent-mean reconstruction $\hat{x}_0 = f^{-1}(0)$. This object concentrates
-cohort-common signal under the model’s likelihood and suppresses idiosyncratic
-variation that does not persist across subjects. When LAMNr flows use latent
-alignment across views, the shared subspace is explicitly promoted, so
-$\hat{x}_0$ reflects common population anatomy (as opposed to shape/intensity
-outliers), and the resulting shared-latent image behaves like a contrast-robust
-population representative.
+This also formalizes the geometric viewpoint using a Glow-style architecture to
+provide an exact, invertible statistical modeling framework. Each image is
+mapped bijectively to a latent vector $z$, where the distribution is governed by
+a centered Gaussian with unit variance. Because the origin $z=0$ remains the
+central tendency in this latent space, inverting this point through the network
+yields a latent-mean reconstruction, $\hat{x}_0 = f^{-1}(0)$. This object
+effectively concentrates cohort-common signal under the model’s likelihood while
+suppressing idiosyncratic variations that do not persist across subjects. By
+explicitly promoting a shared subspace through latent alignment, $\hat{x}_0$
+reflects stable population anatomy rather than shape or intensity outliers,
+allowing the resulting shared-latent image to function as a contrast-robust
+population representative across heterogeneous views.
 
 The relationship to CA can be further elucidated by comparing objective
 functions. CA-based templates minimize geodesic energy under a diffeomorphic
-metric whereas LAMNr flows maximize model likelihood (equivalently, minimizes
+metric whereas normalizing flows maximize model likelihood (equivalently, minimizes
 negative log likelihood) under a pushforward of the Gaussian base distribution.
 If the network is locally well-conditioned around the population and the cohort
 lies in a near-linear region of latent space (as is often the case for
@@ -178,7 +180,6 @@ global minimizer of this functional.  By modeling the population via a centered
 Gaussian in a bijective latent space, the origin provides a computationally
 efficient approximation of this global mean, effectively linearizing the
 underlying geodesic structure.
-
 
 [^CA]: There are, however, important geometric caveats to our comparison. The Fréchet
 mean is defined relative to a specific metric whereas LAMNr flows induces its own
@@ -204,19 +205,19 @@ that shared-latent templates lower the variance of registration energies across
 contrasts relative to raw-contrast templates, indicating that alignment has
 concentrated anatomy and factored out modality.
 
-Framed this way, LAMNr flows is a complementary analogical view of CA that
-provides an exact probabilistic formulation that admits closed-form
-conditioning, one-shot inversion, and multiscale latent access. The latent-mean
-$\hat{x}_0$ is then best understood as a statistically grounded proxy for the
-population center whose proximity to the CA Fréchet mean can be measured and,
-under smoothness and local-linearity conditions, justified to first order. This
-perspective also clarifies the role of shared-latent images i.e., by projecting
-to coordinates that carry cross-subject, cross-view signal and neutralizing
-private factors, they produce references that are more uniform under
-diffeomorphic matching while remaining invertible to and from subject space. In
-the Results section, we leverage this view to provide a novel strategy for
-improved image registration through latent-space editing, a particularly useful
-approach where common diffeomorphic anatomical assumptions are violated.
+Framed this way, LAMNr flows is a complementary analogical view of CA captured
+by multimodal imaging that provides an exact probabilistic formulation that
+admits closed-form conditioning, one-shot inversion, and multiscale latent
+access. The latent-mean $\hat{x}_0$ is then best understood as a statistically
+grounded proxy for the population center whose proximity to the CA Fréchet mean
+can be measured and, under smoothness and local-linearity conditions, justified
+to first order. This perspective also clarifies the role of shared-latent images
+i.e., by projecting to coordinates that carry cross-subject, cross-view signal
+and neutralizing private factors, they produce references that are more uniform
+under diffeomorphic matching while remaining invertible to and from subject
+space. In the Results section, we leverage this view to provide a novel strategy
+for improved image registration through latent-space editing, a particularly
+useful approach where common diffeomorphic anatomical assumptions are violated.
 
 ## Contributions
 
