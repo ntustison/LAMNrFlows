@@ -117,20 +117,24 @@ ability to generate high-fidelity reconstructions in the original data space.
 
 ## A computational anatomy perspective
 
-The mathematical foundation of computational anatomy (CA) has long relied on
-Riemannian geometry to define population templates and statistical variations
-[@GrenanderMiller1998CA;@Trouve1998DiffeoPatternMatching;@Miller2002LDDMMOverview]. Within
-this framework, a template is formally defined as the Fréchet mean, i.e., the
-point on a curved manifold that minimizes the sum of squared geodesic distances
-to all subjects in a cohort [@Avants:2010aa]. However, as noted by Fletcher et
-al. [@Fletcher2009aa], the intrinsic curvature of image spaces typically causes
-a divergence between the Fréchet mean (the variance minimizer), the Karcher mean
-(a local stationary point), and the mode (the most probable individual). This
-necessitates complex, non-linear mathematical machinery to preserve anatomical
-consistency.  In implementation, Large Deformation Diffeomorphic Metric Mapping
-(LDDMM) [@Beg2005LDDMM] and Symmetric Normalization [@Avants:2008aa] are two
-popular approaches.  Their population template estimates are fixed points of a
-barycentric optimization with respect to the induced geodesic distance.
+Beyond the proposed technical advancements, another contribution of this work is
+the exploratory bridge it establishes between deep statistical and generative
+modeling and the foundational principles of computational anatomy (CA). The
+mathematical foundation of CA has long relied on Riemannian geometry to define
+population templates and statistical variations
+[@GrenanderMiller1998CA;@Trouve1998DiffeoPatternMatching;@Miller2002LDDMMOverview].
+Within this framework, a template is formally defined as the Fréchet mean, i.e.,
+the point on a curved manifold that minimizes the sum of squared geodesic
+distances to all subjects in a cohort [@Avants:2010aa]. However, as noted by
+Fletcher et al. [@Fletcher2009aa], the intrinsic curvature of image spaces
+typically causes a divergence between the Fréchet mean (the variance minimizer),
+the Karcher mean (a local stationary point), and the mode (the most probable
+individual). This necessitates complex, non-linear mathematical machinery to
+preserve anatomical consistency.  In implementation, Large Deformation
+Diffeomorphic Metric Mapping (LDDMM) [@Beg2005LDDMM] and Symmetric Normalization
+[@Avants:2008aa] are two popular template construction approaches.  Their
+population template estimates are fixed points of a barycentric optimization
+with respect to the induced geodesic distance.
 
 Normalizing flows offer a transformative perspective by effectively linearizing
 the anatomical manifold through a bijective mapping to a symmetric, centered
@@ -140,23 +144,16 @@ Consequently, the inverse mapping of this origin, $f^{-1}(0)$, provides a
 principled approximation of the population Fréchet mean in the image domain. By
 anchoring the cohort to this "latent-mean" template, the framework establishes
 an approximate geodesic linearity where the deformation path from any subject to
-the center is represented as a straight line. This perspective reconciles
+the latent center is represented as a straight line. This object effectively
+concentrates cohort-common signal under the model’s likelihood while suppressing
+idiosyncratic variations that do not persist across subjects. By explicitly
+promoting a shared subspace through latent alignment, $\hat{x}_0$ reflects
+stable population anatomy rather than shape or intensity outliers, allowing the
+resulting shared-latent image to function as a contrast-robust population
+representative across heterogeneous views. This perspective reconciles
 high-dimensional anatomical complexity with the simplicity of Euclidean
 statistics, providing a robust, likelihood-based alternative to traditional
 iterative group-wise registration.
-
-This also formalizes the geometric viewpoint using a Glow-style architecture to
-provide an exact, invertible statistical modeling framework. Each image is
-mapped bijectively to a latent vector $z$, where the distribution is governed by
-a centered Gaussian with unit variance. Because the origin $z=0$ remains the
-central tendency in this latent space, inverting this point through the network
-yields a latent-mean reconstruction, $\hat{x}_0 = f^{-1}(0)$. This object
-effectively concentrates cohort-common signal under the model’s likelihood while
-suppressing idiosyncratic variations that do not persist across subjects. By
-explicitly promoting a shared subspace through latent alignment, $\hat{x}_0$
-reflects stable population anatomy rather than shape or intensity outliers,
-allowing the resulting shared-latent image to function as a contrast-robust
-population representative across heterogeneous views.
 
 The relationship to CA can be further elucidated by comparing objective
 functions. CA-based templates minimize geodesic energy under a diffeomorphic
