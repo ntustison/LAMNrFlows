@@ -4,6 +4,35 @@
 
 ## Glow-based LAMNr Flows
 
+### Justification for 2D Slice-Based Methodology
+
+The decision to conduct the majority of experiments—specifically hyperparameter optimization and ablation studies—using 2D slice-based representations (**256 x 256**) instead of full 3D volumes was necessitated by the **cubic scaling laws** of memory consumption inherent to Normalizing Flows.
+
+#### Computational Complexity and VRAM Constraints
+Glow-based architectures require storing all intermediate activations for both forward and backward passes to facilitate exact gradient computation. While 2D convolutional neural networks (CNNs) scale quadratically ($N^2$) with spatial resolution, 3D architectures scale cubically ($N^3$). The disparity in voxel count across resolutions is detailed in the table below:
+
+| Dimensionality | Resolution | Total Units (Pixels/Voxels) | Scaling Factor (vs. $256^2$) |
+| :--- | :--- | :--- | :--- |
+| **2D** | 256 x 256 | 65,536 | 1x |
+| **3D** | 64 x 64 x 64 | 262,144 | 4x |
+| **3D** | 128 x 128 x 128 | 2,097,152 | 32x |
+| **3D** | 256 x 256 x 256 | 16,777,216 | 256x |
+
+#### Hardware Limitations
+Experimental procedures were executed using a single **NVIDIA RTX A6000 GPU (48 GB VRAM)**. Empirical measurements indicated that at a **64 x 64 x 64** resolution with an architecture depth of **L = 4** and width **K = 16**, VRAM consumption reached **29 GB** with a micro-batch size of **8**. Projections for higher resolutions indicate that:
+
+* **128^3 Resolution**: Memory requirements for a batch size of **1** exceed the **48 GB** threshold using standard backpropagation.
+* **256^3 Resolution**: Estimated memory requirements exceed **320 GB**, rendering training impossible on standard workstation hardware without distributed model parallelism or reversible networking implementations.
+
+#### Strategic Implementation
+
+A "2D-first" approach allowed for rapid iteration through the hyperparameter
+space—including learning rates, coupling layer complexity, and alignment loss
+weights—while maintaining an effective batch size of 128 to ensure
+convergence stability and robust ActNorm statistics. Findings were subsequently
+validated at $64 \times 64 \times 64$ resolution to ensure geometric and volumetric
+consistency.
+
 ### Leveraging approximate template $\leftrightsquigarrow$ subject geodesic linearity for image registration via latent winsorization
 
 To evaluate the utility of the learned latent representations for downstream
