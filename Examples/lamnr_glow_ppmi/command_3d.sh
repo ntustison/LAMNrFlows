@@ -7,14 +7,14 @@ EXTRA=0                       # phase 2
 TOTAL=$((ITERATIONS + EXTRA))  # horizon for phase-1 aug schedule
 
 # ---------- 3D arch ----------
-H=32
-W=32
-D=32               # depth for 3D Glow
-L=3
+H=64
+W=64
+D=64               # depth for 3D Glow
+L=4
 K=32
 HIDDEN=64
-BATCH=64             # start conservative in 3D; bump if VRAM allows
-GRAD_ACCUM=2
+BATCH=8             # start conservative in 3D; bump if VRAM allows
+GRAD_ACCUM=16
 NUM_WORKERS=4
 
 PLATEAU_FACTOR=0.999999
@@ -41,6 +41,11 @@ SCREEN_WARMUP=1000          # start screening after N iters
 SCREEN_REFRESH=5000         # 0 = discover once; else refresh cadence
 CCA_RIDGE=1e-3              # stability for CCA
 PREFILTER_FRAC=0.5          # HSIC Pearson prefilter (ignored for CCA)
+
+# sampling / eval
+SAMPLE_TEMP=0.5
+EVAL_INTERVAL=1000
+PLOT_INTERVAL=1000
 
 # Optimization
 LR=2.5e-5      
@@ -88,7 +93,7 @@ python train_3d.py \
   --lr ${LR} --warmup-iters ${WARMUP} \
   --lr-decay-gamma 1.0 \
   --lr-decay-steps 0 \
-  --eval-interval 1000 --plot-interval 1000 \
+  --eval-interval ${EVAL_INTERVAL} --plot-interval ${PLOT_INTERVAL} \
   --grad-clip 1.0 \
   --plateau-factor ${PLATEAU_FACTOR} --plateau-patience ${PLATEAU_PATIENCE} \
   --plateau-threshold ${PLATEAU_THRESHOLD} --plateau-cooldown ${PLATEAU_COOLDOWN} \
@@ -96,7 +101,7 @@ python train_3d.py \
   --train-samples 3000 --val-samples 128 \
   --smooth-alpha 0.05 \
   --sample-mode model \
-  --sample-temp 1.0 \
+  --sample-temp ${SAMPLE_TEMP} \
   --weighting fixed \
   --align "${ALIGN}" \
   --align-weight "${ALIGN_WEIGHT}" \

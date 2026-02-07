@@ -912,6 +912,28 @@ def _save_metric_plots(csv_path: Path, out_dir: Path):
     except Exception:
         pass
 
+import shutil
+
+def cleanup_checkpoints_3d(run_dir: Path, keep_every: int = 20000):
+    """
+    Nettoie les points de contrôle 3D pour économiser l'espace disque.
+    Vérifie également l'espace restant sur la partition.
+    """
+    # 1. Suppression des versions intermédiaires
+    for f in run_dir.glob("training_state_it*.pt"):
+        try:
+            it_num = int(f.stem.split('it')[-1])
+            if it_num % keep_every != 0:
+                f.unlink()
+        except (ValueError, IndexError):
+            continue
+
+    # 2. Alerte si l'espace disque est critique (< 50 Go pour le 3D)
+    total, used, free = shutil.disk_usage(run_dir)
+    free_gb = free // (2**30)
+    if free_gb < 50:
+        print(f"[ALERTE DISQUE] Espace restant critique : {free_gb} Go.")
+
 # ------------------------- data -------------------------
 
 def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch, num_workers,
@@ -2084,9 +2106,18 @@ def main():
                 "config": vars(args),
                 "scaler": (scaler.state_dict() if scaler is not None and scaler.is_enabled() else None),
             }
+            # Sauvegarde 'latest' pour --auto-resume
             torch.save(blob, state_path)
-            tqdm.write(f"[ckpt] saved: {str(state_path)}")
-
+            
+            # Sauvegarde du jalon horodaté
+            iter_state_path = run_dir / f"training_state_it{it:06d}.pt"
+            torch.save(blob, iter_state_path)
+            
+            # Nettoyage spécifique 3D (jalons toutes les 20k itérations)
+            cleanup_checkpoints_3d(run_dir, keep_every=20000)
+            
+            tqdm.write(f"[ckpt 3D] Jalon it{it} sauvegardé. Espace disque vérifié.")
+            
     pbar.close()
     print("Done. Run dir:", str(run_dir))
 

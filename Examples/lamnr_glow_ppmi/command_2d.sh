@@ -4,7 +4,7 @@ set -euo pipefail
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # total steps
-iterations=120000
+iterations=100000
 
 # model / data
 H=256; W=256; L=6; K=12; hidden=192
@@ -12,7 +12,7 @@ SLICE_IDX=138
 
 # optimization
 LR=5e-5
-WARMUP=0
+WARMUP=500
 WEIGHT_DECAY=1e-6
 BATCH=16
 GRAD_ACCUM=8

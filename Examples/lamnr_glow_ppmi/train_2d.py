@@ -680,6 +680,20 @@ def _save_metric_plots(csv_path: Path, out_dir: Path):
     except Exception:
         pass
 
+def cleanup_checkpoints(run_dir: Path, keep_every: int = 10000):
+    """
+    Supprime les points de contrôle versionnés qui ne sont pas des jalons.
+    Conserve uniquement les fichiers dont l'itération est un multiple de keep_every.
+    """
+    for f in run_dir.glob("training_state_it*.pt"):
+        try:
+            # Extrait le numéro d'itération du nom de fichier
+            it_num = int(f.stem.split('it')[-1])
+            if it_num % keep_every != 0:
+                f.unlink()  # Supprime le fichier
+        except (ValueError, IndexError):
+            continue
+
 # ------------------------- data -------------------------
 
 def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch, num_workers,
@@ -1637,8 +1651,18 @@ def main():
                 "config": vars(args),
                 "scaler": (scaler.state_dict() if scaler is not None and scaler.is_enabled() else None),
             }
+            
+            # 1. Sauvegarde du fichier 'latest' pour l'auto-resume
             torch.save(blob, state_path)
-            tqdm.write(f"[ckpt] saved: {str(state_path)}")
+            
+            # 2. Sauvegarde d'une version horodatée
+            iter_state_path = run_dir / f"training_state_it{it:06d}.pt"
+            torch.save(blob, iter_state_path)
+            
+            # 3. Nettoyage : ne garder que les jalons (ex: tous les 10 000 itérations)
+            cleanup_checkpoints(run_dir, keep_every=10000)
+            
+            tqdm.write(f"[ckpt] saved: {str(iter_state_path)} (and updated latest)")
 
     pbar.close()
     print("Done. Run dir:", str(run_dir))
