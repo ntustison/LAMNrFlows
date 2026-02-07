@@ -177,13 +177,15 @@ multiview “whitener” that maps each tabular view to a standardized latent
 latents \(z^{(v)}\) and the whitened coordinates \(\varepsilon^{(v)}\) can be
 exported for downstream Gaussian modeling and diagnostics. This Gaussian–PCA
 base is particularly useful when tabular views have different numbers of
-columns. The per-view PCA yields an orthonormal, variance-ordered latent in
+features. The per-view PCA yields an orthonormal, variance-ordered latent in
 which we can select a common rank $r$ for alignment, producing matched-
 dimension standardized coordinates \(\varepsilon^{(v)} \in \mathbb{R}^r\)
 without altering the exact invertibility of the flow (truncation is used only
-for the alignment head). Whitening also improves the conditioning of the
+for the alignment head). 
+
+<!-- Whitening also improves the conditioning of the
 covariance estimates used in the conditional-Gaussian step by reducing
-collinearity and stabilizing \(\Sigma_{OO}^{-1}\). 
+collinearity and stabilizing \(\Sigma_{OO}^{-1}\).  -->
 
 
 ### Image views via Glow-based multiscale flows
