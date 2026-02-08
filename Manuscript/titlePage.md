@@ -11,7 +11,7 @@ $ $
 
 \LARGE
 
-{\bf Latent-Aligned Multiview Normalizing Flows}
+{\bf Deep Computational Anatomy via LAMNr Flows}
 
 \vspace{1.0 cm}
 
