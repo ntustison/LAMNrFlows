@@ -103,6 +103,25 @@ templates discussed below in the context of the Fréchet mean.
 
 ## A computational anatomy perspective
 
+\begin{figure*}[!t]
+    \centering
+    \includegraphics[width=\textwidth]{Figures/lamnr_templates.pdf}
+    \caption{ 
+    (Left) Anatomical variation in the observed data space $\mathcal{X}$ forms a
+    non-linear manifold, visualized by the warped coordinate grid and the
+    curved, non-Euclidean paths connecting individual subjects. (Right) The
+    LAMNr framework learns a bijective mapping $f_{\theta}: \mathcal{X}
+    \rightarrow \mathcal{Z}$ that transforms this manifold into a symmetric,
+    centered Gaussian latent space $\mathcal{Z}$. In this linearized geometry,
+    the origin $z=0$ represents the population mode and mean. Inverting this
+    origin yields the "latent-mean" template $\hat{x}_0 = f^{-1}(0)$ (central
+    brain), which serves as a contrast-robust representative of the cohort's
+    anatomy. The regular grid in $\mathcal{Z}$ illustrates how the flow
+    "unfolds" anatomical complexity, allowing straight lines in latent space to
+    approximate geodesic paths in the image domain.}
+    \label{fig:lamnr_manifold}
+\end{figure*}
+
 Beyond the proposed technical advancements, another contribution of this work is
 the exploratory bridge it establishes between deep statistical and generative
 modeling and the foundational principles of computational anatomy (CA). The
