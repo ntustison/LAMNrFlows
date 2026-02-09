@@ -11,7 +11,7 @@ $ $
 
 \LARGE
 
-{\bf Deep Computational Anatomy via Latent-Aligned Normalizing Flows}
+{\bf Deep Computational Anatomy via Latent-Aligned Multiview Normalizing Flows}
 
 \vspace{1.0 cm}
 
