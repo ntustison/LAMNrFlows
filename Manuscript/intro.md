@@ -101,6 +101,28 @@ geometrically-informed coordinate system, facilitating contrast-robust
 population representatives and providing a direct path to the "latent-mean"
 templates discussed below in the context of the Fréchet mean.
 
+Additionally, the development of LAMNr flows represents a strategic evolution in
+ensuring topological integrity within neural density estimators. Historically,
+models like Deep Diffeomorphic Normalizing Flows (DDNF) [@salman2018deep]
+enforced smoothness by integrating time-varying velocity fields via Ordinary
+Differential Equations (ODEs). While this continuous formulation guarantees a
+diffeomorphic mapping, the computational cost of ODE integration is often
+prohibitive for large-scale medical imaging applications. To address this, LAMNr
+transitions from the continuous "geodesic flow" of DDNF to the discrete,
+efficient architecture of Glow [@kingma2018glow]. While coupling-based flows
+like Glow are mathematically bijective, they lack the inherent temporal
+continuity that prevents anatomically "jagged" deformations.  By aligning
+disparate modalities and views into a shared latent representation, the LAMNr
+flows model is steered to prioritizing robust, underlying anatomical structures
+over idiosyncratic noise.  Furthermore, the inclusion of **training jitter
+serves as an additional spatial regularizer. By introducing stochastic
+intensity- and shape-based perturbations during the learning phase, the model is
+discouraged from over-fitting to local voxel intensities. This forces
+convergence on more generalized anatomical representations, further stabilizing
+the Jacobian determinant and ensuring that the discrete transitions of the Glow
+architecture maintain the smooth, diffeomorphic properties required for robust
+computational anatomy.
+
 ## A computational anatomy perspective
 
 \begin{figure*}[!t]
