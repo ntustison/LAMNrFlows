@@ -5,12 +5,16 @@
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{Figures/clinical_comparison_multipanel.png}
-    \caption{\textbf{Clinical Predictive Power: LAMNr vs. Baselines.} 
-    The forest plot illustrates the correlation uplift ($\Delta r$) of the LAMNr framework compared to the SiMLR linear baseline (blue) and the unconstrained ablation model ($\lambda = 0$, red). 
-    Error bars represent the 95\% confidence intervals derived from 1000 bootstrap resamples. 
-    \textbf{Panel A} displays results for the NNL cohort, highlighting significant non-linear gains in cognitive measures. 
-    \textbf{Panel B} displays results for the PPMI cohort, where linear models remain highly competitive. 
-    Significant improvements ($q < 0.05$, FDR corrected) are indicated by intervals that do not cross the zero-reference line.}
+    \caption{\textbf{LAMNr Clinical Predictive Power.} The forest
+    plot illustrates the correlation uplift ($\Delta r$) of the LAMNr framework
+    compared to the SiMLR linear baseline (red) and the unconstrained multi-view
+    model ($\lambda = 0$, blue). Error bars represent the 95\% confidence
+    intervals derived from 1000 bootstrap resamples. \textbf{Top panel} displays
+    results for the NNL cohort, highlighting significant non-linear gains in
+    cognitive measures. \textbf{Bottom panel} displays results for the PPMI cohort,
+    where linear models remain highly competitive. Significant improvements ($q
+    < 0.05$, FDR corrected) are indicated by intervals that do not cross the
+    zero-reference line.}
     \label{fig:clinical_comparison}
 \end{figure}
 
