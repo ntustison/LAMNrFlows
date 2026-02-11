@@ -1,20 +1,31 @@
+
+\clearpage
+
 ## Tabular LAMNr Flows
+
+To establish a robust latent representation for tabular data, we utilized the recent
+Normative Neurological Health Embedding which constitutes a large-scale, multi-cohort
+evaluation of the SiMLR framework [@Avants:2025aa].  Employing image-derived phenotypes
+
 
 ### Architecture and Hyperparameter Selection
 
-To establish a robust latent representation for tabular data, we utilized the
-pre-trained Similarity-driven Multiview Linear Reconstruction (SiMLR) framework
-[@Tustison:2024aa]. Specifically, we projected the high-dimensional NNL and PPMI
+
+Specifically, we projected the high-dimensional NNL and PPMI
 input features into a shared, lower-dimensional basis ($k=31$) using the
 established SiMLR projection matrices. These matrices encapsulate
 population-level covariance structures derived from large-scale neuroimaging
 initiatives, providing a stable initialization for our generative modeling.
 
-Consistent with the complexity of this pre-trained SiMLR basis, we adopted a RealNVP-style normalizing flow architecture. The network capacity is controlled by two primary hyperparameters:
+Consistent with the complexity of this pre-trained SiMLR basis, we adopted a
+RealNVP-style normalizing flow architecture. The network capacity is controlled
+by two primary hyperparameters:
 (i) **the coupling depth $K$** (number of transform layers), and
 (ii) **the conditioner width `hidden_channels` ($HC$)** (neuronal width).
 
-Based on the architectural specifications of the SiMLR framework and prior benchmarks on tabular neuroimaging data [@Tustison:2024aa], we initialized our search around a baseline configuration of **$K=4$** and **$HC=80$**.
+Based on the architectural specifications of the SiMLR framework and prior
+benchmarks on tabular neuroimaging data [@Tustison:2024aa], we initialized our
+search around a baseline configuration of **$K=4$** and **$HC=80$**.
 
 ### Targeted Validation on Clinical Cohorts
 
