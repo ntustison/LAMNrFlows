@@ -116,8 +116,8 @@ continuity that prevents anatomically "jagged" deformations.
 By aligning disparate modalities and views into a shared latent representation, 
 the LAMNr flows model is steered to prioritizing robust, underlying anatomical 
 structures over idiosyncratic noise. This Latent-Alignment acts in synergy with 
-specific numerical safeguards—such as bounding the scale parameters within the 
-affine coupling layers—to mitigate "gradient blow-ups" during training. 
+specific numerical safeguards, such as bounding the scale parameters within the 
+affine coupling layers, to mitigate gradient blow-ups during training. 
 Furthermore, the inclusion of training jitter serves as an additional spatial 
 regularizer. By introducing stochastic intensity- and shape-based perturbations 
 during the learning phase, the model is discouraged from over-fitting to local 
