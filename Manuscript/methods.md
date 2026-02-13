@@ -212,7 +212,7 @@ per-level alignment and post-hoc Gaussian conditioning.  We therefore adopt
 Glow-style multiscale flows that offer single-pass, exact encoding/decoding in
 image space with explicit latent access [@kingma2018glow].
 
-Base distribution for image latents (Glow-style channel Gaussian) For image
+__Base distribution for image latents (Glow-style channel Gaussian).__ For image
 views we use a channel-wise diagonal Gaussian (“Glow base”) with one mean and
 one log-scale per channel, broadcast across spatial locations. Let \(z \in
 \mathbb{R}^{C\times N_1\times \dots \times N_S}\) with \(S\in\{2,3\}\) spatial

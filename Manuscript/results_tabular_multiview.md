@@ -1,22 +1,65 @@
 
 
-## Nonlinear LAMNr comparison with the SiMLR NNHEmbed Framework
+## Nonlinear LAMNr Comparison with the SiMLR NNHEmbed Framework
 
-\begin{figure}[htbp]
+Having established a stable hyperparameter configuration for individual views,
+we next evaluate the capacity of LAMNr flows to align these latent spaces into a
+coherent multiview representation. We compare the predictive performance of
+LAMNr-derived shared features against the linear SiMLR baselines used in the
+NNHEmbed framework [@Avants:2025aa].
+
+\begin{figure*}[!htbp]
     \centering
     \includegraphics[width=\textwidth]{Figures/clinical_comparison_multipanel.png}
-    \caption{\textbf{LAMNr Clinical Predictive Power.} The forest
-    plot illustrates the correlation uplift ($\Delta r$) of the LAMNr framework
-    compared to the SiMLR linear baseline (red) and the unconstrained multi-view
-    model ($\lambda = 0$, blue). Error bars represent the 95\% confidence
-    intervals derived from 1000 bootstrap resamples. \textbf{Top panel} displays
-    results for the NNL cohort, highlighting significant non-linear gains in
-    cognitive measures. \textbf{Bottom panel} displays results for the PPMI cohort,
-    where linear models remain highly competitive. Significant improvements ($q
-    < 0.05$, FDR corrected) are indicated by intervals that do not cross the
+    \caption{\textbf{LAMNr Clinical Predictive Power.} The forest plot illustrates 
+    the correlation uplift ($\Delta r$) across two levels of comparison: 
+    (1) the gain from non-linear manifold mapping, represented by the difference 
+    between LAMNr and the linear SiMLR baseline (\textbf{red intervals}), and 
+    (2) the gain from latent alignment, represented by the difference between 
+    the aligned LAMNr model and an unconstrained multi-view baseline ($\lambda = 0$, 
+    \textbf{blue intervals}). Error bars represent the 95\% confidence intervals 
+    derived from 1000 bootstrap resamples. \textbf{Top panel} displays results for 
+    the NNL cohort, showing significant non-linear gains in memory and executive 
+    function. \textbf{Bottom panel} displays results for the PPMI cohort, where 
+    linear models remain highly competitive. Significant improvements 
+    ($q < 0.05$, FDR corrected) are indicated by intervals that do not cross the 
     zero-reference line.}
     \label{fig:clinical_comparison}
-\end{figure}
+\end{figure*}
+
+### Clinical Predictive Power and Correlation Uplift
+
+As shown in Figure \ref{fig:clinical_comparison}, LAMNr flows demonstrate
+significant performance gains when predicting complex cognitive and functional
+phenotypes compared to linear subspace projections. In the NNL cohort, the
+nonlinear mapping provides a substantial "correlation uplift" ($\Delta r$)
+relative to SiMLR across multiple domains, notably in *Recall Delayed*
+($\Delta r = 0.190$, $q < 10^{-3}$) and *Working Memory* ($\Delta r = 0.177$,
+$q = 0.024$). In contrast, for *Reading Ability*, the nonlinear model shows a
+slight but non-significant decrease compared to the linear baseline ($\Delta r =
+-0.004$, $q = 0.960$). However, when compared to an unconstrained multiview
+model ($\lambda = 0$), LAMNr alignment still retains a positive trend ($\Delta r
+= 0.069$), suggesting that while linearity suffices for reading tasks, latent
+alignment remains beneficial for overall model stability.
+
+Interestingly, the performance profiles differ across populations. While the NNL
+cohort exhibits clear benefits from nonlinear alignment, the linear SiMLR models
+remain highly competitive in the PPMI cohort. This divergence likely reflects
+the different variance structures of the two datasets: the NNL cohort captures a
+broad spectrum of healthy variation where subtle nonlinear couplings are
+prevalent, whereas the PPMI cohort is dominated by the strong, relatively linear
+pathological signal of Parkinson’s disease progression.
+
+### Alignment Sensitivity
+
+A secondary advantage of the tabular LAMNr framework is the ability to
+efficiently sweep alignment objectives. Our results indicate that
+covariance-based regularization (VICReg) provides the most stable latent
+alignment for high-dimensional IDPs, effectively balancing the preservation of
+view-specific details with the extraction of shared anatomical features. This
+observation justifies our use of VICReg as the primary alignment objective for
+the subsequent high-resolution Glow experiments, where exhaustive objective
+sweeps are computationally prohibitive.
 
 <!-- \begin{table}[ht]
 \centering

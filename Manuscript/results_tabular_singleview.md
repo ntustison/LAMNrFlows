@@ -3,42 +3,52 @@
 
 ## Tabular LAMNr Flows
 
-To establish a robust latent representation for tabular data, we utilized the recent
-Normative Neurological Health Embedding which constitutes a large-scale, multi-cohort
-evaluation of the SiMLR framework [@Avants:2025aa].  Employing image-derived phenotypes
+Our tabular evaluation leverages the Normative Neurological Health Embedding
+(NNHEmbed) framework [@Avants:2025aa]. To ensure methodological consistency with
+population-level priors while adhering to data usage constraints, we utilize
+optimized SiMLR-based projection matrices for multi-modal data derived from UK
+Biobank (UKBB) [@Miller2016aa]. These IDPs, derived from T1-weighted MRI (T1-w),
+diffusion tensor imaging (DTI), and resting-stage fMRI (rsfMRI), were generated
+using ANTsPyMM[^antspymm], an ANTsX-based utility for generating tabular IDP
+data from neuroimaging cohorts.  For NNHEmbed, the resulting views comprised 51
+T1-w IDPs, 77 DTI IDPs, and 484 rsfMRI IDPs. The UKBB-based projection matrices
+map the input features of these three views from the Normative Neurological
+Library (NNL) [@Gage:2024aa] and the Parkinson Progression Marker Initiative
+(PPMI) [@PPMI:2011aa] cohorts into a shared $k=31$ dimensional basis, which then
+serves as the input for our LAMNr flows models.
 
+[^antspymm]: https://github.com/ANTsX/ANTsPyMM
 
 ### Architecture and Hyperparameter Selection
 
+Prior to the multiview SiMLR and LAMNr flows comparison, we used the original
+NNL and PPMI IDP data to determine optimal hyperparameter configuration of the
+RealNVP-style normalizing flow architecture across the single modalities in
+terms of trained likelihoods, i.e., bits-per-dimension (BPD). The network
+capacity is controlled by two primary hyperparameters: (i) the coupling depth
+$K$ (number of transform layers), and (ii) the conditioner width or hidden
+channels ($HC$).
 
-Specifically, we projected the high-dimensional NNL and PPMI
-input features into a shared, lower-dimensional basis ($k=31$) using the
-established SiMLR projection matrices. These matrices encapsulate
-population-level covariance structures derived from large-scale neuroimaging
-initiatives, providing a stable initialization for our generative modeling.
+Rather than performing an exhaustive 2D grid search over a broad parameter
+space, we restricted our evaluation to a targeted window ($K \in \{3, 4, 5\}$,
+$HC \in \{64, 80, 96\}$). This focused selection is informed by a caution
+against overfitting, particularly with our cohort sizes, and the general Minimum
+Description Length (MDL) model selection principle. An over-parameterized model
+risks capturing idiosyncratic noise rather than the underlying manifold
+geometry. By selecting the smallest architecture capable of minimizing the
+validation negative log-likelihood, we ensure that the model remains a compact
+description of the anatomical distribution. 
 
-Consistent with the complexity of this pre-trained SiMLR basis, we adopted a
-RealNVP-style normalizing flow architecture. The network capacity is controlled
-by two primary hyperparameters:
-(i) **the coupling depth $K$** (number of transform layers), and
-(ii) **the conditioner width `hidden_channels` ($HC$)** (neuronal width).
+Our validation sweep across the NNL and PPMI cohorts confirmed the robustness of
+this architectural window. For the NNL cohort ($N = 346$), a depth of
+$K=4$ was consistently optimal across T1, DTI, and rsfMRI modalities,
+effectively minimizing the validation negative log-likelihood. In the PPMI
+cohort ($N = 1769$), while increasing capacity to $K=5$ yielded slightly
+lower likelihoods, the improvement was negligible ($\Delta \text{BPD} < 0.001$
+for DTI) and did not justify the additional model complexity. Prioritizing model
+parsimony and methodological consistency between datasets, we fixed the
+configuration at $K=4$ and $HC=80$ for all subsequent multiview experiments.
+This stable parametric baseline ensures that the learned latent representations
+are comparable across different clinical populations while avoiding overfitting
+to dataset-specific noise.
 
-Based on the architectural specifications of the SiMLR framework and prior
-benchmarks on tabular neuroimaging data [@Tustison:2024aa], we initialized our
-search around a baseline configuration of **$K=4$** and **$HC=80$**.
-
-### Targeted Validation on Clinical Cohorts
-
-To verify that this architecture—originally calibrated for large-scale
-population variance—was appropriate for the specific distributions of our
-smaller clinical cohorts (NNL, $N \approx 360$; PPMI, $N \approx 400$), we
-performed a targeted validation sweep. We evaluated a focused grid of
-hyperparameters ($K \in \{3, 4, 5\}$, $HC \in \{64, 80, 96\}$) to assess model
-stability and generalization.
-
-**Results:**
-The validation confirmed the robustness of the chosen architecture:
-* **NNL Cohort:** The configuration $K=4$ was consistently identified as optimal across all modalities (T1, DTI, rsfMRI), minimizing the validation negative log-likelihood (bits per dimension).
-* **PPMI Cohort:** While a slightly higher capacity configuration ($K=5$) yielded a negligible improvement in likelihood ($\Delta \text{BPD} < 0.001$), the baseline architecture remained highly competitive.
-
-Prioritizing model parsimony and methodological consistency across datasets, we fixed the architecture at **$K=4$** and **$HC=80$** for all subsequent analyses. This approach ensures that the learned latent representations ($Z$) are comparable across different clinical populations while avoiding overfitting to dataset-specific noise.

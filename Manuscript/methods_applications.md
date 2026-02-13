@@ -16,7 +16,7 @@ specifying a generative model \(p_X(x)\) in data space, but with the advantage
 that inference and conditioning can be carried out where the geometry is
 simpler.
 
-LAMNr Flows exploit this by choosing a multivariate Gaussian model on the
+LAMNr flows exploit this by choosing a multivariate Gaussian model on the
 concatenated latents. This choice is deliberately simple: flows absorb the
 complex, non-Gaussian aspects of each view into the invertible mappings
 \(f^{(v)}\), so that the residual cross-view structure can be captured by a

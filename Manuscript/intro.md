@@ -193,9 +193,25 @@ If the network is locally well-conditioned around the population and the cohort
 lies in a near-linear region of latent space (as is often the case for
 high-quality, healthy-control datasets), then Euclidean barycenters in $z$-space
 provide first-order approximations to barycenters in image space with respect to
-the pullback metric.[^gx] Under these conditions, $\hat{x}_0$ acts as a
+the pullback metric, $g_x$.[^gx] Under these conditions, $\hat{x}_0$ acts as a
 practical proxy for a Fréchet mean as it is the image at the center of the
 distribution induced by the learned bijection.[^CA]
+
+<!--
+To maintain the validity of the pullback metric $g_x = J_f(x)^\top J_f(x)$, we
+implemented specific numerical constraints within the affine coupling layers. By
+bounding the scale parameters, we prevent the Jacobian determinant from
+approaching zero or exploding, which ensures that the induced Riemannian metric
+remains well-conditioned. This stabilization is critical for the process: it
+ensures that the latent origin ($z=0$) remains a stable, computationally
+efficient approximation of the population Fréchet mean. By preventing extreme
+local distortions in $g_x$, these numerical safeguards ensure that straight
+lines in the latent space correspond to smooth, length-preserving paths in the
+image space. This effectively linearizes the underlying geodesic structure of
+the cohort, allowing for rigorous statistical analysis and representative
+"atlas" reconstruction without the overhead of iterative Karcher mean
+computations. 
+-->
 
 [^gx]: The pullback metric $g_x = J_f(x)^\top J_f(x)$ is the flow-induced
 Riemannian metric that makes latent straight lines locally length preserving.
