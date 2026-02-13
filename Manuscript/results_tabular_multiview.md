@@ -1,12 +1,21 @@
 
 
-## Nonlinear LAMNr Comparison with the SiMLR NNHEmbed Framework
+## Multiview Comparison with the SiMLR NNHEmbed Framework
 
 Having established a stable hyperparameter configuration for individual views,
 we next evaluate the capacity of LAMNr flows to align these latent spaces into a
-coherent multiview representation. We compare the predictive performance of
-LAMNr-derived shared features against the linear SiMLR baselines used in the
-NNHEmbed framework [@Avants:2025aa].
+coherent multiview representation. We systematically compare several
+latent-alignment strategies, prioritizing methods that balance computational
+efficiency with the ability to capture higher-order interactions. Specifically,
+we evaluate covariance-based regularization (VICReg), kernel-based independence
+measures (HSIC), and contrastive learning objectives (InfoNCE). We deliberately
+favored VICReg over related methods like Barlow-Twins or Pearson correlation as
+these share similar underlying principles of redundancy reduction, VICReg’s
+explicit constraints on variance and covariance provide superior numerical
+stability for high-dimensional IDPs, while HSIC and InfoNCE better preserve the
+non-linear manifold structure that linear metrics often collapse. The predictive
+performance of these LAMNr-derived shared features is then benchmarked against
+the linear SiMLR baselines used in the NNHEmbed framework [@Avants:2025aa].
 
 \begin{figure*}[!htbp]
     \centering
