@@ -113,18 +113,19 @@ efficient architecture of Glow [@kingma2018glow]. While coupling-based flows
 like Glow are mathematically bijective, they lack the inherent temporal
 continuity that prevents anatomically "jagged" deformations. 
 
-By aligning disparate modalities and views into a shared latent representation, 
-the LAMNr flows model is steered to prioritizing robust, underlying anatomical 
-structures over idiosyncratic noise. This Latent-Alignment acts in synergy with 
-specific numerical safeguards, such as bounding the scale parameters within the 
-affine coupling layers, to mitigate gradient blow-ups during training. 
-Furthermore, the inclusion of training jitter serves as an additional spatial 
-regularizer. By introducing stochastic intensity- and shape-based perturbations 
-during the learning phase, the model is discouraged from over-fitting to local 
-voxel intensities. Together, these constraints force convergence on more 
-generalized anatomical representations, stabilizing the Jacobian determinant and 
-ensuring that the discrete transitions of the Glow architecture maintain the 
-smooth, diffeomorphic properties required for robust computational anatomy.
+By aligning disparate modalities and views into a shared latent representation,
+the LAMNr flows model is steered to prioritizing robust, underlying anatomical
+structures over idiosyncratic noise. This Latent-Alignment acts in synergy with
+specific numerical safeguards, such as bounding the scale parameters within the
+affine coupling layers, to mitigate gradient blow-ups during training.
+Furthermore, the inclusion of training jitter serves as an additional
+regularizer (i.e., "dequantization" [@ho2019flowpp]). By introducing stochastic
+intensity- and shape-based perturbations during the learning phase, the model is
+discouraged from over-fitting to local voxel intensities. Together, these
+constraints force convergence on more generalized anatomical representations,
+stabilizing the Jacobian determinant and ensuring that the discrete transitions
+of the Glow architecture maintain the smooth, diffeomorphic properties required
+for robust computational anatomy.
 
 ## A computational anatomy perspective
 

@@ -150,6 +150,9 @@ same methodological framework.
   \label{fig:aug-schedule}
 \end{figure*}
 
+To ensure stable density estimation and prevent degenerate likelihoods due to
+data quantization, we also employ uniform dequantization (jittering) during training,
+following the variational framework established in Flow++ [@ho2019flowpp].
 We apply lightweight, label-free augmentations during maximum-likelihood
 training to improve robustness without changing the model’s exact likelihood
 computation (augmentations act on inputs only)
