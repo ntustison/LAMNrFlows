@@ -3,10 +3,10 @@
 
 ## Tabular LAMNr Flows
 
-Our tabular evaluation leverages the Normative Neurological Health Embedding
-(NNHEmbed) framework [@Avants:2025aa]. To ensure methodological consistency with
-population-level priors while adhering to data usage constraints, we utilize
-optimized SiMLR-based projection matrices for multi-modal data derived from UK
+Our tabular evaluation leverages . To ensure methodological consistency with
+population-level priors while adhering to data usage constraints, we leverage
+the Normative Neurological Health Embedding (NNHEmbed) framework [@Avants:2025aa], 
+an optimized SiMLR-based multimodal modeling framework derived from IDPs from UK
 Biobank (UKBB) [@Miller2016aa]. These IDPs, derived from T1-weighted MRI (T1-w),
 diffusion tensor imaging (DTI), and resting-stage fMRI (rsfMRI), were generated
 using ANTsPyMM[^antspymm], an ANTsX-based utility for generating tabular IDP
@@ -22,7 +22,7 @@ serves as the input for our LAMNr flows models.
 ### Architecture and Hyperparameter Selection
 
 Prior to the multiview SiMLR and LAMNr flows comparison, we used the original
-NNL and PPMI IDP data to determine optimal hyperparameter configuration of the
+NNL and PPMI IDP data to determine optimal hyperparameter settings of the
 RealNVP-style normalizing flow architecture across the single modalities in
 terms of trained likelihoods, i.e., bits-per-dimension (BPD). The network
 capacity is controlled by two primary hyperparameters: (i) the coupling depth
