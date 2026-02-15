@@ -7,20 +7,24 @@
 
 For a single view \(v\), a normalizing flow with parameters \(\theta^{(v)}\) is
 an invertible mapping
-\[
+
+\begin{equation}
 f^{(v)}_{\theta} : \mathcal{X}^{(v)} \to \mathcal{Z}^{(v)}, \quad
 z_n^{(v)} = f^{(v)}_{\theta}(x_n^{(v)}),
-\]
+\end{equation}
+
 that sends observed data \(x_n^{(v)}\) to a latent space
 \(\mathcal{Z}^{(v)}\) with a simple base density, typically
 \(p_Z(z) = \mathcal{N}(0, I)\). The induced density on \(\mathcal{X}^{(v)}\)
 follows from the change-of-variables formula:
-\[
+
+\begin{equation}
 \log p_{\theta}(x_n^{(v)}) =
 \log p_Z\bigl(z_n^{(v)}\bigr)
 + \log \bigl|\det \partial f^{(v)}_{\theta} / \partial x_n^{(v)}\bigr|,
-\]
-which we can evaluate exactly for the RealNVP-style [@dinh2016realnvp] and Glow
+\end{equation}
+
+which can be evaluated exactly for the RealNVP [@dinh2016realnvp] and Glow
 [@kingma2018glow] architectures used here. Maximum-likelihood estimation chooses
 \(\theta^{(v)}\) to maximize the sum of log-likelihoods over subjects, or
 equivalently to minimize the average negative log-likelihood
@@ -30,24 +34,27 @@ Each subject \(n\) has measurements \(\{x_n^{(v)}\}_{v=1}^V\) across one or more
 views \(v = 1,\dots,V\). We instantiate one flow per view and train them jointly on
 subject-matched minibatches. If we consider only the flow likelihoods, the pure
 maximum-likelihood objective is
-\[
+
+\begin{equation}
 \mathcal{L}_{\text{like}}(\theta)
 = \frac{1}{N} \sum_{n=1}^N \sum_{v=1}^V
 \bigl[- \log p_{\theta}(x_n^{(v)})\bigr],
-\]
+\end{equation}
+
 where \(\theta = \{\theta^{(v)}\}_{v=1}^V\) collects all view-specific
 parameters. This term ensures that each per-view flow is an exact-likelihood
-model of its corresponding data distribution.
+model of its corresponding data distribution. The multiview approach of LAMNr
+flows leverages the exposure of latent space provided by RealNVP and Glow
+architectures. For each view and subject we write
 
-The LAMNr flows multiview approach leverages the exposure of latent space. For
-each view and subject we write
-\[
+\begin{equation}
 z_n^{(v)} = \bigl[z^{(v)}_{S,n}, \; z^{(v)}_{P,n}\bigr],
-\]
+\end{equation}
+
 splitting the latent into a block \(z^{(v)}_{S,n}\) that is intended to carry
 shared information across views and a block \(z^{(v)}_{P,n}\) that is
 view-specific. The indices that define this split can be chosen a priori or via
-the CCA/HSIC-based screening procedure described below.
+the CCA/HSIC-based screening procedure (described below).
 
 We then attach a small projector network \(\phi^{(v)}_{\psi} : \mathcal{Z}^{(v)}
 \to \mathbb{R}^D\) to each view, with a matched output dimension \(D\) across
@@ -83,27 +90,30 @@ but carries an $O(B^2)$ kernel cost and is more sensitive to kernel and
 bandwidth choices.
 
 To prevent over-constraining the flows and blurring view-specific information,
-we perform a short screening pass after an MLE warm-up phase. For CCA-based
-screening, we construct whitened feature matrices for two views and perform an
-SVD of the cross-covariance \(X_a^\top X_b\), retaining the top \(r\) canonical
-directions per view. Averaging across all view pairs yields per-view projectors
-\(P^{(v)} \in \mathbb{R}^{D \times r}\) defining the shared subspace. For
-HSIC-based screening, we first prefilter coordinates using Pearson correlation,
-then rank remaining dimensions by an unbiased HSIC estimate with RBF kernels
-averaged over other views, and select the top \(r\) per view. Alignment losses
-are applied only to these projected or masked coordinates, so that dependence is
-enforced where cross-view signal is strongest and private dimensions remain free
-to capture view-specific variation. Screening can be performed once after
-warm-up or periodically refreshed during training.
+we perform a short screening pass after an initial ``warm-up'' phase. For
+CCA-based screening, we construct whitened feature matrices for two views and
+perform an SVD of the cross-covariance \(X_a^\top X_b\), retaining the top \(r\)
+canonical directions per view. Averaging across all view pairs yields per-view
+projectors \(P^{(v)} \in \mathbb{R}^{D \times r}\) defining the shared subspace.
+For HSIC-based screening, we first prefilter coordinates using Pearson
+correlation, then rank remaining dimensions by an unbiased HSIC estimate with
+RBF kernels averaged over other views, and select the top \(r\) per view.
+Alignment losses are applied only to these projected or masked coordinates, so
+that dependence is enforced where cross-view signal is strongest and private
+dimensions remain free to capture view-specific variation. Screening can be
+performed once after warm-up or periodically refreshed during training.
 
 For a subject-matched minibatch of size \(N\), the full training objective becomes
-\[
+
+\begin{equation}
 \mathcal{L}(\theta, \psi)
 = \frac{1}{N} \sum_{n=1}^N \sum_{v=1}^V
 \bigl[- \log p_{\theta}(x_n^{(v)})\bigr]
 + \lambda \, \mathcal{L}_{\text{align}}
 \Bigl(\bigl\{\phi^{(v)}_{\psi}(z^{(v)}_{S,n})\bigr\}_{v,n}\Bigr),
-\]
+\end{equation}
+
+
 where \(\mathcal{L}_{\text{align}}\) is chosen from Barlow Twins, VICReg,
 InfoNCE, Pearson correlation, or HSIC, and \(\lambda\) controls the strength of
 alignment.[^Kendall-Gal] 
@@ -166,7 +176,7 @@ columns are coerced to numeric, NaNs are imputed (typically by the column mean),
 and features are standardized to zero mean or rescaled to \([0,1]\) depending on
 a user-selectable normalization mode. Very low-variance columns are stabilized
 by floor-clamping the standard deviation. Positively skewed, non-negative
-variables can optionally be log or log1p transformed before normalization to
+variables can optionally be $\log$- or $\log1p$-transformed before normalization to
 reduce skewness.
 
 We use two base distributions: a diagonal Gaussian and a Gaussian–PCA base that
@@ -218,12 +228,12 @@ one log-scale per channel, broadcast across spatial locations. Let \(z \in
 \mathbb{R}^{C\times N_1\times \dots \times N_S}\) with \(S\in\{2,3\}\) spatial
 dimensions and \(d=C\prod_{i=1}^S N_i\). The log density is
 
-\[
+\begin{equation}
 \log p(z)
 = -\tfrac12\, d\log(2\pi)
 - \Big(\prod_{i=1}^S N_i\Big)\sum_{c=1}^C s_c
 - \tfrac12 \sum_{c}\sum_{\mathbf{x}}\big[(z_{c,\mathbf{x}}-\mu_c)\,e^{-s_c}\big]^2,
-\]
+\end{equation}
 
 where \(\mu_c\) and \(s_c\) are per-channel parameters broadcast over all
 spatial indices \(\mathbf{x}\). Compared to a conventional per-voxel diagonal

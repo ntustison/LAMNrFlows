@@ -31,41 +31,39 @@ efficiency with the ability to capture higher-order interactions. Specifically,
 we evaluate covariance-based regularization (VICReg), kernel-based independence
 measures (HSIC), and contrastive learning objectives (InfoNCE). We deliberately
 favored VICReg over related methods like Barlow-Twins or Pearson correlation as
-these share similar underlying principles of redundancy reduction, VICReg’s
+these share similar underlying principles of redundancy reduction. VICReg’s
 explicit constraints on variance and covariance provide superior numerical
 stability for high-dimensional IDPs, while HSIC and InfoNCE better preserve the
 non-linear manifold structure that linear metrics often collapse. The predictive
 performance of these LAMNr-derived shared features is then benchmarked against
-the linear SiMLR baselines used in the NNHEmbed framework [@Avants:2025aa].[^alignment]
+the linear SiMLR baselines used in the NNHEmbed framework
+[@Avants:2025aa].[^alignment]
 
-[^alignment]: A secondary advantage of the tabular LAMNr framework is the
-ability to efficiently sweep alignment objectives. Our results indicate that
-covariance-based regularization (VICReg) provides the most stable latent
-alignment for high-dimensional IDPs, effectively balancing the preservation of
-view-specific details with the extraction of shared anatomical features. This
-observation justifies our use of VICReg as the primary alignment objective for
-the subsequent high-resolution Glow experiments, where exhaustive objective
-sweeps are computationally prohibitive.
+[^alignment]: Our results indicate that covariance-based regularization (VICReg)
+provides the most stable latent alignment for high-dimensional IDPs, effectively
+balancing the preservation of view-specific details with the extraction of
+shared anatomical features. This observation justifies our use of VICReg as the
+primary alignment objective for the subsequent high-resolution Glow experiments,
+where exhaustive objective sweeps are computationally prohibitive.
 
 As shown in Figure \ref{fig:clinical_comparison}, LAMNr flows demonstrate
 significant performance gains when predicting complex cognitive and functional
-phenotypes compared to linear subspace projections.[^] In the NNL cohort, the
+phenotypes compared to linear subspace projections. In the NNL cohort, the
 nonlinear mapping provides a substantial "correlation uplift" ($\Delta r$)
-relative to SiMLR across multiple domains, notably in *Recall Delayed*
-($\Delta r = 0.190$, $q < 10^{-3}$) and *Working Memory* ($\Delta r = 0.177$,
-$q = 0.024$). In contrast, for *Reading Ability*, the nonlinear model shows a
-slight but non-significant decrease compared to the linear baseline ($\Delta r =
+relative to SiMLR across multiple domains, notably in *Recall Delayed* ($\Delta
+r = 0.190$, $q < 10^{-3}$) and *Working Memory* ($\Delta r = 0.177$, $q =
+0.024$). In contrast, for *Reading Ability*, the nonlinear model shows a slight
+but non-significant decrease compared to the linear baseline ($\Delta r =
 -0.004$, $q = 0.960$). However, when compared to an unconstrained multiview
 model ($\lambda = 0$), LAMNr alignment still retains a positive trend ($\Delta r
 = 0.069$), suggesting that while linearity suffices for reading tasks, latent
-alignment remains beneficial for overall model stability.
-
-Interestingly, the performance profiles differ across populations. While the NNL
-cohort exhibits clear benefits from nonlinear alignment, the linear SiMLR models
-remain highly competitive in the PPMI cohort. This divergence likely reflects
-the different variance structures of the two datasets: the NNL cohort captures a
-broad spectrum of healthy variation where subtle nonlinear couplings are
-prevalent, whereas the PPMI cohort is dominated by the strong, relatively linear
+alignment remains beneficial for overall model stability. Interestingly, the
+performance profiles differ across populations. While the NNL cohort exhibits
+clear benefits from nonlinear alignment, the linear SiMLR models remain highly
+competitive in the PPMI cohort. This divergence likely reflects the different
+variance structures of the two datasets: the NNL cohort captures a broad
+spectrum of healthy variation where subtle nonlinear couplings are prevalent,
+whereas the PPMI cohort is dominated by the strong, relatively linear
 pathological signal of Parkinson’s disease progression.
 
 
