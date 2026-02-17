@@ -1,62 +1,87 @@
 #!/usr/bin/env python3
 """
-lamnr_glow_tool.py — Sample M×N image grids from trained LAM-Flow (Glow 2D) checkpoints.
+lamnr_glow_tool.py — LAM-Flow (Glow 2D) Inference & Analysis Toolkit
 
-v0.3.1 (2025-11-09)
-- v0.3.8: Add `--cov-estimator lowrank` with `--rank` and `--sigma2`,
-  storing per-level factors U (D×r), eig (r), sigma2.
+A comprehensive suite for sampling, reconstruction, latent space analysis, and
+conditional generation using trained LAM-Flow models.
 
-- Add `gauss-fit` subcommand to fit a Conditional Gaussian over multiview latents
-  (perlevel|merged) from a strict, row-ordered manifest; missing files cause a hard error.
-  Produces a serialized model (`--gauss-out`) and optional summary JSON (`--gauss-summary`).
-  Quick usage:
-  
-  ```bash
-  python lamnr_glow_tool.py gauss-fit \
-    --ckpt runs/t1_t2_fa_128x128_vicreg/training_state.pt \
-    --manifest /data/lam/manifest.csv \
-    --views T1,T2,FA \
-    --slice-axis 2 --slice-index 64 \
-    --batch 64 --devices cuda:0 \
-    --cov-mode perlevel \
-    --cov-estimator full --shrinkage 1e-6 --cov-lam 0.00 \
-    --gauss-out /data/lam/models/t1t2fa_gauss_perlevel.pt \
-    --gauss-summary /data/lam/models/t1t2fa_gauss_perlevel.json
-  ```
+v0.4.0 (2026-02-17)
 
-- Add ANTs resampling by physical spacing (--resample-spacing SxT) and by voxel size (--resample-size HxW).
-- Add --native-spacing override.
-- Ensure priming happens at checkpoint-native size to avoid internal shape mismatches.
-- Prefer EMA weights if available; robust checkpoint loader.
-- Save a metadata JSON next to the PNG output for reproducibility.
+KEY FEATURES:
+-------------
+1. Sampling: Generate random samples from the learned distribution.
+2. Reconstruction: Sanity check (x -> z -> x_hat) and visualization.
+3. Gaussian Fitting (gauss-fit): Fit a conditional Gaussian model to the latent space.
+   - Supports 'full' covariance for low-res (128x128).
+   - Supports 'lowrank' (SVD) for high-res (256x256+) to avoid memory errors.
+4. Imputation (gauss-impute): Predict missing modalities (e.g., T1 -> FA).
+5. Template Construction (recon-template): Generate population averages.
+6. Latent Manipulation:
+   - recon-winsorize: Clamp latents to remove outliers (lesions/artifacts).
+   - recon-interpolate: Interpolate between patient and atlas/target (style transfer).
+   - calc-distance: Compute Mahalanobis/Euclidean distance to detect anomalies.
 
-Usage examples
---------------
-# 6×8 grid, 192×192 tiles, sample at ckpt-native size, then resample tiles to 0.8×0.8 mm (ANTs), then save:
-python lamnr_glow_tool.py \
-  --ckpt runs/t1_t2_fa_256x256_vicreg/training_state.pt \
-  --view-index 1 \
-  --grid-size 6x8 \
-  --image-size 192x192 \
-  --resample-spacing 0.8x0.8
-  --out samples_view1.png
+COMMANDS & EXAMPLES:
+--------------------
 
-# If native spacing is not in the checkpoint, provide it:
-python lamnr_glow_tool.py \
-  --ckpt runs/t1_t2_fa_256x256_vicreg/training_state.pt \
-  --view-index 1 \
-  --grid-size 6x8 \
-  --image-size 192x192 \
-  --native-spacing 1.0x1.0 \
-  --resample-spacing 0.7x0.7
+1. FIT GAUSSIAN MODEL (Required for analysis)
+   Fit a per-level Gaussian. Use --cov-estimator lowrank for images > 128x128.
+   
+   python lamnr_glow_tool.py gauss-fit \
+     --ckpt runs/model_256x256/training_state.pt \
+     --manifest data/manifest.csv \
+     --views T1,FA \
+     --slice-axis 2 --slice-index 130 \
+     --cov-estimator lowrank --rank 256 --sigma2 auto \
+     --gauss-out output/model_lowrank.npz
 
-# Resample by voxel count (use_voxels=True) to 192×192 before final grid save:
-python lamnr_glow_tool.py \
-  --ckpt runs/t1_t2_fa_256x256_vicreg/training_state.pt \
-  --view-index 0 \
-  --grid-size 5x10 \
-  --resample-size 192x192 \
-  --out samples_rsz.png
+2. CALCULATE LATENT DISTANCE (Anomaly Detection)
+   Compute Euclidean distance between subject latents and the group mean (or a target).
+   Output is a CSV with total distance and per-level breakdown.
+
+   python lamnr_glow_tool.py calc-distance \
+     --ckpt runs/model.pt \
+     --gauss output/model_lowrank.npz \
+     --manifest data/patients.csv \
+     --views T1 \
+     --slice-axis 2 --slice-index 130 \
+     --out output/distances.csv \
+     --save-levels
+
+3. INTERPOLATION (Style Transfer / Normalization)
+   Interpolate between a patient and the atlas (t=0) or another patient.
+   
+   # Interpolate 50% towards the mean
+   python lamnr_glow_tool.py recon-interpolate \
+     --ckpt runs/model.pt \
+     --gauss output/model.npz \
+     --manifest data/patient.csv \
+     --t 0.5 \
+     --out output/interp_t0.5.png
+
+   # Interpolate towards a specific target image
+   python lamnr_glow_tool.py recon-interpolate \
+     --target-image data/reference_control.nii.gz \
+     --t 0.5 ...
+
+4. WINSORIZATION (Lesion/Artifact Suppression)
+   Clamp latent vectors that exceed a quantile threshold (e.g., 99%).
+   
+   python lamnr_glow_tool.py recon-winsorize \
+     --ckpt runs/model.pt \
+     --manifest data/lesions.csv \
+     --quantile 0.99 \
+     --out output/healed_lesion.png
+
+5. SAMPLING & RESAMPLING
+   Generate synthetic samples and resample to physical spacing (ANTs).
+
+   python lamnr_glow_tool.py sample \
+     --ckpt runs/model.pt \
+     --view-index 0 \
+     --sample-grid-size 6x6 \
+     --resample-spacing 1.0x1.0 \
+     --out output/samples.png
 """
 from __future__ import annotations
 
@@ -2652,7 +2677,7 @@ def main_calc_distance(argv=None):
                 pbar.update(len(batch_paths))
 
     print(f"[ok] Distances written to {out_csv}")
-    
+
 def main_gauss_fit(argv: List[str] | None = None):
 
     def _sanitize_latents_array(X, cap_quantile=99.9, hard_cap=None):
