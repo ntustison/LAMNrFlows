@@ -425,7 +425,7 @@ def save_grid(x: torch.Tensor, out_path: Path, nrow: int, target_hw: Tuple[int, 
         else:
             arr_ants = arr[0, 0]
             
-        ants_img = ants.from_numpy(np.flip(arr_ants, axis=1)) 
+        ants_img = ants.from_numpy(np.flip(arr_ants, axis=(1,0))) 
         ants.image_write(ants_img, str(out_path))
 
     else:
@@ -1228,7 +1228,7 @@ def main_sample():
 
         M, N = args.sample_grid_size
         total = int(M) * int(N)
-        print(f"[info] sampling {total} images @ temp={args.temperature} as {M}x{N}")
+        print(f"[info] sampling {total} images @ temp={args.temperature} as {M}x{N} (seed={args.seed})")
 
         try:
             s = sample_with_temperature(model, total, float(args.temperature))
@@ -1832,6 +1832,8 @@ def main_recon_template(argv=None):
     ap.add_argument("--mc-temp", type=float, default=1.0, help="Monte Carlo temperature.")
     ap.add_argument("--seed", type=int, default=12345,
                     help="Random seed used when --mc-samples > 0")
+    ap.add_argument("--sharpen-image", action="store_true", 
+                    help="Apply smoothing ---> Laplacian sharpening using ANTs before saving.")
     args = ap.parse_args(argv)
 
     device = torch.device(args.devices)
@@ -2100,6 +2102,32 @@ def main_recon_template(argv=None):
 
         print(f"[recon-template] Monte Carlo mean computed from {mc_n} samples.")
 
+    if args.sharpen_image: # Plus besoin de getattr
+       import ants
+       from scipy import ndimage
+       print("[info] Applying Laplacian sharpening to template(s)...")
+       
+       # CORRECTION 2 : Ajoutez .cpu() avant .numpy()
+       # Traitement du template moyen (mu)
+       if x_mu.is_cuda: x_mu = x_mu.cpu() # Sécurité
+       ants_mu = ants.from_numpy(x_mu.squeeze().numpy())       
+       img_smooth = ants.smooth_image(ants_mu, 1.0)  
+       # img_smooth = ants.from_numpy(ndimage.median_filter(ants_mu.numpy(), size=3))
+       img_sharp = ants.iMath_sharpen(img_smooth) 
+
+       # Retour au format tenseur et REPLACE sur le device original si nécessaire
+       x_mu = torch.from_numpy(img_sharp.numpy()).view(1, 1, Hc, Wc).to(device)
+
+       # Traitement du template Monte Carlo
+       if x_mc_mean is not None:
+           if x_mc_mean.is_cuda: x_mc_mean = x_mc_mean.cpu()
+           ants_mc = ants.from_numpy(x_mc_mean.squeeze().numpy())
+           smooth_mc = ants.smooth_image(ants_mc, 1.0)
+           # smooth_mc = ants.from_numpy(ndimage.median_filter(ants_mc.numpy(), size=3))
+           sharpened_mc = ants.iMath_sharpen(smooth_mc)
+
+           x_mc_mean = torch.from_numpy(sharpened_mc.numpy()).view(1, 1, Hc, Wc).to(device)
+
     # ----------------------------- save panel -----------------------------
     outp = Path(args.out)
     outp.parent.mkdir(parents=True, exist_ok=True)
@@ -2115,6 +2143,138 @@ def main_recon_template(argv=None):
     save_grid(panel, outp, nrow=nrow, target_hw=(Hc, Wc))
     print(f"[recon-template] wrote {outp}")
 
+def main_recon_winsorize(argv=None):
+    """
+    Encode an image, winsorize (clamp) the latents, and reconstruct. 
+    Supports global thresholds and per-level overrides.
+    """
+    ap = argparse.ArgumentParser("LAM-Flow Recon Winsorize")
+    ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
+    ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV")
+    ap.add_argument("--views", type=str, required=True, help="Views list (e.g. T1,FA)")
+    ap.add_argument("--view-index", type=int, default=0, help="View to process")
+    ap.add_argument("--slice-axis", type=int, required=True)
+    ap.add_argument("--slice-index", type=int, required=True)
+    ap.add_argument("--batch", type=int, default=1)
+    ap.add_argument("--devices", type=str, default="cuda:0")
+    ap.add_argument("--out", type=str, required=True, help="Output PNG panel")
+    
+    # Options de Winsorization Globales
+    ap.add_argument("--quantile", type=float, default=0.99, 
+                    help="Global quantile threshold (default: 0.99).")
+    ap.add_argument("--hard-threshold", type=float, default=None,
+                    help="Global hard threshold (e.g. 3.0). Overrides quantile if set.")
+    
+    # Option par niveau (Granularité)
+    ap.add_argument("--winsorize-level", action="append", type=str,
+                    help="Override threshold for a specific level. Format 'level,value'. "
+                         "Example: '--winsorize-level 0,0.999 --winsorize-level 4,0.95'. "
+                         "Can be repeated.")
+
+    args = ap.parse_args(argv)
+    device = torch.device(args.devices)
+
+    # --- Parsing des overrides par niveau ---
+    level_overrides = {}
+    if args.winsorize_level:
+        for item in args.winsorize_level:
+            try:
+                parts = item.split(',')
+                if len(parts) != 2: raise ValueError
+                lvl = int(parts[0])
+                val = float(parts[1])
+                level_overrides[lvl] = val
+            except ValueError:
+                raise RuntimeError(f"Invalid format for --winsorize-level: '{item}'. Expected 'level,value'.")
+        print(f"[info] Per-level overrides: {level_overrides}")
+
+    # 1. Chargement Modèle & Données (Standard)
+    ckpt_path = resolve_ckpt_path(Path(args.ckpt))
+    try:
+        blob = torch.load(ckpt_path, map_location=device, weights_only=True)
+    except TypeError:
+        blob = torch.load(ckpt_path, map_location=device)
+    cfg = blob.get("config", {})
+    Hc, Wc = int(cfg.get("H", 128)), int(cfg.get("W", 128))
+    model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc}, device=device)
+    model.eval()
+    _prime_if_needed(model, Hc, Wc, device=device)
+
+    manifest_path = Path(args.manifest)
+    # ... (Logique de chargement manifest/images identique à main_recon) ...
+    # [Pour la brièveté, je reprends la partie chargement simplifiée, 
+    #  assurez-vous d'utiliser le code complet de lecture d'image ici]
+    cols = _read_manifest_csv(manifest_path)
+    view_names, per_view_paths = _resolve_views(cols, manifest_path.parent, args.views)
+    
+    views_list = [v.strip() for v in args.views.split(",")]
+    vname = views_list[int(args.view_index)]
+    
+    ok, note = load_weights_into_model(model, blob, view_idx=int(args.view_index), prefer_ema=True, view_name=vname, cfg_views=views_list)
+    if not ok: raise RuntimeError(f"Weights failed: {note}")
+
+    paths = per_view_paths[int(args.view_index)]
+    xs = []
+    limit = min(int(args.batch), len(paths))
+    for i in range(limit):
+        xi = _read_image_any(paths[i], args.slice_axis, args.slice_index)
+        xi = torch.nn.functional.interpolate(xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear").squeeze(0)
+        xi = to01(xi.unsqueeze(0)).squeeze(0)
+        xs.append(xi)
+    xb = torch.stack(xs, dim=0)    # 3. Encodage x -> z
+    z_list = _encode_latents(model, xb)
+    
+    # 4. Winsorization Granulaire
+    z_clamped_list = []
+    
+    is_hard_global = (args.hard_threshold is not None)
+    
+    print(f"[info] Winsorizing latents (Global Mode: {'Hard' if is_hard_global else 'Quantile'})")
+
+    for l, z in enumerate(z_list):
+        z_flat = z.view(z.shape[0], -1) 
+        
+        # Déterminer la valeur cible pour ce niveau
+        if l in level_overrides:
+            val_target = level_overrides[l]
+            # On assume que l'override suit le même "Mode" que le global
+            # Si global=Hard, override=3.0 -> Hard 3.0
+            # Si global=Quantile, override=0.95 -> Quantile 0.95
+            is_hard_level = is_hard_global 
+            mode_str = "Override"
+        else:
+            val_target = args.hard_threshold if is_hard_global else args.quantile
+            is_hard_level = is_hard_global
+            mode_str = "Global"
+
+        if is_hard_level:
+            # Mode Hard Threshold
+            thresh = float(val_target)
+            z_clamped = torch.clamp(z, min=-thresh, max=thresh)
+            pct_clipped = (torch.abs(z) > thresh).float().mean().item() * 100
+        else:
+            # Mode Quantile
+            q_val = float(val_target)
+            abs_z = torch.abs(z_flat)
+            thresh = torch.quantile(abs_z, q_val).item()
+            z_clamped = torch.clamp(z, min=-thresh, max=thresh)
+            pct_clipped = (abs_z > thresh).float().mean().item() * 100
+
+        print(f"  Level {l} ({mode_str}): target={val_target}, thresh={thresh:.3f}, clipped={pct_clipped:.2f}%")
+        z_clamped_list.append(z_clamped)
+
+    # 5. Décodage & Sauvegarde
+    xh = _decode_latents(model, z_clamped_list, target_hw=(Hc, Wc))
+    if os.path.splitext(args.out)[1].lower() in [".png", ".jpg", ".jpeg", ".bmp", ".tiff"]:
+        panel = make_recon_panel(xb, xh)
+        save_grid(panel, Path(args.out), nrow=3, target_hw=(Hc, Wc))
+        print(f"[ok] Saved winsorized recon panel to {args.out}")
+    elif os.path.splitext(args.out)[1].lower() in [".nii", ".gz"]:
+        import ants
+        xh = _coerce_nchw_4d(xh, target_hw=(Hc, Wc))
+        ants_img = ants.from_numpy(np.flip(xh.squeeze().cpu().numpy(), axis=(1,0))) 
+        ants.image_write(ants_img, args.out)
+        print(f"[ok] Saved winsorized recon to {args.out}")
 
 def main_gauss_fit(argv: List[str] | None = None):
 
@@ -3061,10 +3221,12 @@ def main_gauss_impute(argv=None):
 
         acc = None
         batch = []
+        all_images = []
 
         def flush():
             nonlocal acc, batch
             xb = torch.stack(batch, dim=0).to(device=device, dtype=torch.float32)
+            all_images.append(xb.cpu())
             batch = []
             with torch.no_grad(), torch.amp.autocast(
                 device_type=("cuda" if device.type == "cuda" else "cpu"), enabled=False
@@ -3092,10 +3254,14 @@ def main_gauss_impute(argv=None):
                 flush()
         if batch:
             flush()
-        return [torch.cat(chunks, dim=0) for chunks in acc]
+        return [torch.cat(chunks, dim=0) for chunks in acc], torch.cat(all_images, dim=0)
 
-
-    obs_latents = {v: encode_view(v) for v in obs}
+    # Exécution de l'encodage pour chaque modalité observée
+    obs_data = {v: encode_view(v) for v in obs}
+    
+    # On sépare les dictionnaires pour plus de clarté
+    obs_latents = {v: obs_data[v][0] for v in obs}
+    obs_images  = {v: obs_data[v][1] for v in obs}
 
     # Assert concatenation dims match the Gaussian layout per level
     for l in range(L):
@@ -3258,11 +3424,61 @@ def main_gauss_impute(argv=None):
         out_dir.mkdir(parents=True, exist_ok=True)
 
         for i in range(N):
+            # 1. Sauvegarder la cible imputée (ex: FA)
             file_name = f"{i:06d}_{tname}.{args.output_format}" 
             save_grid(xh[i:i+1], out_dir / file_name, nrow=1, target_hw=(Hc, Wc))
 
+            # 2. Sauvegarder les images d'entrée (ex: T1)
+            for v_obs in obs:
+                input_name = f"{i:06d}_{v_obs}_input.{args.output_format}"
+                input_path = out_dir / input_name
+                
+                if not input_path.exists():
+                    save_grid(obs_images[v_obs][i:i+1], input_path, nrow=1, target_hw=(Hc, Wc))
+
         print(f"[gauss-impute] wrote {N} NIfTI images for target={tname} -> {out_dir}")
 
+def main_export_slices(argv=None):
+    ap = argparse.ArgumentParser("LAM-Flow slice exporter (export-slices)")
+    ap.add_argument("--manifest", type=str, required=True, help="CSV listing image paths.")
+    ap.add_argument("--views", type=str, required=True, help="Comma-separated views to export (e.g., T1,FA).")
+    ap.add_argument("--slice-axis", type=int, required=True, help="Axis for slicing (0, 1, or 2).")
+    ap.add_argument("--slice-index", type=int, required=True, help="Index of the slice.")
+    ap.add_argument("--outdir", type=str, required=True, help="Output directory.")
+    ap.add_argument("--output-format", type=str, choices=["nii.gz", "nii", "png"], default="nii.gz")
+    ap.add_argument("--image-size", type=parse_hw, default=None, help="Optional HxW resize (e.g., 256x256).")
+    args = ap.parse_args(argv)
+
+    out_dir = Path(args.outdir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Lecture du manifest
+    cols = _read_manifest_csv(Path(args.manifest))
+    view_names = [v.strip() for v in args.views.split(",") if v.strip()]
+    
+    for vname in view_names:
+        if vname not in cols:
+            print(f"[error] View '{vname}' not found in manifest.")
+            continue
+        
+        paths = cols[vname]
+        print(f"[info] Exporting {len(paths)} slices for view: {vname}")
+        
+        for i, p in enumerate(paths):
+            pth = Path(p)
+            if not pth.exists():
+                print(f"[warn] Missing file: {pth}")
+                continue
+                
+            # Lecture et slicing
+            xi = _read_image_any(pth, args.slice_axis, args.slice_index) 
+            
+            # Sauvegarde via save_grid
+            out_name = f"{i:06d}_{vname}.{args.output_format}"
+            save_grid(xi.unsqueeze(0), out_dir / out_name, nrow=1, target_hw=args.image_size)
+
+    print(f"[ok] Export complete -> {out_dir}")
+    return 0
 
 if __name__ == "__main__":
     import sys, inspect
