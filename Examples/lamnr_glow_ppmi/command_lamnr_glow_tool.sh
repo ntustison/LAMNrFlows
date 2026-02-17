@@ -194,31 +194,32 @@ fi
 # or for aggressive regularization/denoising by pulling latents toward the mean.
 # Supports a global factor 't' (0.0=Mean, 1.0=Original) and granular per-level control
 # (e.g., keeping original shape at L4 while normalizing texture at L0).
+# Can also specify a target image for interpolation instead of the mean (--target-image)
 ########################################
-# echo "Performing latent space interpolation between subject and population mean..."
-# for t_val in 0.60 0.90 ;
-#   do
-#     echo "Interpolating at t=${t_val}"
-#     ${WHICH_PYTHON} lamnr_glow_tool.py recon-interpolate \
-#       --ckpt ${ckpt} \
-#       --gauss ${gaussian_lr} \
-#       --manifest ${manifest_lesions} \
-#       --views T1 \
-#       --slice-axis 2 --slice-index ${SLICE_INDEX} \
-#       --devices ${DEVICE} \
-#       --t ${t_val} \
-#       --out ${out_dir}/interpolation/interp_t${t_val}.png
-#   done
+echo "Performing latent space interpolation between subject and population mean..."
+for t_val in 0.55 0.95 ;
+  do
+    echo "Interpolating at t=${t_val}"
+    ${WHICH_PYTHON} lamnr_glow_tool.py recon-interpolate \
+      --ckpt ${ckpt} \
+      --gauss ${gaussian_lr} \
+      --manifest ${manifest_lesions} \
+      --views T1 \
+      --slice-axis 2 --slice-index ${SLICE_INDEX} \
+      --devices ${DEVICE} \
+      --t ${t_val} \
+      --out ${out_dir}/interpolation/interp_t${t_val}.png
+  done
 
-${WHICH_PYTHON} lamnr_glow_tool.py calc-distance \
-  --ckpt ${ckpt} \
-  --gauss ${gaussian_lr} \
-  --manifest ${manifest} \
-  --devices ${DEVICE} \
-  --views T1 \
-  --slice-axis 2 --slice-index ${SLICE_INDEX} \
-  --out ${dist_csv} \
-  --save-levels  # ou --no-save-levels
+# ${WHICH_PYTHON} lamnr_glow_tool.py calc-distance \
+#   --ckpt ${ckpt} \
+#   --gauss ${gaussian_lr} \
+#   --manifest ${manifest} \
+#   --devices ${DEVICE} \
+#   --views T1 \
+#   --slice-axis 2 --slice-index ${SLICE_INDEX} \
+#   --out ${dist_csv} \
+#   --save-levels  # ou --no-save-levels
 
 ########################################
 # Performs 'Pseudo-Healthy Synthesis' via latent winsorization.

@@ -2282,18 +2282,19 @@ def main_recon_winsorize(argv=None):
 
 def main_recon_interpolate(argv=None):
     """
-    Interpole entre la moyenne Gaussienne (mu) et le latent du sujet (z).
-    z_new = (1 - t) * mu + t * z
+    Interpole entre une cible (moyenne Gaussienne OU image cible) et le latent du sujet.
+    z_new = (1 - t) * z_target + t * z_source
     
     Arguments:
-      --t (float) : Facteur global (défaut=0.5).
-      --interp-level (L,t) : Facteur spécifique pour un niveau L.
-                             Ex: --interp-level 0,1.0 --interp-level 4,0.0
+      --target-image (path) : Image cible optionnelle. Si absent, utilise la moyenne Gaussienne (mu).
+      --t (float) : Facteur global.
+          t=0.0 -> Cible (Moyenne ou Target Image)
+          t=1.0 -> Source (Original Image)
     """
     ap = argparse.ArgumentParser("LAM-Flow Latent Interpolation")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
     ap.add_argument("--gauss", type=str, required=True, help="Gaussian model (.npz or .pt)")
-    ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV")
+    ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV (Source images)")
     ap.add_argument("--views", type=str, required=True, help="Views list (e.g. T1,FA)")
     ap.add_argument("--view-index", type=int, default=0, help="View to process")
     ap.add_argument("--slice-axis", type=int, required=True)
@@ -2303,48 +2304,49 @@ def main_recon_interpolate(argv=None):
     ap.add_argument("--out", type=str, required=True, help="Output PNG panel")
     
     # Options d'interpolation
+    ap.add_argument("--target-image", type=str, default=None,
+                    help="Optional target image path. If not set, interpolates towards Gaussian mean.")
     ap.add_argument("--t", type=float, default=0.5, 
-                    help="Global interpolation factor [0.0 = Mean, 1.0 = Original].")
+                    help="Interpolation factor [0.0 = Target/Mean, 1.0 = Source].")
     ap.add_argument("--interp-level", action="append", type=str,
-                    help="Override t for a specific level. Format 'level,t'. "
-                         "Example: '--interp-level 0,1.0 --interp-level 4,0.0'.")
+                    help="Override t for a specific level. Format 'level,t'.")
 
     args = ap.parse_args(argv)
     device = torch.device(args.devices)
 
-    # --- Parsing des overrides par niveau ---
+    # --- Parsing des overrides ---
     level_overrides = {}
     if args.interp_level:
         for item in args.interp_level:
             try:
                 parts = item.split(',')
                 if len(parts) != 2: raise ValueError
-                lvl = int(parts[0])
-                val = float(parts[1])
+                lvl = int(parts[0]); val = float(parts[1])
                 level_overrides[lvl] = val
             except ValueError:
                 raise RuntimeError(f"Invalid format for --interp-level: '{item}'. Expected 'level,t'.")
-        print(f"[info] Per-level interpolation overrides: {level_overrides}")
 
     # 1. Chargement Modèle
     ckpt_path = resolve_ckpt_path(Path(args.ckpt))
     try:
         blob = torch.load(ckpt_path, map_location=device, weights_only=True)
-    except TypeError:
+    except Exception as e:
+        print(f"[warn] weights_only load failed: {e}. Retrying standard load.")
         blob = torch.load(ckpt_path, map_location=device)
+
     cfg = blob.get("config", {})
     Hc, Wc = int(cfg.get("H", 128)), int(cfg.get("W", 128))
     model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc}, device=device)
     model.eval()
     _prime_if_needed(model, Hc, Wc, device=device)
 
-    # 2. Chargement Données
+    # 2. Chargement Poids & Manifest Source
     manifest_path = Path(args.manifest)
     cols = _read_manifest_csv(manifest_path)
     view_names, per_view_paths = _resolve_views(cols, manifest_path.parent, args.views)
     views_list = [v.strip() for v in args.views.split(",")]
-    
     vname = views_list[int(args.view_index)]
+    
     ok, note = load_weights_into_model(model, blob, view_idx=int(args.view_index), prefer_ema=True, view_name=vname, cfg_views=views_list)
     if not ok: raise RuntimeError(f"Weights failed: {note}")
 
@@ -2356,55 +2358,76 @@ def main_recon_interpolate(argv=None):
         xi = torch.nn.functional.interpolate(xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear").squeeze(0)
         xi = to01(xi.unsqueeze(0)).squeeze(0)
         xs.append(xi)
-    xb = torch.stack(xs, dim=0).to(device)
+    xb = torch.stack(xs, dim=0).to(device) # (B, 1, H, W)
 
-    # 3. Encodage x -> z
-    z_list = _encode_latents(model, xb)
+    # 3. Encodage Source (x -> z_source)
+    z_source_list = _encode_latents(model, xb)
 
-    # 4. Chargement Moyenne (Mu)
-    gauss_blob = _load_gaussian_model(Path(args.gauss))
-    views_g, dims_tbl, shapes_by_view, L = _validate_gauss_blob(gauss_blob)
+    # 4. Détermination de la Cible (z_target)
+    z_target_list = []
 
-    if vname not in views_g:
-        raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
-    v_idx_g = views_g.index(vname)
-    mu_list_raw = gauss_blob["mu"]
-
-    # Reconstruire les offsets (logique robuste)
-    level_view_slices = []
-    raw_slices = gauss_blob.get("level_view_slices", None)
-    if raw_slices:
-         for l in range(L):
-            row = raw_slices[l]
-            if isinstance(row, dict): row = {int(k): tuple(v) for k, v in row.items()}
-            else: row = {vi: tuple(row[vi]) for vi in range(len(views_g))}
-            level_view_slices.append(row)
+    if args.target_image:
+        # Cas A: Cible = Image Spécifique
+        tgt_path = Path(args.target_image)
+        if not tgt_path.exists():
+            raise FileNotFoundError(f"Target image not found: {tgt_path}")
+        
+        print(f"[info] Interpolating towards target image: {tgt_path.name}")
+        xt = _read_image_any(tgt_path, args.slice_axis, args.slice_index)
+        xt = torch.nn.functional.interpolate(xt.unsqueeze(0), size=(Hc, Wc), mode="bilinear").squeeze(0)
+        xt = to01(xt.unsqueeze(0)).squeeze(0)
+        xb_target = xt.unsqueeze(0).to(device) # (1, 1, H, W)
+        
+        # Si on a un batch source > 1, on répète la cible
+        if xb.shape[0] > 1:
+            xb_target = xb_target.expand(xb.shape[0], -1, -1, -1)
+            
+        z_target_list = _encode_latents(model, xb_target)
+    
     else:
-        for l in range(L):
-            off = 0; row = {}
-            for vi in range(len(views_g)):
-                d = int(np.asarray(dims_tbl[vi][l]).item()); row[vi] = (off, off+d); off += d
-            level_view_slices.append(row)
+        # Cas B: Cible = Moyenne Gaussienne (Mu)
+        print(f"[info] Interpolating towards Gaussian Mean (Mu)")
+        gauss_blob = _load_gaussian_model(Path(args.gauss))
+        views_g, dims_tbl, shapes_by_view, L = _validate_gauss_blob(gauss_blob)
+        if vname not in views_g: raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
+        v_idx_g = views_g.index(vname)
+        mu_list_raw = gauss_blob["mu"]
 
-    # 5. Interpolation Latente
+        # Offsets
+        level_view_slices = []
+        raw_slices = gauss_blob.get("level_view_slices", None)
+        if raw_slices:
+            for l in range(L):
+                row = raw_slices[l]
+                if isinstance(row, dict): row = {int(k): tuple(v) for k, v in row.items()}
+                else: row = {vi: tuple(row[vi]) for vi in range(len(views_g))}
+                level_view_slices.append(row)
+        else:
+            for l in range(L):
+                off = 0; row = {}
+                for vi in range(len(views_g)):
+                    d = int(np.asarray(dims_tbl[vi][l]).item()); row[vi] = (off, off+d); off += d
+                level_view_slices.append(row)
+
+        for l, z in enumerate(z_source_list):
+            B, C, H, W = z.shape
+            a, b = level_view_slices[l][v_idx_g]
+            mu_flat = np.asarray(mu_list_raw[l], dtype=np.float64).ravel()[a:b]
+            mu_tensor = torch.from_numpy(mu_flat).float().to(device).view(1, C, H, W)
+            # Expand pour matcher le batch size
+            z_target_list.append(mu_tensor.expand(B, C, H, W))
+
+    # 5. Interpolation
     z_interp_list = []
+    print(f"[info] Interpolating Latents...")
     
-    print(f"[info] Interpolating Latents (Global t={args.t})")
-    
-    for l, z in enumerate(z_list):
-        # Choix du facteur t pour ce niveau
+    for l, (z_src, z_tgt) in enumerate(zip(z_source_list, z_target_list)):
         t_level = level_overrides.get(l, float(args.t))
         
-        # Extraire mu
-        B, C, H, W = z.shape
-        a, b = level_view_slices[l][v_idx_g]
-        mu_flat = np.asarray(mu_list_raw[l], dtype=np.float64).ravel()[a:b]
-        mu_tensor = torch.from_numpy(mu_flat).float().to(device).view(1, C, H, W)
-        
-        # Formule : z_new = mu + t * (z - mu)
-        # t=1.0 -> z (Original)
-        # t=0.0 -> mu (Moyenne)
-        z_new = mu_tensor + t_level * (z - mu_tensor)
+        # Formule : z_new = z_tgt + t * (z_src - z_tgt)
+        # t=1.0 -> z_src
+        # t=0.0 -> z_tgt
+        z_new = z_tgt + t_level * (z_src - z_tgt)
         
         print(f"  Level {l}: t={t_level}")
         z_interp_list.append(z_new)
@@ -2412,10 +2435,6 @@ def main_recon_interpolate(argv=None):
     # 6. Décodage et Sauvegarde
     xh = _decode_latents(model, z_interp_list, target_hw=(Hc, Wc))
     
-    # Panel: [ Input | Interpolated | Diff ]
-    panel = make_recon_panel(xb, xh)
-    
-    # Si format NIfTI demandé explicitement par l'extension
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -2426,9 +2445,26 @@ def main_recon_interpolate(argv=None):
         ants.image_write(ants_img, str(out_path))
         print(f"[ok] Saved interpolated NIfTI to {out_path}")
     else:
-        save_grid(panel, out_path, nrow=3, target_hw=(Hc, Wc))
+        # Panel: [ Source | Interpolated | Target ]
+        # On décode la cible pour l'affichage si on est en mode image
+        if args.target_image:
+             x_tgt_decoded = _decode_latents(model, z_target_list, target_hw=(Hc, Wc))
+             # Panel 3 colonnes: Source | Interp | Target
+             panel = torch.cat([xb, xh, x_tgt_decoded], dim=0) 
+             # Réorganiser pour save_grid (nrow=3) -> [S1, I1, T1, S2, I2, T2...]
+             # Hack rapide pour l'affichage : on crée une liste
+             panels_list = []
+             for i in range(xb.shape[0]):
+                 panels_list.extend([xb[i:i+1], xh[i:i+1], x_tgt_decoded[i:i+1]])
+             panel = torch.cat(panels_list, dim=0)
+             save_grid(panel, out_path, nrow=3, target_hw=(Hc, Wc))
+        else:
+             # Mode Moyenne: [ Source | Interpolated | Diff ]
+             panel = make_recon_panel(xb, xh)
+             save_grid(panel, out_path, nrow=3, target_hw=(Hc, Wc))
+             
         print(f"[ok] Saved interpolated panel to {out_path}")
-
+        
 def main_calc_distance(argv=None):
     """
     Calcule la distance Euclidienne (L2) entre les latents d'une image et la moyenne (mu).
@@ -2576,7 +2612,7 @@ def main_calc_distance(argv=None):
                 pbar.update(len(batch_paths))
 
     print(f"[ok] Distances written to {out_csv}")
-    
+
 def main_gauss_fit(argv: List[str] | None = None):
 
     def _sanitize_latents_array(X, cap_quantile=99.9, hard_cap=None):
