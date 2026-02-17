@@ -2464,17 +2464,19 @@ def main_recon_interpolate(argv=None):
              save_grid(panel, out_path, nrow=3, target_hw=(Hc, Wc))
              
         print(f"[ok] Saved interpolated panel to {out_path}")
-        
+
 def main_calc_distance(argv=None):
     """
-    Calcule la distance Euclidienne (L2) entre les latents d'une image et la moyenne (mu).
+    Calcule la distance Euclidienne (L2) entre les latents d'une image et une référence.
+    Référence par défaut : Moyenne Gaussienne (Mu).
+    Référence optionnelle : Une image cible (--target-image).
+    
     Génère un CSV : [path, total_dist, (optionnel: dist_L0, dist_L1, ...)]
     """
-    # Import local pour faciliter le copier-coller
+    # Import local
     try:
         from tqdm import tqdm
     except ImportError:
-        # Fallback si tqdm n'est pas installé (print simple)
         print("[info] tqdm not found. Install with `pip install tqdm` for progress bars.")
         tqdm = lambda x, **kwargs: x
 
@@ -2491,6 +2493,10 @@ def main_calc_distance(argv=None):
     ap.add_argument("--out", type=str, required=True, help="Output CSV file path")
     ap.add_argument("--save-levels", action=argparse.BooleanOptionalAction, default=True,
                     help="Include separate columns for distance at each level.")
+    
+    # NOUVEAU : Option Image Cible
+    ap.add_argument("--target-image", type=str, default=None,
+                    help="Optional target image path. If set, calculates distance to this image instead of the Gaussian mean.")
 
     args = ap.parse_args(argv)
     device = torch.device(args.devices)
@@ -2509,15 +2515,13 @@ def main_calc_distance(argv=None):
     model.eval()
     _prime_if_needed(model, Hc, Wc, device=device)
 
-    # 2. Chargement Gaussien
+    # 2. Chargement Gaussien (Utilisé pour L, views, et Mu si pas de target)
     gauss_blob = _load_gaussian_model(Path(args.gauss))
     views_g, dims_tbl, shapes_by_view, L = _validate_gauss_blob(gauss_blob)
-    mu_list_raw = gauss_blob["mu"]
 
     # 3. Parsing Manifest
     manifest_path = Path(args.manifest)
     cols = _read_manifest_csv(manifest_path)
-    view_names, per_view_paths = _resolve_views(cols, manifest_path.parent, args.views)
     views_list = [v.strip() for v in args.views.split(",")]
     
     vname = views_list[int(args.view_index)]
@@ -2527,30 +2531,69 @@ def main_calc_distance(argv=None):
     ok, note = load_weights_into_model(model, blob, view_idx=int(args.view_index), prefer_ema=True, view_name=vname, cfg_views=views_list)
     if not ok: raise RuntimeError(f"Weights failed: {note}")
 
-    # Offsets Slices
-    level_view_slices = []
-    raw_slices = gauss_blob.get("level_view_slices", None)
-    if raw_slices:
-         for l in range(L):
-            row = raw_slices[l]
-            if isinstance(row, dict): row = {int(k): tuple(v) for k, v in row.items()}
-            else: row = {vi: tuple(row[vi]) for vi in range(len(views_g))}
-            level_view_slices.append(row)
-    else:
-        for l in range(L):
-            off = 0; row = {}
-            for vi in range(len(views_g)):
-                d = int(np.asarray(dims_tbl[vi][l]).item()); row[vi] = (off, off+d); off += d
-            level_view_slices.append(row)
-
-    # 4. Calcul avec TQDM
+    # Récupération des chemins (Source)
+    view_names, per_view_paths = _resolve_views(cols, manifest_path.parent, args.views)
     paths = per_view_paths[int(args.view_index)]
     total_imgs = len(paths)
+
+    # ---------------------------------------------------------
+    # 4. PRÉPARATION DE LA RÉFÉRENCE (Moyenne ou Target Image)
+    # ---------------------------------------------------------
+    reference_latents = [] # Liste de tenseurs (1, D) pour chaque niveau
+
+    if args.target_image:
+        tgt_path = Path(args.target_image)
+        if not tgt_path.exists(): raise FileNotFoundError(f"Target image not found: {tgt_path}")
+        print(f"[info] Reference: Target Image ({tgt_path.name})")
+        
+        # Encodage de l'image cible
+        xt = _read_image_any(tgt_path, args.slice_axis, args.slice_index)
+        xt = torch.nn.functional.interpolate(xt.unsqueeze(0), size=(Hc, Wc), mode="bilinear").squeeze(0)
+        xt = to01(xt.unsqueeze(0)).squeeze(0)
+        xb_target = xt.unsqueeze(0).to(device)
+        
+        # On obtient la liste des latents pour la cible
+        z_tgt_list = _encode_latents(model, xb_target)
+        
+        # On stocke sous forme aplatie (1, D)
+        for z in z_tgt_list:
+            reference_latents.append(z.view(1, -1).detach()) # Detach pour être sûr
+
+    else:
+        print(f"[info] Reference: Gaussian Mean (Mu)")
+        mu_list_raw = gauss_blob["mu"]
+        
+        # Calcul des offsets (slices) pour extraire Mu spécifique à la vue
+        level_view_slices = []
+        raw_slices = gauss_blob.get("level_view_slices", None)
+        if raw_slices:
+             for l in range(L):
+                row = raw_slices[l]
+                if isinstance(row, dict): row = {int(k): tuple(v) for k, v in row.items()}
+                else: row = {vi: tuple(row[vi]) for vi in range(len(views_g))}
+                level_view_slices.append(row)
+        else:
+            for l in range(L):
+                off = 0; row = {}
+                for vi in range(len(views_g)):
+                    d = int(np.asarray(dims_tbl[vi][l]).item()); row[vi] = (off, off+d); off += d
+                level_view_slices.append(row)
+
+        # Extraction et conversion en tenseurs
+        for l in range(L):
+            a, b = level_view_slices[l][v_idx_g]
+            mu_flat = np.asarray(mu_list_raw[l], dtype=np.float64).ravel()[a:b]
+            mu_tensor = torch.from_numpy(mu_flat).float().to(device).view(1, -1)
+            reference_latents.append(mu_tensor)
+
+    # ---------------------------------------------------------
+    # 5. BOUCLE DE CALCUL
+    # ---------------------------------------------------------
     bs = int(args.batch)
     out_csv = Path(args.out)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"[info] Calculating distances for {total_imgs} images (View: {vname})...")
+    print(f"[info] Calculating distances for {total_imgs} images...")
 
     with open(out_csv, "w", newline="") as f:
         writer = csv.writer(f)
@@ -2568,7 +2611,6 @@ def main_calc_distance(argv=None):
                 xs = []
                 valid_paths = []
                 
-                # Chargement Batch
                 for p in batch_paths:
                     try:
                         xi = _read_image_any(p, args.slice_axis, args.slice_index)
@@ -2590,14 +2632,13 @@ def main_calc_distance(argv=None):
                 B = xb.shape[0]
                 dists_per_level = np.zeros((B, L), dtype=np.float64)
                 
-                # Calcul Distances
+                # Calcul Distances par niveau
                 for l, z in enumerate(z_list):
-                    a, b = level_view_slices[l][v_idx_g]
-                    mu_flat = np.asarray(mu_list_raw[l], dtype=np.float64).ravel()[a:b]
-                    mu_tensor = torch.from_numpy(mu_flat).float().to(device).view(1, -1)
-
-                    z_flat = z.view(B, -1)
-                    dist_sq = torch.sum((z_flat - mu_tensor) ** 2, dim=1).cpu().numpy()
+                    ref = reference_latents[l] # (1, D)
+                    z_flat = z.view(B, -1)     # (B, D)
+                    
+                    # Broadcasting automatique: (B, D) - (1, D)
+                    dist_sq = torch.sum((z_flat - ref) ** 2, dim=1).cpu().numpy()
                     dists_per_level[:, l] = np.sqrt(dist_sq)
 
                 # Écriture
@@ -2608,11 +2649,10 @@ def main_calc_distance(argv=None):
                         row.extend([f"{d:.6f}" for d in dists_per_level[b_idx]])
                     writer.writerow(row)
                 
-                # Update TQDM
                 pbar.update(len(batch_paths))
 
     print(f"[ok] Distances written to {out_csv}")
-
+    
 def main_gauss_fit(argv: List[str] | None = None):
 
     def _sanitize_latents_array(X, cap_quantile=99.9, hard_cap=None):
