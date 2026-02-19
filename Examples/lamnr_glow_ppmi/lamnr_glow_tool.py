@@ -2680,6 +2680,12 @@ def main_calc_distance(argv=None):
 
 def main_gauss_fit(argv: List[str] | None = None):
 
+    try:
+        from tqdm import tqdm
+    except ImportError:
+        print("[info] tqdm not found. Install with `pip install tqdm` for progress bars.")
+        tqdm = lambda x, **kwargs: x
+
     def _sanitize_latents_array(X, cap_quantile=99.9, hard_cap=None):
         """
         X: (N, D) numpy float64
@@ -2877,13 +2883,15 @@ def main_gauss_fit(argv: List[str] | None = None):
         try:
             warm_xs = []
             warm_n = min(bs, len(paths))
-            for pth in paths[:warm_n]:
+
+            for pth in tqdm(paths[:warm_n], desc=f"Warmup {vname}", leave=False, unit="img"):
                 xi = _read_image_any(pth, int(args.slice_axis), int(args.slice_index))  # (1,h,w) in [0,1]
                 xi = torch.nn.functional.interpolate(
                     xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False
                 ).squeeze(0)
                 xi = to01(xi.unsqueeze(0)).squeeze(0)  # match trainer preprocessing
                 warm_xs.append(xi)
+
             if warm_xs:
                 xb_warm = torch.stack(warm_xs, dim=0).to(device=device, dtype=torch.float32)
                 warmup_actnorm_with_real_batch(model, xb_warm)
@@ -2910,7 +2918,7 @@ def main_gauss_fit(argv: List[str] | None = None):
 
         # main batching (preprocess exactly like warmup)
         batch = []
-        for pth in paths:
+        for pth in tqdm(paths, desc=f"Encoding {vname}", unit="img"):
             xi = _read_image_any(pth, int(args.slice_axis), int(args.slice_index))  # (1,h,w) in [0,1]
             xi = torch.nn.functional.interpolate(
                 xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False
