@@ -39,6 +39,11 @@ manifest_lesions="${manifest_dir}/manifest_brats_short.csv"
 
 # Numerical parameters for slice extraction and computational batching.
 WHICH_PYTHON="/Users/ntustison/miniconda3/bin/python3"
+
+# MPS (Metal Performance Shaders) est l'API d'accélération matérielle développée 
+# par Apple. Dans l'écosystème PyTorch, le backend mps est l'équivalent du backend 
+# cuda de NVIDIA, mais il est conçu spécifiquement pour exploiter les cœurs 
+# graphiques des puces Apple Silicon (séries M1, M2, M3, etc.).
 DEVICE="mps"  # Options: 'cpu', 'cuda:0', etc.
 
 # --- Derived Paths ---
