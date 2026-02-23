@@ -3,15 +3,15 @@
 
 ## Applications
 
-### Conditional Gaussian model over latents
+### Conditional Gaussian modeling over latents
 
 Normalizing flows give us an explicit bijection between data space and a latent
-space with a simple base density (e.g., Gaussian). Once the per-view flows have been trained,
-every multiview observation \(x = \{x^{(v)}\}_{v=1}^V\) can be mapped to a
-collection of latents \(z = \{z^{(v)}\}_{v=1}^V\) with an exactly known
-Jacobian. Any joint distribution placed on these latents induces a valid joint
-distribution on the original data via the change-of-variables formula. In other
-words, specifying a model \(p_Z(z)\) in latent space is equivalent to
+space with a simple base density (e.g., Gaussian). Once the per-view flows have
+been trained, every multiview observation \(x = \{x^{(v)}\}_{v=1}^V\) can be
+mapped to a collection of latents \(z = \{z^{(v)}\}_{v=1}^V\) with an exactly
+known Jacobian. Any joint distribution placed on these latents induces a valid
+joint distribution on the original data via the change-of-variables formula. In
+other words, specifying a model \(p_Z(z)\) in latent space is equivalent to
 specifying a generative model \(p_X(x)\) in data space, but with the advantage
 that inference and conditioning can be carried out where the geometry is
 simpler.
@@ -22,9 +22,11 @@ complex, non-Gaussian aspects of each view into the invertible mappings
 \(f^{(v)}\), so that the residual cross-view structure can be captured by a
 Gaussian dependence model in \(z\). Under this construction, the joint density
 factorizes as
-\[
+
+\begin{equation}
 p_X(x) = p_Z(z)\,\prod_{v=1}^V \left|\det \frac{\partial f^{(v)}}{\partial x^{(v)}}\right|,
-\]
+\end{equation}
+
 with \(z = f(x)\). Because \(p_Z(z)\) is Gaussian, all conditionals
 \(p_Z(z_U \mid z_O)\) are available in closed form, and exact conditional
 inference in data space reduces to three steps: encode observed views to
@@ -37,31 +39,48 @@ parameters and collect latents for all subjects. For image views, we retain a
 multiscale representation \(z^{(v)}_\ell\) at each level \(\ell \in
 \{1,\dots,L\}\); for tabular views we have a single level. Concatenating across
 views and levels yields a joint latent vector
-\[
-z = \bigl[z^{(1)}_1, \dots, z^{(1)}_L, \dots, z^{(V)}_1, \dots, z^{(V)}_L\bigr].
-\]
 
-We model this joint latent as Gaussian,
-\[
-z \sim \mathcal{N}(\mu, \Sigma),
-\]
-with mean \(\mu\) and covariance \(\Sigma\) estimated either per level or in a
-merged representation, using either full covariance, shrinkage estimators, or a
-low-rank-plus-diagonal parameterization depending on dimensionality.
+\begin{equation}
+z = \bigl[z^{(1)}_1, \dots, z^{(1)}_L, \dots, z^{(V)}_1, \dots, z^{(V)}_L\bigr].
+\end{equation}
+
+We model this joint latent as Gaussian, \(z \sim \mathcal{N}(\mu, \Sigma)\).
+However, directly computing and operating on the full covariance matrix
+\(\Sigma\) poses a severe computational bottleneck due to the "curse of
+dimensionality." While feasible for 2D images, a single 3D medical volume (e.g.,
+\(64 \times 64 \times 64\)) yields a latent dimension \(D \approx 2.6 \times
+10^5\). Storing the dense \(D \times D\) covariance matrix requires over 500 GB
+of memory, making direct Cholesky inversion \(\mathcal{O}(D^3)\) computationally
+intractable.
+
+To resolve this in high-dimensional 3D settings, we employ a
+low-rank-plus-diagonal parameterization via Singular Value Decomposition (SVD).
+We approximate the covariance as \(\Sigma \approx U \Lambda U^T + \sigma^2 I\),
+where \(U\) contains the top \(r\) eigenvectors (\(r \ll D\)), \(\Lambda\) is
+the diagonal matrix of the top \(r\) eigenvalues, and \(\sigma^2 I\) captures
+the isotropic residual variance.
 
 Given an observed subset of coordinates \(O\) and an unobserved subset \(U\),
-the posterior \(p(z_U \mid z_O)\) is Gaussian with closed-form mean and
-covariance:
-\[
+the exact posterior \(p(z_U \mid z_O)\) is Gaussian. The conditional mean and
+covariance are theoretically given by:
+
+\begin{equation}
 \mu_{U\mid O}
 = \mu_U + \Sigma_{UO}\Sigma_{OO}^{-1}(z_O - \mu_O),
-\]
-\[
+\end{equation}
+
+\begin{equation}
 \Sigma_{U\mid O}
 = \Sigma_{UU} - \Sigma_{UO}\Sigma_{OO}^{-1}\Sigma_{OU}.
-\]
-We use shrinkage or low-rank regularization to ensure positive definiteness and
-numerical stability during inversion of \(\Sigma_{OO}\).
+\end{equation}
+
+To evaluate these equations without instantiating the massive \(\Sigma_{OO}\)
+matrix, we utilize the Woodbury matrix identity. Specifically, we apply the
+Push-Through identity to perform the inversion strictly within the
+low-dimensional subspace \(r\). By reformulating the system to solve for a
+strictly positive-definite \(r \times r\) matrix (\(K = \Lambda^{1/2} U_O^T U_O
+\Lambda^{1/2} + \sigma^2 I\)), we bypass catastrophic numerical cancellations
+and reduce the memory footprint to mere megabytes.
 
 Samples from this conditional Gaussian propagate uncertainty, while the
 posterior mean provides a calibrated point estimate. Applying the inverse flows
