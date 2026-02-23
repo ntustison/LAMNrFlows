@@ -739,80 +739,286 @@ def main_gauss_impute(argv=None):
                 save_mid_slice_png(obs_images[v_obs], out_path / f"input_{i:04d}_{v_obs}_midslice.png")
 
 def main_recon_winsorize(argv=None):
-    ap = argparse.ArgumentParser("recon-winsorize")
-    ap.add_argument("--ckpt", required=True)
-    ap.add_argument("--input", required=True)
-    ap.add_argument("--out", required=True)
-    ap.add_argument("--quantile", type=float, default=0.99)
-    ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64")
-    ap.add_argument("--devices", default="cuda:0")
-    args = ap.parse_args(argv)
+    """
+    Encode un volume 3D, limite (winsorize) les valeurs latentes aberrantes, et reconstruit.
+    Supporte les seuils globaux et les surcharges spécifiques par niveau.
+    """
+    ap = argparse.ArgumentParser("LAM-Flow 3D Recon Winsorize")
+    ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
+    ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV")
+    ap.add_argument("--views", type=str, required=True, help="Views list (e.g. T1,FA)")
+    ap.add_argument("--view-index", type=int, default=0, help="View to process")
+    ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64", help="DxHxW")
+    ap.add_argument("--batch", type=int, default=1, help="Number of subjects to process")
+    ap.add_argument("--devices", type=str, default="cuda:0")
+    ap.add_argument("--out-dir", type=str, required=True, help="Output directory")
     
+    # Options de Winsorization Globales
+    ap.add_argument("--quantile", type=float, default=0.99, 
+                    help="Global quantile threshold (default: 0.99).")
+    ap.add_argument("--hard-threshold", type=float, default=None,
+                    help="Global hard threshold (e.g. 3.0). Overrides quantile if set.")
+    
+    # Option par niveau (Granularité)
+    ap.add_argument("--winsorize-level", action="append", type=str,
+                    help="Override threshold for a specific level. Format 'level,value'. "
+                         "Example: '--winsorize-level 0,0.999 --winsorize-level 2,0.95'. "
+                         "Can be repeated.")
+
+    args = ap.parse_args(argv)
     device = torch.device(args.devices)
+
+    # --- Parsing des overrides par niveau ---
+    level_overrides = {}
+    if args.winsorize_level:
+        for item in args.winsorize_level:
+            try:
+                parts = item.split(',')
+                if len(parts) != 2: raise ValueError
+                lvl = int(parts[0])
+                val = float(parts[1])
+                level_overrides[lvl] = val
+            except ValueError:
+                raise RuntimeError(f"Invalid format for --winsorize-level: '{item}'. Expected 'level,value'.")
+        print(f"[info] Per-level overrides: {level_overrides}")
+
+    # 1. Chargement Modèle
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
     cfg = blob.get("config", {})
     model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
     
     _prime_if_needed(model, *args.volume_size, device)
-    ok, note = load_weights_into_model(model, blob, 0)
+    
+    views_list = [v.strip() for v in args.views.split(",")]
+    vname = views_list[int(args.view_index)]
+    
+    ok, note = load_weights_into_model(model, blob, int(args.view_index))
     if not ok: raise RuntimeError(f"Weights failed: {note}")
+
+    # 2. Chargement Manifest & Fichiers
+    cols = _read_manifest_csv(Path(args.manifest))
+    _, per_view_paths = _resolve_views(cols, Path(args.manifest).parent, args.views)
+    paths = per_view_paths[int(args.view_index)]
     
-    xi = _read_image_3d(Path(args.input), args.volume_size).to(device)
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
     
-    with torch.no_grad():
-        z, _ = model.inverse_and_log_det(xi)
-        if not isinstance(z, list): z = [z]
-        z_clamped = []
-        for t in z:
-            thresh = torch.quantile(torch.abs(t), args.quantile)
-            z_clamped.append(torch.clamp(t, -thresh, thresh))
-        xh, _ = model.forward_and_log_det(z_clamped)
-        xh = to01(_coerce_5d(xh, args.volume_size))
+    bs = max(1, int(args.batch))
+    limit = min(bs, len(paths))
+    
+    is_hard_global = (args.hard_threshold is not None)
+    
+    # 3. Boucle de Traitement (Séquentiel pour économiser la RAM 3D)
+    for i in range(limit):
+        pth = paths[i]
+        xi = _read_image_3d(pth, target_dhw=args.volume_size).to(device)
         
-    save_nifti(xh, Path(args.out))
-    print(f"[ok] Saved {args.out}")
+        with torch.no_grad():
+            # Encodage
+            z_raw, _ = model.inverse_and_log_det(xi)
+            if not isinstance(z_raw, list): z_raw = [z_raw]
+            
+            print(f"\n[info] Winsorizing latents for {pth.name} (Global Mode: {'Hard' if is_hard_global else 'Quantile'})")
+            
+            z_clamped_list = []
+            
+            # 4. Winsorization Granulaire
+            for l, z in enumerate(z_raw):
+                z_flat = z.view(z.shape[0], -1) 
+                
+                # Déterminer la valeur cible pour ce niveau
+                if l in level_overrides:
+                    val_target = level_overrides[l]
+                    # L'override suit le même mode (Quantile ou Hard) que le paramètre global
+                    is_hard_level = is_hard_global 
+                    mode_str = "Override"
+                else:
+                    val_target = args.hard_threshold if is_hard_global else args.quantile
+                    is_hard_level = is_hard_global
+                    mode_str = "Global"
+
+                if is_hard_level:
+                    # Mode Hard Threshold
+                    thresh = float(val_target)
+                    z_clamped = torch.clamp(z, min=-thresh, max=thresh)
+                    pct_clipped = (torch.abs(z) > thresh).float().mean().item() * 100
+                else:
+                    # Mode Quantile
+                    q_val = float(val_target)
+                    abs_z = torch.abs(z_flat)
+                    thresh = torch.quantile(abs_z, q_val).item()
+                    z_clamped = torch.clamp(z, min=-thresh, max=thresh)
+                    pct_clipped = (abs_z > thresh).float().mean().item() * 100
+
+                print(f"  Level {l} ({mode_str}): target={val_target}, thresh={thresh:.3f}, clipped={pct_clipped:.2f}%")
+                z_clamped_list.append(z_clamped)
+
+            # 5. Décodage
+            xh, _ = model.forward_and_log_det(z_clamped_list)
+            xh = to01(_coerce_5d(xh, args.volume_size), winsorize=True)
+            diff = to01(torch.abs(xi - xh), winsorize=True)
+
+        # 6. Sauvegardes NIfTI et PNG
+        base_name = Path(pth).name.split('.')[0]
+        prefix = out_dir / f"winsorize_{i:03d}_{base_name}"
+        
+        save_nifti(xi, Path(f"{prefix}_orig.nii.gz"))
+        save_nifti(xh, Path(f"{prefix}_recon.nii.gz"))
+        save_nifti(diff, Path(f"{prefix}_diff.nii.gz"))
+        
+        save_mid_slice_png(xi, Path(f"{prefix}_orig_midslice.png"))
+        save_mid_slice_png(xh, Path(f"{prefix}_recon_midslice.png"))
+        
+        print(f"[ok] Saved {prefix}_recon.nii.gz")
+        
+    return 0
 
 def main_calc_distance(argv=None):
-    ap = argparse.ArgumentParser("calc-distance")
-    ap.add_argument("--ckpt", required=True)
-    ap.add_argument("--manifest", required=True)
-    ap.add_argument("--out-csv", required=True)
-    ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64")
+    """
+    Calcule la distance Euclidienne (L2) entre les latents d'une image 3D et une référence.
+    Référence par défaut : Moyenne Gaussienne (Mu) extraite du modèle .npz.
+    Référence optionnelle : Une image cible (--target-image).
+    """
+    ap = argparse.ArgumentParser("LAM-Flow 3D Latent Distance Calculator")
+    ap.add_argument("--ckpt", required=True, help="Path to checkpoint")
+    ap.add_argument("--gauss", required=True, help="Gaussian model (.npz)")
+    ap.add_argument("--manifest", required=True, help="Input manifest CSV")
+    ap.add_argument("--views", required=True, help="Views header (e.g. T1,FA)")
+    ap.add_argument("--view-index", type=int, default=0, help="View index to analyze")
+    ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64", help="DxHxW")
+    ap.add_argument("--batch", type=int, default=1, help="Batch size (keep low for 3D)")
     ap.add_argument("--devices", default="cuda:0")
+    ap.add_argument("--out-csv", required=True, help="Output CSV file path")
+    ap.add_argument("--save-levels", action=argparse.BooleanOptionalAction, default=True,
+                    help="Include separate columns for distance at each level.")
+    ap.add_argument("--target-image", type=str, default=None,
+                    help="Optional target 3D image path. If set, calculates distance to this image instead of the Gaussian mean.")
     args = ap.parse_args(argv)
     
     device = torch.device(args.devices)
+    
+    # 1. Chargement du modèle
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
     cfg = blob.get("config", {})
     model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
     
     _prime_if_needed(model, *args.volume_size, device)
-    ok, note = load_weights_into_model(model, blob, 0)
+    ok, note = load_weights_into_model(model, blob, int(args.view_index))
     if not ok: raise RuntimeError(f"Weights failed: {note}")
     
-    cols = _read_manifest_csv(Path(args.manifest))
-    paths = [Path(p) for p in list(cols.values())[0]]
+    views_list = [v.strip() for v in args.views.split(",")]
+    vname = views_list[int(args.view_index)]
+
+    # 2. Chargement du modèle Gaussien (pour obtenir Mu et la structure des niveaux)
+    npz = np.load(args.gauss, allow_pickle=True)
+    L = int(npz["L"])
+    views_g = list(npz["views"])
+    level_sizes = [int(sz) for sz in npz["dims_per_view_L0"]]
     
-    results = []
-    print(f"[info] Calculating latent L2 distance for {len(paths)} volumes")
+    if vname not in views_g: 
+        raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
+    v_idx_g = views_g.index(vname)
+    
+    slice_map = [] 
+    for l in range(L):
+        sz = level_sizes[l]
+        d = {}
+        curr = 0
+        for v in views_g:
+            d[v] = (curr, curr + sz)
+            curr += sz
+        slice_map.append(d)
 
-    for p in tqdm(paths, desc="Distance calc", unit="vol"):
-        try:
-            xi = _read_image_3d(p, args.volume_size).to(device)
-            with torch.no_grad():
-                z, _ = model.inverse_and_log_det(xi)
-                if not isinstance(z, list): z = [z]
-                dist = 0.0
-                for t in z: dist += torch.sum(t ** 2).item()
-                results.append((p.name, math.sqrt(dist)))
-        except Exception as e:
-            print(f"[warn] Failed {p}: {e}")
+    # 3. Parsing du Manifest
+    cols = _read_manifest_csv(Path(args.manifest))
+    _, per_view_paths = _resolve_views(cols, Path(args.manifest).parent, args.views)
+    paths = per_view_paths[int(args.view_index)]
+    total_imgs = len(paths)
 
-    with open(args.out_csv, "w", newline="") as f:
+    # ---------------------------------------------------------
+    # 4. PRÉPARATION DE LA RÉFÉRENCE (Moyenne ou Target Image)
+    # ---------------------------------------------------------
+    reference_latents = [] 
+
+    if args.target_image:
+        tgt_path = Path(args.target_image)
+        if not tgt_path.exists(): raise FileNotFoundError(f"Target image not found: {tgt_path}")
+        print(f"[info] Reference: Target Image ({tgt_path.name})")
+        
+        xt = _read_image_3d(tgt_path, target_dhw=args.volume_size).to(device)
+        with torch.no_grad():
+            z_tgt_list, _ = model.inverse_and_log_det(xt)
+            if not isinstance(z_tgt_list, list): z_tgt_list = [z_tgt_list]
+            
+        for z in z_tgt_list:
+            reference_latents.append(z.view(1, -1).detach()) 
+
+    else:
+        print(f"[info] Reference: Gaussian Mean (Mu)")
+        for l in range(L):
+            mu_l = npz[f"mu_{l}"]
+            s, e = slice_map[l][vname]
+            mu_flat = mu_l[s:e]
+            mu_tensor = torch.from_numpy(mu_flat).float().to(device).view(1, -1)
+            reference_latents.append(mu_tensor)
+
+    # ---------------------------------------------------------
+    # 5. BOUCLE DE CALCUL
+    # ---------------------------------------------------------
+    bs = max(1, int(args.batch))
+    out_csv = Path(args.out_csv)
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"[info] Calculating distances for {total_imgs} volumes...")
+
+    with open(out_csv, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["filename", "latent_l2_dist"])
-        writer.writerows(results)
-    print(f"[ok] Saved {args.out_csv}")
+        
+        header = ["path", "total_distance"]
+        if args.save_levels:
+            header += [f"dist_L{l}" for l in range(L)]
+        writer.writerow(header)
+
+        for i in tqdm(range(0, total_imgs, bs), desc="Distance calc", unit="batch"):
+            batch_paths = paths[i : i + bs]
+            xs = []
+            valid_paths = []
+            
+            for p in batch_paths:
+                try:
+                    xi = _read_image_3d(p, target_dhw=args.volume_size)
+                    xs.append(xi.squeeze(0))
+                    valid_paths.append(str(p))
+                except Exception as e:
+                    print(f"[warn] Failed to read {p}: {e}")
+
+            if not xs: continue
+
+            xb = torch.stack(xs, dim=0).to(device)
+            B = xb.shape[0]
+
+            with torch.no_grad():
+                z_list, _ = model.inverse_and_log_det(xb)
+                if not isinstance(z_list, list): z_list = [z_list]
+                
+            dists_per_level = np.zeros((B, L), dtype=np.float64)
+            
+            for l, z in enumerate(z_list):
+                ref = reference_latents[l] 
+                z_flat = z.view(B, -1)     
+                
+                # Broadcasting automatique: (B, D) - (1, D)
+                dist_sq = torch.sum((z_flat - ref) ** 2, dim=1).cpu().numpy()
+                dists_per_level[:, l] = np.sqrt(dist_sq)
+
+            for b_idx in range(B):
+                total_dist = np.sqrt(np.sum(dists_per_level[b_idx] ** 2))
+                row = [valid_paths[b_idx], f"{total_dist:.6f}"]
+                if args.save_levels:
+                    row.extend([f"{d:.6f}" for d in dists_per_level[b_idx]])
+                writer.writerow(row)
+
+    print(f"[ok] Distances written to {out_csv}")
 
 def main_recon_interpolate(argv=None):
     ap = argparse.ArgumentParser("recon-interpolate")

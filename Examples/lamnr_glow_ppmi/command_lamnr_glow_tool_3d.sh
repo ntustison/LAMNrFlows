@@ -137,16 +137,19 @@ mkdir -p "${sample_out_dir}"
 # --view-index 0 correspond généralement à la modalité T1 selon votre ordre d'entraînement
 # --temperature 0.8 réduit légèrement la variance pour des échantillons plus nets
 
-${WHICH_PYTHON} lamnr_glow_tool_3d.py sample \
-  --ckpt ${ckpt} \
-  --view-index 0 \
-  --n-samples 5 \
-  --volume-size ${which_experiment} \
-  --temperature 0.25 \
-  --out-dir "${sample_out_dir}" \
-  --devices cpu
-  
-echo "Échantillonnage terminé. Fichiers sauvegardés dans : ${sample_out_dir}"
+if [[ -d ${sample_out_dir} && $(ls -A ${sample_out_dir}) ]]; then
+  echo "Le répertoire d'échantillons existe déjà et n'est pas vide : ${sample_out_dir}. Ignoré."
+else 
+  ${WHICH_PYTHON} lamnr_glow_tool_3d.py sample \
+    --ckpt ${ckpt} \
+    --view-index 0 \
+    --n-samples 5 \
+    --volume-size ${which_experiment} \
+    --temperature 0.25 \
+    --out-dir "${sample_out_dir}" \
+    --devices cpu
+  echo "Échantillonnage terminé. Fichiers sauvegardés dans : ${sample_out_dir}"
+fi
 
 ###############################################################################
 # 2. Imputation Gaussienne (T1 -> FA)
@@ -158,37 +161,41 @@ impute_out_dir="${out_dir}/imputed_FA/"
 
 echo "Exécution de l'imputation conditionnelle (T1 -> FA)..."
 
-${WHICH_PYTHON} lamnr_glow_tool_3d.py gauss-impute \
-  --ckpt ${ckpt} \
-  --gauss ${gaussian_lr} \
-  --manifest ${manifest_short} \
-  --views T1,FA \
-  --observed T1 \
-  --target FA \
-  --volume-size ${which_experiment} \
-  --out-dir ${impute_out_dir} \
-  --devices cpu
+if [[ -d ${impute_out_dir} && $(ls -A ${impute_out_dir}) ]]; then
+  echo "Le répertoire d'imputation existe déjà et n'est pas vide : ${impute_out_dir}. Ignoré."
+else
+  ${WHICH_PYTHON} lamnr_glow_tool_3d.py gauss-impute \
+    --ckpt ${ckpt} \
+    --gauss ${gaussian_lr} \
+    --manifest ${manifest_short} \
+    --views T1,FA \
+    --observed T1 \
+    --target FA \
+    --volume-size ${which_experiment} \
+    --out-dir ${impute_out_dir} \
+    --devices cpu
+  echo "Imputation terminée. Fichiers sauvegardés dans : ${impute_out_dir}"
+fi    
 
 ###############################################################################
 # 1. Calcul de Distance Latente (Détection d'anomalies / OOD)
 ###############################################################################
 # Évalue la distance entre les latents de chaque volume T1 et la moyenne de la population.
 
-# if [[ ! -f ${dist_csv} ]]; then
-#   echo "Calcul de la distance à la moyenne Gaussienne pour la vue T1..."
-  
-#   ${WHICH_PYTHON} lamnr_glow_tool_3d.py calc-distance \
-#     --ckpt ${ckpt} \
-#     --gauss ${gaussian_lr} \
-#     --manifest ${manifest} \
-#     --views T1,FA \
-#     --volume-size ${which_experiment} \
-#     --out-csv ${dist_csv} \
-#     --devices ${DEVICE}
-
-# else
-#   echo "Le fichier CSV de distances existe déjà : ${dist_csv}. Ignoré."
-# fi
+if [[ ! -f ${dist_csv} ]]; then
+  echo "Calcul de la distance à la moyenne Gaussienne pour la vue T1..."  
+  ${WHICH_PYTHON} lamnr_glow_tool_3d.py calc-distance \
+    --ckpt ${ckpt} \
+    --gauss ${gaussian_lr} \
+    --manifest ${manifest} \
+    --views T1 \
+    --view-index 0 \
+    --volume-size ${which_experiment} \
+    --out-csv ${dist_csv} \
+    --devices cpu
+else
+  echo "Le fichier CSV de distances existe déjà : ${dist_csv}. Ignoré."
+fi
 
 ###############################################################################
 # 3. Winsorisation (Suppression des Lésions/Artefacts)
@@ -196,40 +203,44 @@ ${WHICH_PYTHON} lamnr_glow_tool_3d.py gauss-impute \
 # Restreint les valeurs extrêmes dans l'espace latent (quantiles) pour 
 # "guérir" ou atténuer les anomalies structurelles (ex: tumeurs de BraTS).
 
-# winsorize_out_dir="${out_dir}/winsorized_lesions/"
+winsorize_out_dir="${out_dir}/winsorized_lesions/"
 
-# if [[ ! -d ${winsorize_out_dir} ]]; then
-#   echo "Exécution de la winsorisation sur le jeu de données des lésions..."
-#   mkdir -p "${winsorize_out_dir}"
+if [[ ! -d ${winsorize_out_dir} ]]; then
+  echo "Exécution de la winsorisation sur le jeu de données des lésions..."
+  mkdir -p "${winsorize_out_dir}"
 
-#   # Lecture du manifeste en ignorant l'en-tête. 
-#   # On suppose que la modalité T1 est la première colonne du CSV.
-#   tail -n +2 "${manifest_lesions}" | while IFS=',' read -r t1_path fa_path_or_other; do
+  # Lecture du manifeste en ignorant l'en-tête. 
+  # On suppose que la modalité T1 est la première colonne du CSV.
+  tail -n +2 "${manifest_lesions}" | while IFS=',' read -r t1_path fa_path_or_other; do
     
-#     # Ignorer les lignes vides
-#     if [[ -z "${t1_path}" ]]; then continue; fi
+    # Ignorer les lignes vides
+    if [[ -z "${t1_path}" ]]; then continue; fi
     
-#     # Extraction du nom de fichier pour créer le chemin de sortie
-#     filename=$(basename "${t1_path}")
-#     out_path="${winsorize_out_dir}/winsorized_${filename}"
+    # Extraction du nom de fichier pour créer le chemin de sortie
+    filename=$(basename "${t1_path}")
+    out_path="${winsorize_out_dir}/winsorized_${filename}"
 
-#     echo "  Traitement de : ${filename}"
+    echo "  Traitement de : ${filename}"
 
-#     ${WHICH_PYTHON} lamnr_glow_tool_3d.py recon-winsorize \
-#       --ckpt ${ckpt} \
-#       --input "${t1_path}" \
-#       --volume-size ${which_experiment} \
-#       --quantile 0.99 \
-#       --out "${out_path}" \
-#       --devices ${DEVICE}
-      
-#   done
+    ${WHICH_PYTHON} lamnr_glow_tool_3d.py recon-winsorize \
+      --ckpt ${ckpt} \
+      --manifest ${manifest_lesions} \
+      --views T1 \
+      --view-index 0 \
+      --volume-size ${which_experiment} \
+      --batch 2 \
+      --hard-threshold 3.0 \
+      --winsorize-level 0,0.95 \
+      --out-dir ${winsorize_out_dir} \
+      --devices cpu
+
+  done
   
-#   echo "Winsorisation terminée. Résultats sauvegardés dans : ${winsorize_out_dir}"
+  echo "Winsorisation terminée. Résultats sauvegardés dans : ${winsorize_out_dir}"
 
-# else
-#   echo "Le répertoire de winsorisation existe déjà : ${winsorize_out_dir}. Ignoré."
-# fi
+else
+  echo "Le répertoire de winsorisation existe déjà : ${winsorize_out_dir}. Ignoré."
+fi
 
 ###############################################################################
 # 4. Interpolation Latente 3D (Morphing / Transfert de Style)
