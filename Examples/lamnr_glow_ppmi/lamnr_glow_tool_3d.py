@@ -1021,44 +1021,133 @@ def main_calc_distance(argv=None):
     print(f"[ok] Distances written to {out_csv}")
 
 def main_recon_interpolate(argv=None):
-    ap = argparse.ArgumentParser("recon-interpolate")
-    ap.add_argument("--ckpt", required=True)
-    ap.add_argument("--source", required=True)
-    ap.add_argument("--target", required=True)
-    ap.add_argument("--out-dir", required=True)
-    ap.add_argument("--steps", type=int, default=5)
-    ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64")
-    ap.add_argument("--devices", default="cuda:0")
+    """
+    Interpole entre une cible (Moyenne Gaussienne ou Image Cible) et un sujet 3D.
+    Génère une séquence de volumes NIfTI représentant la transition.
+    """
+    ap = argparse.ArgumentParser("LAM-Flow 3D Latent Interpolation")
+    ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
+    ap.add_argument("--gauss", type=str, default=None, help="Gaussian model (.npz). Required if no target image is provided.")
+    ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV (Source images)")
+    ap.add_argument("--views", type=str, required=True, help="Views list (e.g. T1,FA)")
+    ap.add_argument("--view-index", type=int, default=0, help="View to process")
+    ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64", help="DxHxW")
+    ap.add_argument("--batch", type=int, default=1, help="Number of source subjects to process")
+    ap.add_argument("--devices", type=str, default="cuda:0")
+    ap.add_argument("--out-dir", type=str, required=True, help="Output directory for NIfTI frames")
+    
+    # Options d'interpolation
+    ap.add_argument("--target-image", type=str, default=None,
+                    help="Optional target image path. If not set, interpolates towards Gaussian mean.")
+    ap.add_argument("--steps", type=int, default=5, 
+                    help="Number of interpolation steps (frames) to generate between Target (t=0) and Source (t=1).")
     args = ap.parse_args(argv)
     
     device = torch.device(args.devices)
+
+    # 1. Chargement Modèle
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
     cfg = blob.get("config", {})
     model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
-    
     _prime_if_needed(model, *args.volume_size, device)
-    ok, note = load_weights_into_model(model, blob, 0)
+    
+    ok, note = load_weights_into_model(model, blob, int(args.view_index))
     if not ok: raise RuntimeError(f"Weights failed: {note}")
+
+    views_list = [v.strip() for v in args.views.split(",")]
+    vname = views_list[int(args.view_index)]
+
+    # 2. Chargement Manifest Source
+    cols = _read_manifest_csv(Path(args.manifest))
+    _, per_view_paths = _resolve_views(cols, Path(args.manifest).parent, args.views)
+    paths = per_view_paths[int(args.view_index)]
+
+    # 3. Détermination de la Cible (z_target)
+    z_target_list = []
     
-    s = _read_image_3d(Path(args.source), args.volume_size).to(device)
-    t = _read_image_3d(Path(args.target), args.volume_size).to(device)
-    
-    with torch.no_grad():
-        zs, _ = model.inverse_and_log_det(s)
-        zt, _ = model.inverse_and_log_det(t)
-        if not isinstance(zs, list): zs = [zs]
-        if not isinstance(zt, list): zt = [zt]
+    if args.target_image:
+        tgt_path = Path(args.target_image)
+        if not tgt_path.exists(): raise FileNotFoundError(f"Target image not found: {tgt_path}")
+        print(f"[info] Target: Specific Image ({tgt_path.name})")
         
-        Path(args.out_dir).mkdir(exist_ok=True, parents=True)
-        alphas = np.linspace(0, 1, args.steps)
-        for i, alpha in enumerate(alphas):
-            zi = []
-            for l in range(len(zs)):
-                zi.append(zs[l] * (1 - alpha) + zt[l] * alpha)
-            xi, _ = model.forward_and_log_det(zi)
-            xi = to01(_coerce_5d(xi, args.volume_size))
-            save_nifti(xi, Path(args.out_dir) / f"interp_{i:02d}_a{alpha:.2f}.nii.gz")
-    print(f"[ok] Saved {args.steps} frames to {args.out_dir}")
+        xt = _read_image_3d(tgt_path, target_dhw=args.volume_size).to(device)
+        with torch.no_grad():
+            z_tgt_raw, _ = model.inverse_and_log_det(xt)
+            if not isinstance(z_tgt_raw, list): z_tgt_raw = [z_tgt_raw]
+            for z in z_tgt_raw:
+                z_target_list.append(z.clone()) # (1, C, D, H, W)
+    else:
+        if not args.gauss:
+            raise RuntimeError("You must provide --gauss if no --target-image is specified.")
+        print(f"[info] Target: Gaussian Mean (Mu)")
+        npz = np.load(args.gauss, allow_pickle=True)
+        L = int(npz["L"])
+        views_g = list(npz["views"])
+        level_sizes = [int(sz) for sz in npz["dims_per_view_L0"]]
+        
+        if vname not in views_g: raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
+        
+        # On utilise un encodage factice juste pour obtenir la forme 5D exacte
+        dummy = torch.zeros(1, 1, args.volume_size[0], args.volume_size[1], args.volume_size[2], device=device)
+        with torch.no_grad():
+            z_dummy, _ = model.inverse_and_log_det(dummy)
+            if not isinstance(z_dummy, list): z_dummy = [z_dummy]
+
+        for l in range(L):
+            mu_l = npz[f"mu_{l}"]
+            
+            # Calcul de l'offset pour cette vue
+            curr = 0
+            for v in views_g:
+                if v == vname:
+                    s, e = curr, curr + level_sizes[l]
+                    break
+                curr += level_sizes[l]
+                
+            mu_flat = mu_l[s:e]
+            ref_shape = z_dummy[l].shape
+            mu_tensor = torch.from_numpy(mu_flat).float().view(1, ref_shape[1], ref_shape[2], ref_shape[3], ref_shape[4]).to(device)
+            z_target_list.append(mu_tensor)
+
+    # 4. Boucle d'Interpolation (Sujet par Sujet)
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    bs = max(1, int(args.batch))
+    limit = min(bs, len(paths))
+
+    alphas = np.linspace(0.0, 1.0, args.steps)
+    
+    for i in range(limit):
+        pth = paths[i]
+        print(f"\n[info] Interpolating Source: {pth.name}")
+        xs = _read_image_3d(pth, target_dhw=args.volume_size).to(device)
+        
+        with torch.no_grad():
+            z_source_list, _ = model.inverse_and_log_det(xs)
+            if not isinstance(z_source_list, list): z_source_list = [z_source_list]
+            
+            base_name = Path(pth).name.split('.')[0]
+            subj_dir = out_dir / f"interp_{i:03d}_{base_name}"
+            subj_dir.mkdir(exist_ok=True)
+            
+            for step_idx, alpha in enumerate(alphas):
+                z_interp_list = []
+                for l, (z_src, z_tgt) in enumerate(zip(z_source_list, z_target_list)):
+                    # Interpolation linéaire : z_new = z_tgt + alpha * (z_src - z_tgt)
+                    z_new = z_tgt + float(alpha) * (z_src - z_tgt)
+                    z_interp_list.append(z_new)
+                
+                xh, _ = model.forward_and_log_det(z_interp_list)
+                xh = to01(_coerce_5d(xh, args.volume_size), winsorize=True)
+                
+                # Sauvegarde NIfTI et PNG pour chaque frame
+                out_name = subj_dir / f"frame_{step_idx:02d}_alpha{alpha:.2f}.nii.gz"
+                save_nifti(xh, out_name)
+                save_mid_slice_png(xh, subj_dir / f"frame_{step_idx:02d}_alpha{alpha:.2f}_midslice.png")
+                
+        print(f"[ok] Generated {args.steps} frames in {subj_dir}")
+
+    return 0
 
 def main_sample(argv=None):
     ap = argparse.ArgumentParser("LAM‑Flow 3D sample tool")

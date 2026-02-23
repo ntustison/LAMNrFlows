@@ -248,32 +248,34 @@ fi
 # Crée une transition fluide dans l'espace latent entre un volume source
 # (sujet avec lésion) et un volume cible (sujet sain PPMI).
 
-# interp_out_dir="${out_dir}/interpolation_brats_to_ppmi/"
+interp_out_dir="${out_dir}/interpolation_brats_to_ppmi/"
 
-# if [[ ! -d ${interp_out_dir} ]]; then
-#   echo "Génération de l'interpolation latente 3D (Source -> Cible)..."
+if [[ ! -d ${interp_out_dir} ]]; then
+  echo "Génération de l'interpolation latente 3D (Source -> Cible)..."
   
-#   # Extraction du premier chemin T1 valide depuis les manifestes (en ignorant l'en-tête)
-#   source_vol=$(tail -n +2 "${manifest_lesions}" | awk -F',' '{print $1}' | grep -v "^$" | head -n 1)
-#   target_vol=$(tail -n +2 "${manifest}" | awk -F',' '{print $1}' | grep -v "^$" | head -n 1)
+  # Extraction du premier chemin T1 valide depuis les manifestes (en ignorant l'en-tête)
+  source_vol=$(tail -n +2 "${manifest_lesions}" | awk -F',' '{print $1}' | grep -v "^$" | head -n 1)
+  target_vol=$(tail -n +2 "${manifest}" | awk -F',' '{print $1}' | grep -v "^$" | head -n 1)
 
-#   if [[ -f "${source_vol}" && -f "${target_vol}" ]]; then
-#     echo "  Source : ${source_vol}"
-#     echo "  Cible  : ${target_vol}"
+  if [[ -f "${source_vol}" && -f "${target_vol}" ]]; then
+    echo "  Source : ${source_vol}"
+    echo "  Cible  : ${target_vol}"
 
-#     ${WHICH_PYTHON} lamnr_glow_tool_3d.py recon-interpolate \
-#       --ckpt ${ckpt} \
-#       --source "${source_vol}" \
-#       --target "${target_vol}" \
-#       --out-dir ${interp_out_dir} \
-#       --steps 5 \
-#       --volume-size ${which_experiment} \
-#       --devices ${DEVICE}
+    ${WHICH_PYTHON} lamnr_glow_tool_3d.py recon-interpolate \
+      --ckpt ${ckpt} \
+      --gauss ${gaussian_lr} \
+      --manifest ${manifest} \
+      --views T1 \
+      --view-index 0 \
+      --volume-size ${which_experiment} \
+      --steps 5 \
+      --out-dir ${interp_out_dir} \
+      --devices cpu
       
-#     echo "Interpolation terminée. Fichiers NIfTI intermédiaires sauvegardés dans : ${interp_out_dir}"
-#   else
-#     echo "Erreur : Fichiers source ou cible introuvables. Vérifiez les chemins dans vos manifestes."
-#   fi
-# else
-#   echo "Le répertoire d'interpolation existe déjà : ${interp_out_dir}. Ignoré."
-# fi
+    echo "Interpolation terminée. Fichiers NIfTI intermédiaires sauvegardés dans : ${interp_out_dir}"
+  else
+    echo "Erreur : Fichiers source ou cible introuvables. Vérifiez les chemins dans vos manifestes."
+  fi
+else
+  echo "Le répertoire d'interpolation existe déjà : ${interp_out_dir}. Ignoré."
+fi
