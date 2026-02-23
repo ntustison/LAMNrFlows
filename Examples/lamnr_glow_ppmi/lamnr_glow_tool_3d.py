@@ -186,7 +186,7 @@ def to01(x: torch.Tensor, eps: float = 1e-8, winsorize: bool = True, upper_q: fl
 
     if winsorize:
         N, C, D, H, W = x.shape
-        flat = x.view(N, C, -1)
+        flat = x.reshape(N, C, -1)
         hi = torch.quantile(flat, upper_q, dim=-1, keepdim=True).view(N, C, 1, 1, 1)
         lo = torch.quantile(flat, 1.0 - upper_q, dim=-1, keepdim=True).view(N, C, 1, 1, 1)
         x = torch.maximum(torch.minimum(x, hi), lo)
@@ -738,6 +738,166 @@ def main_gauss_impute(argv=None):
                 save_nifti(obs_images[v_obs], input_path)
                 save_mid_slice_png(obs_images[v_obs], out_path / f"input_{i:04d}_{v_obs}_midslice.png")
 
+def main_recon_template(argv=None):
+    """
+    Reconstruit un template 3D (volume moyen) dans l'espace latent en utilisant le modèle Gaussien.
+    Génère le volume décodé à partir de la moyenne (mu), et optionnellement, une moyenne de 
+    plusieurs échantillons stochastiques de Monte Carlo.
+    """
+    ap = argparse.ArgumentParser("LAM-Flow 3D latent template reconstruction (recon-template)")
+    ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
+    ap.add_argument("--gauss", type=str, required=True, help="Gaussian model (.npz)")
+    ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV (for views validation)")
+    ap.add_argument("--views", type=str, required=True, help="Views list (e.g. T1,FA)")
+    ap.add_argument("--view-index", type=int, default=0, help="Which view to reconstruct")
+    ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64", help="DxHxW")
+    ap.add_argument("--devices", type=str, default="cuda:0")
+    ap.add_argument("--out-dir", type=str, required=True, help="Output directory for templates")
+    
+    # Options de Monte Carlo
+    ap.add_argument("--mc-samples", type=int, default=0,
+                    help="Number of Monte Carlo samples to draw in latent space and average.")
+    ap.add_argument("--mc-temp", type=float, default=1.0, help="Monte Carlo temperature.")
+    ap.add_argument("--seed", type=int, default=12345, help="Random seed for MC sampling.")
+    ap.add_argument("--sharpen-image", action="store_true", 
+                    help="Apply smoothing & Laplacian sharpening using ANTs before saving.")
+    args = ap.parse_args(argv)
+
+    device = torch.device(args.devices)
+    mc_n = max(0, int(args.mc_samples))
+    if mc_n > 0:
+        set_deterministic(int(args.seed))
+
+    # 1. Chargement Modèle
+    blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
+    cfg = blob.get("config", {})
+    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+    _prime_if_needed(model, *args.volume_size, device)
+    
+    ok, note = load_weights_into_model(model, blob, int(args.view_index))
+    if not ok: raise RuntimeError(f"Weights failed: {note}")
+
+    views_list = [v.strip() for v in args.views.split(",") if v.strip()]
+    vname = views_list[int(args.view_index)]
+
+    # 2. Chargement Gaussien
+    npz = np.load(args.gauss, allow_pickle=True)
+    L = int(npz["L"])
+    views_g = list(npz["views"])
+    level_sizes = [int(sz) for sz in npz["dims_per_view_L0"]]
+    
+    if vname not in views_g: raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
+    v_idx = views_g.index(vname)
+    
+    slice_map = [] 
+    for l in range(L):
+        sz = level_sizes[l]
+        d = {}
+        curr = 0
+        for v in views_g:
+            d[v] = (curr, curr + sz)
+            curr += sz
+        slice_map.append(d)
+
+    # 3. Sonde de la dimension latente 5D exacte
+    dummy = torch.zeros(1, 1, *args.volume_size, device=device)
+    with torch.no_grad():
+        z_dummy, _ = model.inverse_and_log_det(dummy)
+        if not isinstance(z_dummy, list): z_dummy = [z_dummy]
+    z_shapes = [t.shape for t in z_dummy]
+
+    # 4. Construction de la Moyenne (Mu)
+    z_mu_list = []
+    print(f"[info] Reconstructing base template for {vname} from Gaussian mean (mu)...")
+    for l in range(L):
+        mu_l = npz[f"mu_{l}"]
+        s, e = slice_map[l][vname]
+        mu_flat = mu_l[s:e]
+        
+        mu_tensor = torch.from_numpy(mu_flat).float().view(1, *z_shapes[l][1:]).to(device)
+        z_mu_list.append(mu_tensor)
+
+    with torch.no_grad():
+        x_mu, _ = model.forward_and_log_det(z_mu_list)
+        x_mu = to01(_coerce_5d(x_mu, args.volume_size), winsorize=True)
+
+    # 5. Échantillonnage de Monte Carlo
+    x_mc_mean = None
+    if mc_n > 0:
+        print(f"[info] Generating {mc_n} Monte Carlo samples at temp={args.mc_temp}...")
+        z_mc_list = []
+        for l in range(L):
+            s, e = slice_map[l][vname]
+            mu_flat = npz[f"mu_{l}"][s:e]
+            Dv = e - s
+            
+            if f"Sigma_{l}_type" in npz and str(npz[f"Sigma_{l}_type"]) == "lowrank":
+                U_full = npz[f"Sigma_{l}_U"]
+                eig = npz[f"Sigma_{l}_eig"] * (args.mc_temp ** 2)
+                sigma2 = float(npz[f"Sigma_{l}_sigma2"]) * (args.mc_temp ** 2)
+                
+                U_v = U_full[s:e, :]
+                
+                # Formule : z = mu + U * sqrt(eig) * xi + sqrt(sigma2) * eps
+                xi = np.random.randn(U_v.shape[1], mc_n)
+                A = U_v * np.sqrt(np.clip(eig, a_min=0.0, a_max=None))[np.newaxis, :]
+                z_samp = mu_flat[:, None] + A @ xi
+                
+                if sigma2 > 0.0:
+                    eps = np.random.randn(Dv, mc_n)
+                    z_samp = z_samp + math.sqrt(max(sigma2, 0.0)) * eps
+                
+                z_samp = z_samp.T # Format (mc_n, D)
+            else:
+                raise RuntimeError("Only 'lowrank' covariance is currently supported for 3D MC sampling.")
+
+            z_samp_tensor = torch.from_numpy(z_samp).float().view(mc_n, *z_shapes[l][1:]).to(device)
+            z_mc_list.append(z_samp_tensor)
+
+        # Décodage Séquentiel (Crucial pour éviter un OOM en 3D)
+        print(f"[info] Decoding MC samples sequentially to preserve VRAM...")
+        x_mc_sum = torch.zeros_like(x_mu)
+        for i in tqdm(range(mc_n), desc="Decoding MC", unit="vol"):
+            z_mc_single = [z[i:i+1] for z in z_mc_list]
+            with torch.no_grad():
+                xi, _ = model.forward_and_log_det(z_mc_single)
+                xi = to01(_coerce_5d(xi, args.volume_size), winsorize=True)
+            x_mc_sum += xi
+            
+        x_mc_mean = x_mc_sum / float(mc_n)
+
+    # 6. Sharpening (Optionnel)
+    if args.sharpen_image:
+        print("[info] Applying Laplacian sharpening...")
+        import ants
+        
+        x_mu_cpu = x_mu.cpu().squeeze().numpy()
+        ants_mu = ants.iMath_sharpen(ants.smooth_image(ants.from_numpy(x_mu_cpu), 1.0))
+        x_mu = torch.from_numpy(ants_mu.numpy()).view(1, 1, *args.volume_size).to(device)
+        
+        if x_mc_mean is not None:
+            x_mc_cpu = x_mc_mean.cpu().squeeze().numpy()
+            ants_mc = ants.iMath_sharpen(ants.smooth_image(ants.from_numpy(x_mc_cpu), 1.0))
+            x_mc_mean = torch.from_numpy(ants_mc.numpy()).view(1, 1, *args.volume_size).to(device)
+
+    # 7. Sauvegarde
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    save_nifti(x_mu, out_dir / f"template_{vname}_mu.nii.gz")
+    save_mid_slice_png(x_mu, out_dir / f"template_{vname}_mu_midslice.png")
+    
+    if x_mc_mean is not None:
+        save_nifti(x_mc_mean, out_dir / f"template_{vname}_mc_mean.nii.gz")
+        save_mid_slice_png(x_mc_mean, out_dir / f"template_{vname}_mc_mean_midslice.png")
+        
+        diff = to01(torch.abs(x_mu - x_mc_mean), winsorize=True)
+        save_nifti(diff, out_dir / f"template_{vname}_diff.nii.gz")
+        save_mid_slice_png(diff, out_dir / f"template_{vname}_diff_midslice.png")
+
+    print(f"[ok] Saved templates to {out_dir}")
+    return 0
+
 def main_recon_winsorize(argv=None):
     """
     Encode un volume 3D, limite (winsorize) les valeurs latentes aberrantes, et reconstruit.
@@ -1204,7 +1364,8 @@ if __name__ == "__main__":
         "gauss-impute": main_gauss_impute,
         "recon-winsorize": main_recon_winsorize,
         "calc-distance": main_calc_distance,
-        "recon-interpolate": main_recon_interpolate
+        "recon-interpolate": main_recon_interpolate,
+        "recon-template": main_recon_template
     }
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print("Available subcommands:", ", ".join(sorted(table.keys())))
