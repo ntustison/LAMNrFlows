@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
 lamnr_glow_tool_3d.py — LAM-Flow (Glow 3D) Inference & Analysis Toolkit
-v0.5.4-3D (STABLE ACTNORM & PUSH-THROUGH)
 
 A comprehensive suite for sampling, reconstruction, latent space analysis, and
 conditional generation using trained 3D LAM-Flow models.
 
-v0.5.0-3D (2026-02-20)
+v0.5.5-3D (STABLE ACTNORM & PUSH-THROUGH)
 
 KEY FEATURES:
 -------------
@@ -14,16 +13,18 @@ KEY FEATURES:
 2. Reconstruction: Sanity check (x -> z -> x_hat) and 3D NIfTI export.
 3. Gaussian Fitting (gauss-fit): Fit a conditional Gaussian model to the latent space.
    - FORCED 'lowrank' (SVD) or 'diag' to avoid OOM errors on large 3D latents.
-4. Imputation (gauss-impute): Predict missing 3D modalities (e.g., T1 -> FA).
-5. Latent Manipulation:
-   - recon-winsorize: Clamp latents to remove outliers (lesions/artifacts).
-   - recon-interpolate: Interpolate 3D volumes between source and target.
-   - calc-distance: Compute Euclidean distance to detect anomalies.
+   - Includes latent circuit breakers (clamping) to prevent Out-Of-Distribution explosion.
+4. Imputation (gauss-impute): Predict missing 3D modalities (e.g., T1 -> FA) using the stable Push-Through Woodbury identity.
+5. Latent Manipulation & Analysis:
+   - recon-template (NEW): Generate population average templates and Monte Carlo samples.
+   - recon-winsorize: Clamp latents globally or per-level to remove outliers (lesions/artifacts).
+   - recon-interpolate: Generate 3D NIfTI sequences interpolating between source and target/mean.
+   - calc-distance: Compute Euclidean distance to detect anomalies against the group mean.
 
 COMMANDS & EXAMPLES:
 --------------------
 
-1. FIT GAUSSIAN MODEL (Required for analysis)
+1. FIT GAUSSIAN MODEL (Required for downstream analysis)
    Fit a per-level Gaussian. Uses --cov-estimator lowrank by default for 3D volumes.
    
    python lamnr_glow_tool_3d.py gauss-fit \
@@ -31,58 +32,82 @@ COMMANDS & EXAMPLES:
      --manifest data/manifest.csv \
      --views T1,FA \
      --volume-size 64x64x64 \
-     --cov-estimator lowrank --rank 128 --sigma2 auto \
+     --cov-estimator lowrank --rank 256 \
      --gauss-out output/model_lowrank.npz
 
-2. CALCULATE LATENT DISTANCE (Anomaly Detection)
-   Compute Euclidean distance between subject latents and the group mean.
+2. IMPUTATION (Conditional Generation)
+   Impute a missing modality from an observed one.
+   
+   python lamnr_glow_tool_3d.py gauss-impute \
+     --ckpt runs/model_64x64x64/training_state.pt \
+     --gauss output/model_lowrank.npz \
+     --manifest data/manifest_short.csv \
+     --views T1,FA \
+     --observed T1 --target FA \
+     --volume-size 64x64x64 \
+     --out-dir output/imputed_FA/
+
+3. RECON-TEMPLATE (Population Average)
+   Reconstruct the latent Gaussian mean and generate Monte Carlo variations.
+   
+   python lamnr_glow_tool_3d.py recon-template \
+     --ckpt runs/model_64x64x64/training_state.pt \
+     --gauss output/model_lowrank.npz \
+     --manifest data/manifest.csv \
+     --views T1 \
+     --mc-samples 10 \
+     --sharpen-image \
+     --out-dir output/templates/
+
+4. CALCULATE LATENT DISTANCE (Anomaly Detection)
+   Compute Euclidean distance between subject latents and the Gaussian mean.
 
    python lamnr_glow_tool_3d.py calc-distance \
-     --ckpt runs/model.pt \
+     --ckpt runs/model_64x64x64/training_state.pt \
      --gauss output/model_lowrank.npz \
-     --manifest data/patients.csv \
+     --manifest data/manifest.csv \
      --views T1 \
      --volume-size 64x64x64 \
      --out-csv output/distances.csv
 
-3. INTERPOLATION (Style Transfer / Normalization)
-   Interpolate between a source volume and a target volume (generates multiple NIfTI frames).
+5. INTERPOLATION (Style Transfer / Normalization)
+   Interpolate a subject towards the population mean or a target image in sequential steps.
    
    python lamnr_glow_tool_3d.py recon-interpolate \
-     --ckpt runs/model.pt \
-     --source data/patient.nii.gz \
-     --target data/atlas.nii.gz \
-     --volume-size 64x64x64 \
+     --ckpt runs/model_64x64x64/training_state.pt \
+     --gauss output/model_lowrank.npz \
+     --manifest data/manifest_lesions.csv \
+     --views T1 \
      --steps 5 \
-     --out-dir output/interp_frames/
+     --out-dir output/interpolation/
 
-4. WINSORIZATION (Lesion/Artifact Suppression)
-   Clamp 3D latent vectors that exceed a quantile threshold (e.g., 99%).
+6. WINSORIZATION (Lesion/Artifact Suppression)
+   Clamp 3D latent vectors using hard thresholds or quantiles to "heal" pathologies.
    
    python lamnr_glow_tool_3d.py recon-winsorize \
-     --ckpt runs/model.pt \
-     --input data/lesion.nii.gz \
-     --volume-size 64x64x64 \
-     --quantile 0.99 \
-     --out output/healed_lesion.nii.gz
+     --ckpt runs/model_64x64x64/training_state.pt \
+     --manifest data/manifest_lesions.csv \
+     --views T1 \
+     --hard-threshold 3.0 \
+     --winsorize-level 0,0.95 \
+     --out-dir output/winsorized/
 
-5. SAMPLING
+7. SAMPLING
    Generate synthetic 3D NIfTI samples.
 
    python lamnr_glow_tool_3d.py sample \
-     --ckpt runs/model.pt \
+     --ckpt runs/model_64x64x64/training_state.pt \
      --view-index 0 \
      --volume-size 64x64x64 \
      --n-samples 5 \
      --out-dir output/samples/
 
-NOTE ON MEMORY:
----------------
-Processing 3D volumes (e.g., 64x64x64 or 128x128x128) requires significant VRAM.
-Keep --batch size low (1 or 2).
-
-lamnr_glow_tool_3d.py — LAM-Flow (Glow 3D) Inference & Analysis Toolkit
-v0.5.5-3D (STABLE ACTNORM & PUSH-THROUGH)
+NOTE ON MEMORY & 3D GEOMETRY:
+-----------------------------
+Processing 3D volumes (e.g., 64x64x64) requires significant VRAM.
+- Keep --batch size low (1 or 2).
+- The script automatically processes Monte Carlo samples and matrix inversions sequentially 
+  to prevent Out-Of-Memory (OOM) errors and tensor contiguity crashes.
 """
 
 from __future__ import annotations
