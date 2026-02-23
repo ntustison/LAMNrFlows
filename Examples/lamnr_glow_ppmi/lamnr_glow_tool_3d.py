@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 lamnr_glow_tool_3d.py — LAM-Flow (Glow 3D) Inference & Analysis Toolkit
+v0.5.4-3D (STABLE ACTNORM & PUSH-THROUGH)
 
 A comprehensive suite for sampling, reconstruction, latent space analysis, and
 conditional generation using trained 3D LAM-Flow models.
@@ -79,7 +80,11 @@ NOTE ON MEMORY:
 ---------------
 Processing 3D volumes (e.g., 64x64x64 or 128x128x128) requires significant VRAM.
 Keep --batch size low (1 or 2).
+
+lamnr_glow_tool_3d.py — LAM-Flow (Glow 3D) Inference & Analysis Toolkit
+v0.5.5-3D (STABLE ACTNORM & PUSH-THROUGH)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -104,18 +109,14 @@ except ImportError:
     print("[info] tqdm non trouvé. Exécutez `pip install tqdm` pour afficher les barres de progression.")
     tqdm = lambda x, **kwargs: x
 
-# Ensure headless save works
 import matplotlib
 matplotlib.use("Agg")
 
-__version__ = "0.5.0-3D"
+__version__ = "0.5.5-3D"
 
-# ---------------- antstorch / model factory -----------------
-# Assumes antstorch has the 3D implementation available
 try:
     from antstorch import create_glow_normalizing_flow_model_3d
 except ImportError:
-    # Fallback/Mock for environment testing without antstorch installed
     print("[warn] 'antstorch' not found. Ensure it is installed for 3D Glow models.")
     create_glow_normalizing_flow_model_3d = None
 
@@ -124,12 +125,49 @@ except ImportError:
 def parse_dhw(spec: str) -> Tuple[int, int, int]:
     try:
         parts = spec.lower().split("x")
-        if len(parts) != 3: raise ValueError
         D, H, W = int(parts[0]), int(parts[1]), int(parts[2])
         assert D > 0 and H > 0 and W > 0
         return D, H, W
     except Exception:
         raise argparse.ArgumentTypeError(f"Invalid DxHxW spec '{spec}'. Expected like '64x64x64'.")
+
+def parse_dhw_float(spec: str) -> Tuple[float, float, float]:
+    try:
+        parts = spec.lower().split("x")
+        D, H, W = float(parts[0]), float(parts[1]), float(parts[2])
+        assert D > 0 and H > 0 and W > 0
+        return D, H, W
+    except Exception:
+        raise argparse.ArgumentTypeError(f"Invalid spacing spec '{spec}'. Expected like '1.0x1.0x1.0'.")
+
+def _gather_val_paths(val_list: Optional[list[str]], limit: int) -> list[Path]:
+    from glob import glob
+    paths: list[Path] = []
+    tokens = val_list or []
+    for tok in tokens:
+        tok = os.path.expandvars(os.path.expanduser(tok))
+        p = Path(tok)
+        if p.exists() and p.is_file():
+            if p.suffix.lower() in (".txt", ".lst", ".csv"):
+                try:
+                    with open(p, "r") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line: paths.append(Path(os.path.expandvars(os.path.expanduser(line))))
+                except Exception: pass
+            else:
+                paths.append(p)
+        else:
+            for g in sorted(glob(tok, recursive=True)):
+                gp = Path(g)
+                if gp.exists() and gp.is_file(): paths.append(gp)
+    seen = set()
+    uniq: list[Path] = []
+    for p in paths:
+        if p not in seen and p.exists() and p.is_file():
+            uniq.append(p); seen.add(p)
+        if len(uniq) >= int(limit): break
+    return uniq
 
 def set_deterministic(seed: int):
     torch.manual_seed(seed)
@@ -141,111 +179,93 @@ def set_deterministic(seed: int):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def to01(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """
-    Normalization to [0, 1] over spatial dims (D, H, W).
-    Input: (B, C, D, H, W)
-    """
+def to01(x: torch.Tensor, eps: float = 1e-8, winsorize: bool = True, upper_q: float = 0.999) -> torch.Tensor:
     if not torch.is_floating_point(x):
         x = x.float()
-    # Min/Max over spatial dims (2,3,4)
+    x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=0.0)
+
+    if winsorize:
+        N, C, D, H, W = x.shape
+        flat = x.view(N, C, -1)
+        hi = torch.quantile(flat, upper_q, dim=-1, keepdim=True).view(N, C, 1, 1, 1)
+        lo = torch.quantile(flat, 1.0 - upper_q, dim=-1, keepdim=True).view(N, C, 1, 1, 1)
+        x = torch.maximum(torch.minimum(x, hi), lo)
+
     x_min = x.amin(dim=(2, 3, 4), keepdim=True)
     x_max = x.amax(dim=(2, 3, 4), keepdim=True)
     return (x - x_min) / (x_max - x_min + eps)
 
 def _coerce_5d(x, target_dhw: Tuple[int,int,int]=None):
-    """Ensure tensor is (B, C, D, H, W)."""
     if not torch.is_tensor(x):
-        if isinstance(x, (list, tuple)):
-            x = x[0]
-        else:
-            raise RuntimeError(f"Unexpected output type: {type(x)}")
-    
-    # If 4D (C, D, H, W) or (B, D, H, W), unsqueeze to 5D
-    if x.ndim == 4:
-        x = x.unsqueeze(0)
-    
+        if isinstance(x, (list, tuple)): x = x[0]
+        else: raise RuntimeError(f"Unexpected output type: {type(x)}")
+    if x.ndim == 4: x = x.unsqueeze(0)
     x = x.float()
-
     if target_dhw is not None:
         dt, ht, wt = target_dhw
         d0, h0, w0 = x.shape[-3], x.shape[-2], x.shape[-1]
         if (d0, h0, w0) != (dt, ht, wt):
             x = F.interpolate(x, size=(dt, ht, wt), mode="trilinear", align_corners=False)
-    
     return x
 
 def save_nifti(x: torch.Tensor, out_path: Path, spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0)):
-    """Save a single 3D/4D tensor to NIfTI using ANTsPy."""
-    # x shape expected: (1, C, D, H, W) or (C, D, H, W)
     x = x.detach().cpu()
-    if x.ndim == 5: x = x.squeeze(0) # Remove batch
-    
+    if x.ndim == 5: x = x.squeeze(0) 
     arr = x.numpy()
-    
-    # Handle channels for ANTs: 
-    # ANTs expects (D, H, W) or (D, H, W, C)
-    if arr.shape[0] == 1:
-        arr = arr[0] # (D, H, W)
-    else:
-        # Transpose (C, D, H, W) -> (D, H, W, C)
-        arr = np.transpose(arr, (1, 2, 3, 0))
-
+    if arr.shape[0] == 1: arr = arr[0] 
+    else: arr = np.transpose(arr, (1, 2, 3, 0))
     img = ants.from_numpy(arr)
-    # Ensure spacing is float tuple
     sp = tuple(float(s) for s in spacing)
-    try:
-        img.set_spacing(sp)
-    except:
-        pass
-    
+    try: img.set_spacing(sp)
+    except: pass
     ants.image_write(img, str(out_path))
 
 def _read_image_3d(path: Path, target_dhw: Optional[Tuple[int,int,int]] = None) -> torch.Tensor:
-    """
-    Read 3D NIfTI, normalize [0,1], return (1, C, D, H, W).
-    """
     path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"{path}")
-    
+    if not path.exists(): raise FileNotFoundError(f"{path}")
     img = ants.image_read(str(path))
     arr = img.numpy()
-    
-    # Standardize to (C, D, H, W)
-    if arr.ndim == 3:
-        arr = arr[np.newaxis, ...] # (1, D, H, W)
-    elif arr.ndim == 4:
-        # ANTs reads as (D, H, W, C), we need (C, D, H, W)
-        arr = np.transpose(arr, (3, 0, 1, 2))
-        
+    if arr.ndim == 3: arr = arr[np.newaxis, ...] 
+    elif arr.ndim == 4: arr = np.transpose(arr, (3, 0, 1, 2))
     t = torch.from_numpy(arr).float()
-    
-    # Robust normalization
     q1, q99 = torch.quantile(t, 0.01), torch.quantile(t, 0.99)
-    if q99 > q1:
-        t = torch.clamp((t - q1) / (q99 - q1 + 1e-8), 0.0, 1.0)
+    if q99 > q1: t = torch.clamp((t - q1) / (q99 - q1 + 1e-8), 0.0, 1.0)
     else:
         mn, mx = t.min(), t.max()
         t = (t - mn) / (mx - mn + 1e-8) if mx > mn else torch.zeros_like(t)
-
-    # Resize if needed (trilinear)
     if target_dhw is not None:
-        t = t.unsqueeze(0) # (1, C, D, H, W)
+        t = t.unsqueeze(0) 
         t = F.interpolate(t, size=target_dhw, mode="trilinear", align_corners=False)
         return t
-    
     return t.unsqueeze(0)
 
+def save_mid_slice_png(x: torch.Tensor, out_path: Path, slice_axis: int = 2):
+    import matplotlib.pyplot as plt
+    x_np = x.detach().cpu()
+    if x_np.ndim == 5: x_np = x_np.squeeze(0) 
+    D = x_np.shape[slice_axis+1] 
+    mid_idx = D // 2
+    if slice_axis == 0:
+        slice_2d = x_np[0, mid_idx, :, :].numpy()
+    elif slice_axis == 1:
+        slice_2d = x_np[0, :, mid_idx, :].numpy()
+    elif slice_axis == 2:
+        slice_2d = x_np[0, :, :, mid_idx].numpy()
+    else: 
+        raise ValueError(f"Invalid slice_axis {slice_axis}. Must be 0, 1, or 2.")    
+    plt.imsave(str(out_path), slice_2d, cmap="gray", vmin=0.0, vmax=1.0)
 
 # ---------------------- Model Builders ----------------------
 
-def build_model_from_config(cfg: dict, device: torch.device):
-    D = int(cfg.get("D", 64))
-    H = int(cfg.get("H", 64))
-    W = int(cfg.get("W", 64))
+def build_model_from_config(cfg: dict, device: torch.device, target_dhw: Tuple[int, int, int] = None):
+    if target_dhw is not None:
+        D, H, W = int(target_dhw[0]), int(target_dhw[1]), int(target_dhw[2])
+    else:
+        D = int(cfg.get("D", 64))
+        H = int(cfg.get("H", 64))
+        W = int(cfg.get("W", 64))
+        
     input_shape = (1, D, H, W)
-    
     if create_glow_normalizing_flow_model_3d is None:
         raise ImportError("antstorch.create_glow_normalizing_flow_model_3d is required.")
 
@@ -261,8 +281,6 @@ def build_model_from_config(cfg: dict, device: torch.device):
         scale_map=str(cfg.get("scale_map", "tanh")),
         net_actnorm=bool(cfg.get("net_actnorm", False))
     ).to(device).float().eval()
-    
-    # Attach shape for internal use
     m.input_shape = input_shape
     return m
 
@@ -275,36 +293,69 @@ def resolve_ckpt_path(p: Path) -> Path:
     return p
 
 def load_weights_into_model(model, blob, view_idx: int, prefer_ema: bool = True):
-    # Try EMA first
-    if prefer_ema and isinstance(blob.get("ema"), list) and len(blob["ema"]) > 0:
-        k = max(0, min(int(view_idx), len(blob["ema"]) - 1))
-        sd = blob["ema"][k]
-        if "state_dict" in sd: sd = sd["state_dict"]
+    def try_load(sd):
         try:
-            model.load_state_dict(sd, strict=False)
-            return True, "ema"
-        except: pass
-        
-    # Try models list
+            model.load_state_dict(sd, strict=True)
+            return True, None
+        except Exception as e:
+            try:
+                model.load_state_dict(sd, strict=False)
+                return True, f"non-strict: {e}"
+            except Exception as e2:
+                return False, f"failed: {e2}"
+
+    def extract_sd(candidate):
+        if isinstance(candidate, dict):
+            if "state_dict" in candidate and isinstance(candidate["state_dict"], dict):
+                return candidate["state_dict"]
+            return candidate
+        return None
+
+    target_idx = int(view_idx)
+
+    if prefer_ema and isinstance(blob.get("ema"), list) and len(blob["ema"]) > 0:
+        max_idx = len(blob["ema"]) - 1
+        k = max(0, min(target_idx, max_idx))
+        sd = extract_sd(blob["ema"][k])
+        if sd is not None:
+            ok, note = try_load(sd)
+            if ok:
+                if target_idx > max_idx:
+                    print(f"\n[AVERTISSEMENT CRITIQUE] L'index de vue {target_idx} n'existe pas dans le checkpoint (ema).")
+                    print(f"-> Repli forcé sur les poids de l'index {k}.")
+                    print(f"-> Attention : Les latents générés pour cette modalité seront hors distribution (Out-Of-Distribution) !\n")
+                return True, f"ema slot={k} ({note})"
+            
     if isinstance(blob.get("models"), list) and len(blob["models"]) > 0:
-        k = max(0, min(int(view_idx), len(blob["models"]) - 1))
-        sd = blob["models"][k]
-        if "state_dict" in sd: sd = sd["state_dict"]
-        model.load_state_dict(sd, strict=False)
-        return True, "models"
-        
-    # Standard state_dict
+        max_idx = len(blob["models"]) - 1
+        k = max(0, min(target_idx, max_idx))
+        sd = extract_sd(blob["models"][k])
+        if sd is not None:
+            ok, note = try_load(sd)
+            if ok:
+                if target_idx > max_idx:
+                    print(f"\n[AVERTISSEMENT CRITIQUE] L'index de vue {target_idx} n'existe pas dans le checkpoint (models).")
+                    print(f"-> Repli forcé sur les poids de l'index {k}.")
+                    print(f"-> Attention : Les latents générés pour cette modalité seront hors distribution (Out-Of-Distribution) !\n")
+                return True, f"models slot={k} ({note})"
+            
     if "state_dict" in blob:
-        model.load_state_dict(blob["state_dict"], strict=False)
-        return True, "state_dict"
-        
-    return False, "failed"
+        ok, note = try_load(blob["state_dict"])
+        if ok:
+            if target_idx > 0:
+                 print(f"\n[AVERTISSEMENT CRITIQUE] Checkpoint unique (state_dict) détecté. Repli forcé de la vue {target_idx} sur l'unique vue disponible.\n")
+            return True, f"state_dict ({note})"
+            
+    if isinstance(blob, dict) and all(isinstance(k, str) for k in blob.keys()) and any("." in k for k in blob.keys()):
+        ok, note = try_load(blob)
+        if ok: return True, f"raw ({note})"
+
+    return False, "no valid weights found"
+
 
 def _prime_if_needed(model, D, H, W, device):
-    """Run a dummy pass to initialize ActNorm if present."""
-    dummy = torch.zeros(1, 1, D, H, W, device=device)
-    try:
-        model.inverse_and_log_det(dummy)
+    dummy = torch.randn(1, 1, D, H, W, device=device)
+    try: model.inverse_and_log_det(dummy)
     except: pass
 
 # ---------------------- Manifest Helpers ----------------------
@@ -327,7 +378,6 @@ def _resolve_views(cols, root_dir, views_str):
     paths = []
     for v in v_names:
         if v not in cols: raise ValueError(f"View {v} not in manifest")
-        # Resolve absolute paths
         abs_paths = []
         for p in cols[v]:
             pp = Path(p)
@@ -336,164 +386,120 @@ def _resolve_views(cols, root_dir, views_str):
         paths.append(abs_paths)
     return v_names, paths
 
-# ---------------------- LowRank Math ----------------------
+# ---------------------- LowRank Math (STABLE PUSH-THROUGH) ----------------------
 
 def _lowrank_from_Xc(Xc: np.ndarray, rank: int, sigma2: float | str, extra_ridge: float) -> dict:
-    """Compute SVD-based low-rank covariance approximation.
-       Xc: Centered data (N, D).
-       Returns dict with U (D, r), eig (r), sigma2.
-    """
     N, D = Xc.shape
     rmax = min(D, max(1, N - 1))
     r = int(max(1, min(rank, rmax)))
-    
-    # SVD on (N, D) -> U_svd(N,K), S(K), Vt(K,D)
-    # We want eigenvectors of Cov = Xc.T @ Xc / (N-1)
-    # Xc = U_svd * S * Vt
-    # Cov = Vt.T * S^2 * Vt / (N-1)
-    # So Cov eigenvectors are Vt.T (shape D, K)
-    
-    # Use float32 to save RAM during SVD if float64 is too big
-    try:
-        Ux, Svals, Vt = np.linalg.svd(Xc, full_matrices=False)
-    except np.linalg.LinAlgError:
-        print("[warn] SVD failed on float64, trying float32")
-        Ux, Svals, Vt = np.linalg.svd(Xc.astype(np.float32), full_matrices=False)
-        
+    try: Ux, Svals, Vt = np.linalg.svd(Xc, full_matrices=False)
+    except np.linalg.LinAlgError: Ux, Svals, Vt = np.linalg.svd(Xc.astype(np.float32), full_matrices=False)
     eigs_all = (Svals ** 2) / max(1, (N - 1))
-    
-    # Top r components
     eig_r = eigs_all[:r].copy()
-    U_cov = Vt[:r, :].T.copy() # (D, r)
-    
+    U_cov = Vt[:r, :].T.copy() 
     if isinstance(sigma2, str) and sigma2.lower() == "auto":
-        # Average of remaining eigenvalues
-        if eigs_all.shape[0] > r:
-            sigma2_val = float(np.maximum(np.mean(eigs_all[r:]), 0.0))
-        else:
-            sigma2_val = 0.0
+        sigma2_val = float(np.maximum(np.mean(eigs_all[r:]), 0.0)) if eigs_all.shape[0] > r else 0.0
     else:
         sigma2_val = float(sigma2)
-        
     sigma2_val += extra_ridge
-    
     return {"type": "lowrank", "U": U_cov, "eig": eig_r, "sigma2": sigma2_val}
 
 def _cond_mean_block_lowrank(U: np.ndarray, eig: np.ndarray, sigma2: float,
                              idx_U: list, idx_O: list,
                              mu: np.ndarray, ZO: np.ndarray,
-                             base_ridge: float = 1e-6):
-    """
-    Conditional mean using LowRank inversion (Woodbury/Sherman-Morrison logic).
-    Goal: E[z_U | z_O] = mu_U + Sig_UO * inv(Sig_OO) * (z_O - mu_O)
-    
-    Sig = U diag(eig) U.T + sigma2 I
-    Sig_OO = U_O diag(eig) U_O.T + sigma2 I
-    
-    Inversion via Woodbury:
-    inv(Sig_OO) = inv(sigma2 I + U_O Lam U_O.T)
-                = (1/s2) I - (1/s2) U_O * inv(inv(Lam) + U_O.T U_O / s2) * U_O.T / s2
-    """
+                             base_ridge: float = 1e-4):
     U = np.asarray(U, dtype=np.float64)
     eig = np.asarray(eig, dtype=np.float64)
     mu = np.asarray(mu, dtype=np.float64).ravel()
     
-    U_O = U[idx_O, :] # (D_O, r)
-    U_U = U[idx_U, :] # (D_U, r)
+    if ZO.ndim == 1:
+        ZO = ZO[None, :]
+        
+    U_O = U[idx_O, :] 
+    U_U = U[idx_U, :] 
     
-    diff_O = (ZO - mu[idx_O][None, :]).T # (D_O, N)
+    s2 = max(float(sigma2) + float(base_ridge), 1e-6)
+        
+    dO = (ZO - mu[idx_O][None, :]).T 
     
-    r = eig.shape[0]
+    sqrt_eig = np.sqrt(np.clip(eig, 0.0, None))
+    A_T = U_O.T * sqrt_eig[:, None]  
     
-    # 1. Compute Matrix M = diag(1/eig) + (U_O.T @ U_O) / sigma2
-    # If eig is close to 0, use large number
-    inv_lam = np.diag(1.0 / (eig + 1e-12)) 
-    M = inv_lam + (U_O.T @ U_O) / sigma2
+    K = A_T @ A_T.T + s2 * np.eye(len(eig), dtype=np.float64) 
+    rhs = A_T @ dO 
     
-    # 2. Solve M gamma = U_O.T @ diff_O
-    rhs = U_O.T @ diff_O # (r, N)
-    gamma = np.linalg.solve(M, rhs) # (r, N)
+    try:
+        w = np.linalg.solve(K, rhs)
+    except np.linalg.LinAlgError:
+        w, _, _, _ = np.linalg.lstsq(K, rhs, rcond=None)
+        
+    v_target = sqrt_eig[:, None] * w 
+    projection = U_U @ v_target 
+    zU = mu[idx_U][:, None] + projection
     
-    # 3. Apply formula
-    # inv(Sig_OO) * diff = (diff - U_O @ gamma) / sigma2
-    w = (diff_O - U_O @ gamma) / sigma2 # (D_O, N)
-    
-    # 4. Result = mu_U + Sig_UO @ w
-    # Sig_UO = U_U diag(eig) U_O.T
-    # Result = mu_U + U_U diag(eig) (U_O.T @ w)
-    
-    # Optimized: U_O.T @ w is computed efficiently
-    # Note: Woodbury simplification leads to:
-    # E[z_U|z_O] = mu_U + U_U @ (inv(inv(Lam) + U_O.T U_O/s2) @ (U_O.T diff_O / s2))
-    
-    term1 = U_O.T @ diff_O / sigma2 # (r, N)
-    term2 = np.linalg.solve(M, term1) # (r, N)
-    delta = U_U @ term2 # (D_U, N)
-    
-    zU = mu[idx_U][:, None] + delta
-    return zU.T # (N, D_U)
+    return zU.T 
 
 # ---------------------- Main Commands ----------------------
 
-def main_sample(argv=None):
-    ap = argparse.ArgumentParser("sample")
-    ap.add_argument("--ckpt", required=True)
-    ap.add_argument("--out-dir", required=True)
-    ap.add_argument("--n-samples", type=int, default=1)
-    ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64")
-    ap.add_argument("--temperature", type=float, default=1.0)
-    ap.add_argument("--devices", default="cuda:0")
-    ap.add_argument("--seed", type=int, default=42)
-    args = ap.parse_args(argv)
-
-    set_deterministic(args.seed)
-    device = torch.device(args.devices)
-    
-    blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
-    cfg = blob.get("config", {"D": args.volume_size[0], "H": args.volume_size[1], "W": args.volume_size[2]})
-    model = build_model_from_config(cfg, device)
-    load_weights_into_model(model, blob, view_idx=0)
-    _prime_if_needed(model, *args.volume_size, device)
-
-    Path(args.out_dir).mkdir(parents=True, exist_ok=True)
-
-    print(f"[info] Sampling {args.n_samples} volumes...")
-    with torch.no_grad():
-        for i in range(args.n_samples):
-            z_sample = model.sample(1, temperature=args.temperature)
-            x_hat = _coerce_5d(z_sample, target_dhw=args.volume_size)
-            x_hat = to01(x_hat)
-            save_nifti(x_hat, Path(args.out_dir) / f"sample_{i:03d}.nii.gz")
-    print("[ok] Done.")
-
 def main_recon(argv=None):
-    ap = argparse.ArgumentParser("recon")
-    ap.add_argument("--ckpt", required=True)
-    ap.add_argument("--input", required=True)
-    ap.add_argument("--out", required=True)
+    ap = argparse.ArgumentParser("LAM‑Flow 3D reconstruction and latent editing tool (recon)")
+    ap.add_argument("--ckpt", type=str, required=True)
+    ap.add_argument("--manifest", type=str, required=True)
+    ap.add_argument("--views", type=str, required=True)
+    ap.add_argument("--view-index", type=int, default=0)
     ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64")
-    ap.add_argument("--devices", default="cuda:0")
+    ap.add_argument("--batch", type=int, default=1)
+    ap.add_argument("--devices", type=str, default="cuda:0")
+    ap.add_argument("--out-dir", type=str, required=True)
+    ap.add_argument("--gauss", type=str, default=None)
+    ap.add_argument("--edit-levels", type=str, default="none")
+    ap.add_argument("--edit-what", type=str, choices=["mean", "zero", "pc"], default="mean")
+    ap.add_argument("--edit-pc-index", type=int, default=0)
+    ap.add_argument("--edit-pc-scale", type=float, default=2.0)
+    ap.add_argument("--edit-pc-center", type=str, choices=["sample", "mean"], default="sample")
     args = ap.parse_args(argv)
 
     device = torch.device(args.devices)
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
     cfg = blob.get("config", {})
-    model = build_model_from_config(cfg, device)
-    load_weights_into_model(model, blob, 0)
-    _prime_if_needed(model, *args.volume_size, device)
-
-    xi = _read_image_3d(Path(args.input), target_dhw=args.volume_size).to(device)
     
-    with torch.no_grad():
-        z, _ = model.inverse_and_log_det(xi)
-        # z is list of tensors. 
-        if isinstance(z, torch.Tensor): z = [z]
-        xh, _ = model.forward_and_log_det(z)
-        xh = to01(_coerce_5d(xh, target_dhw=args.volume_size))
+    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+    all_views = [v.strip() for v in args.views.split(",") if v.strip()]
+    vname = all_views[int(args.view_index)]
+    
+    Dc, Hc, Wc = args.volume_size
+    _prime_if_needed(model, Dc, Hc, Wc, device)
+    
+    ok, note = load_weights_into_model(model, blob, int(args.view_index))
+    if not ok: raise RuntimeError(f"Failed to load weights: {note}")
 
-    save_nifti(xh, Path(args.out))
-    print(f"[ok] Saved {args.out}")
+    cols = _read_manifest_csv(Path(args.manifest))
+    vcol = cols[vname]
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
+    npz = np.load(args.gauss, allow_pickle=True) if args.gauss else None
+    L_gauss = int(npz["L"]) if npz else 0
+
+    bs = max(1, int(args.batch))
+    for i, pth in enumerate(vcol[:bs]):
+        xi = _read_image_3d(pth, target_dhw=args.volume_size).to(device)
+        with torch.no_grad():
+            z_raw, _ = model.inverse_and_log_det(xi)
+            if not isinstance(z_raw, list): z_raw = [z_raw]
+            xh_base, _ = model.forward_and_log_det(z_raw)
+            xh_base = to01(_coerce_5d(xh_base, args.volume_size), winsorize=True)
+            diff_base = to01(torch.abs(xi - xh_base), winsorize=True)
+            
+        base_name = Path(pth).name.split('.')[0]
+        prefix = out_dir / f"recon_{i:03d}_{base_name}"
+        save_nifti(xi, Path(f"{prefix}_orig.nii.gz"))
+        save_nifti(xh_base, Path(f"{prefix}_recon.nii.gz"))
+        save_nifti(diff_base, Path(f"{prefix}_diff.nii.gz"))
+        save_mid_slice_png(xh_base, Path(f"{prefix}_recon_midslice.png"))
+
+    print(f"[ok] Outputs in {out_dir}")
+    return 0
 
 def main_gauss_fit(argv=None):
     ap = argparse.ArgumentParser("gauss-fit")
@@ -502,9 +508,8 @@ def main_gauss_fit(argv=None):
     ap.add_argument("--views", required=True)
     ap.add_argument("--gauss-out", required=True)
     ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64")
-    ap.add_argument("--batch", type=int, default=2, help="Keep low for 3D")
+    ap.add_argument("--batch", type=int, default=2)
     ap.add_argument("--devices", default="cuda:0")
-    
     ap.add_argument("--cov-estimator", choices=["lowrank", "diag"], default="lowrank")
     ap.add_argument("--rank", type=int, default=128)
     ap.add_argument("--sigma2", default="auto")
@@ -513,90 +518,78 @@ def main_gauss_fit(argv=None):
 
     device = torch.device(args.devices)
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
-    cfg = blob.get("config", {"D": args.volume_size[0], "H": args.volume_size[1], "W": args.volume_size[2]})
-    model = build_model_from_config(cfg, device)
+    cfg = blob.get("config", {})
 
-    # Resolve paths
     cols = _read_manifest_csv(Path(args.manifest))
     view_names, paths_per_view = _resolve_views(cols, Path(args.manifest).parent, args.views)
     N = len(paths_per_view[0])
-    
     print(f"[info] Fitting 3D Gaussian on {N} subjects. Estimator: {args.cov_estimator}")
 
-    # Latent collection
-    # Structure: Z_levels[level_idx] -> Tensor (N, D_level)
     Z_levels = [] 
     
     for v_idx, vname in enumerate(view_names):
-        print(f"  Encoding view: {vname}")
-        load_weights_into_model(model, blob, v_idx)
+        model_view = build_model_from_config(cfg, device, target_dhw=args.volume_size)
         
-        # Collect latents for this view
-        latents_for_view = [] # list of levels, each is list of batches
+        _prime_if_needed(model_view, *args.volume_size, device)
+        ok, note = load_weights_into_model(model_view, blob, v_idx)
+        if not ok: raise RuntimeError(f"Weights failed for {vname}: {note}")
         
+        latents_for_view = [] 
         paths = paths_per_view[v_idx]
+        
         for i in tqdm(range(0, N, args.batch), desc=f"Encoding {vname}", unit="batch"):
             batch_p = paths[i:i+args.batch]
             batch_x = []
             for p in batch_p:
                 batch_x.append(_read_image_3d(p, args.volume_size).squeeze(0))
-            
             xb = torch.stack(batch_x).to(device)
             
             with torch.no_grad():
-                z_raw, _ = model.inverse_and_log_det(xb)
+                z_raw, _ = model_view.inverse_and_log_det(xb)
                 if not isinstance(z_raw, list): z_raw = [z_raw]
                 
-                # Flatten spatial dims: (B, C, D, H, W) -> (B, Features)
-                z_flat = [t.view(t.shape[0], -1).cpu() for t in z_raw]
-                
-                if not latents_for_view: 
-                    latents_for_view = [[] for _ in z_flat]
-                
-                for l, t in enumerate(z_flat):
-                    latents_for_view[l].append(t)
+                # CORRECTION ICI: On construit la liste directement
+                z_flat = []
+                for t in z_raw:
+                    t_safe = torch.clamp(t, min=-20.0, max=20.0)
+                    z_flat.append(t_safe.view(t.shape[0], -1).cpu())
 
-        # Concatenate batches -> (N, Feat) per level
+                if not latents_for_view: latents_for_view = [[] for _ in z_flat]
+                for l, t in enumerate(z_flat): latents_for_view[l].append(t)
+
         z_view_concat = [torch.cat(batches, dim=0) for batches in latents_for_view]
-        
-        # Merge with previous views
-        if not Z_levels:
-            Z_levels = z_view_concat
-        else:
-            # Concatenate features from different views at same level
-            Z_levels = [torch.cat([Z_levels[l], z_view_concat[l]], dim=1) for l in range(len(Z_levels))]
+        if not Z_levels: Z_levels = z_view_concat
+        else: Z_levels = [torch.cat([Z_levels[l], z_view_concat[l]], dim=1) for l in range(len(Z_levels))]
 
-    # Dimensions tracking
-    dims_per_level_per_view = [] # Not fully tracked here for simplicity, reusing from 2D logic would be better if needed later
-    # For now we assume strict order reconstruction in impute
-    
-    # Fit Stats
     mu_list = []
     Sigma_list = []
     
     for l, Z in enumerate(Z_levels):
-        print(f"  Fitting Level {l}, Shape {Z.shape}")
         X = Z.numpy().astype(np.float64)
+        if not np.isfinite(X).all():
+            X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+            
+        cap = np.percentile(np.abs(X), 99.9) + 1e-6
+        X = np.clip(X, -cap, cap)
+        
         mu = np.mean(X, axis=0)
         Xc = X - mu
-        
+
         if args.cov_estimator == "lowrank":
             sig = _lowrank_from_Xc(Xc, args.rank, args.sigma2, args.cov_lam)
         else:
-            sig = np.var(Xc, axis=0) + args.cov_lam # diag
+            sig = np.var(Xc, axis=0) + args.cov_lam 
             
         mu_list.append(mu)
         Sigma_list.append(sig)
 
-    # Save
     pack = {
         "mode": "perlevel",
         "estimator": args.cov_estimator,
         "views": view_names,
         "N": N, "L": len(Z_levels),
         "D": args.volume_size[0], "H": args.volume_size[1], "W": args.volume_size[2],
-        # Dims info helps reconstruction
-        "dims_per_view_L0": [Z.shape[1] // len(view_names) for Z in Z_levels] # Approx
+        "dims_per_view_L0": [Z.shape[1] // len(view_names) for Z in Z_levels] 
     }
     
     for i, (m, s) in enumerate(zip(mu_list, Sigma_list)):
@@ -609,15 +602,17 @@ def main_gauss_fit(argv=None):
         else:
             pack[f"Sigma_{i}"] = s
 
-    np.savez_compressed(args.gauss_out, **pack)
-    print(f"[ok] Saved {args.gauss_out}")
+    out_path = Path(args.gauss_out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(out_path, **pack)
+    print(f"[ok] Saved {out_path}")
 
 def main_gauss_impute(argv=None):
     ap = argparse.ArgumentParser("gauss-impute")
     ap.add_argument("--ckpt", required=True)
     ap.add_argument("--gauss", required=True)
     ap.add_argument("--manifest", required=True)
-    ap.add_argument("--views", required=True) # Full view list used in fit
+    ap.add_argument("--views", required=True) 
     ap.add_argument("--observed", required=True)
     ap.add_argument("--target", required=True)
     ap.add_argument("--out-dir", required=True)
@@ -627,30 +622,18 @@ def main_gauss_impute(argv=None):
 
     device = torch.device(args.devices)
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
-    cfg = blob.get("config", {"D": args.volume_size[0], "H": args.volume_size[1], "W": args.volume_size[2]})
-    model = build_model_from_config(cfg, device)
-
-    # Load Gauss
+    cfg = blob.get("config", {})
+    
+    # 1. Lecture directe des tailles depuis le modèle Gaussien (plus de dummy_model)
     npz = np.load(args.gauss, allow_pickle=True)
     L = int(npz["L"])
     all_views = list(npz["views"])
+    level_sizes = [int(sz) for sz in npz["dims_per_view_L0"]]
     
     obs_views = [v.strip() for v in args.observed.split(",")]
     tgt_views = [v.strip() for v in args.target.split(",")]
     
-    # Determine indices in flat vectors
-    # This requires knowing the size of each view at each level.
-    # Since we use Glow, splits are usually regular. 
-    # We will infer sizes by encoding a dummy.
-    dummy = torch.zeros(1, 1, args.volume_size[0], args.volume_size[1], args.volume_size[2], device=device)
-    with torch.no_grad():
-        z_dummy, _ = model.inverse_and_log_det(dummy)
-        if not isinstance(z_dummy, list): z_dummy = [z_dummy]
-        level_sizes = [t.numel() for t in z_dummy] # Size per ONE view per level
-
-    # Build Slice Map
-    # Flat vector at Level L is [View1_L ... ViewN_L]
-    slice_map = [] # List of dict {view_name: (start, end)}
+    slice_map = [] 
     for l in range(L):
         sz = level_sizes[l]
         d = {}
@@ -660,7 +643,6 @@ def main_gauss_impute(argv=None):
             curr += sz
         slice_map.append(d)
 
-    # Load Manifest
     cols = _read_manifest_csv(Path(args.manifest))
     _, paths_obs = _resolve_views(cols, Path(args.manifest).parent, args.observed)
     
@@ -670,87 +652,91 @@ def main_gauss_impute(argv=None):
     print(f"[info] Imputing {tgt_views} from {obs_views} for {N_sub} subjects.")
 
     for i in tqdm(range(N_sub), desc="Imputing volumes", unit="subj"):
-        # 1. Encode Observed
-        z_obs_levels = [[] for _ in range(L)] # Store vectors
+        z_obs_levels = [[] for _ in range(L)]
+        obs_images = {}
+        z_shapes = {} # Dictionnaire pour capturer dynamiquement les formes 5D réelles
         
         for v_idx, v_name in enumerate(obs_views):
-            # Load specific weights for this view
-            # Note: This is inefficient (reloading weights per subject/view), 
-            # but safe for 3D memory.
+            mdl_obs = build_model_from_config(cfg, device, target_dhw=args.volume_size)
             global_idx = all_views.index(v_name)
-            load_weights_into_model(model, blob, global_idx)
+            
+            ok, note = load_weights_into_model(mdl_obs, blob, global_idx)
+            if not ok: raise RuntimeError(f"Weights failed for {v_name}: {note}")
+            _prime_if_needed(mdl_obs, *args.volume_size, device)
             
             p = paths_obs[v_idx][i]
             x = _read_image_3d(p, args.volume_size).to(device)
+            obs_images[v_name] = x
             with torch.no_grad():
-                z, _ = model.inverse_and_log_det(x)
+                z, _ = mdl_obs.inverse_and_log_det(x)
+                if isinstance(z, tuple): z = list(z)
                 if not isinstance(z, list): z = [z]
                 for l, t in enumerate(z):
                     z_obs_levels[l].append(t.view(-1).cpu().numpy())
+                    # Capture de la forme exacte pour le décodage futur
+                    if l not in z_shapes:
+                        z_shapes[l] = t.shape
 
-        # 2. Condition & Predict per Level
-        z_pred_levels = [] # List of tensors for reconstruction
+        z_pred_levels = [] 
         
         for l in range(L):
-            # Construct Z_Observed_Concatenated
-            # Note: The order must match the Gaussian fit order, filtering only obs
-            # But here we have z_obs_levels filled by obs_views loop.
-            # We need to construct the full vector Z_O corresponding to indices idx_O
-            
             mu = npz[f"mu_{l}"]
-            
-            # Identify indices
             idx_O = []
             z_vals_O = []
             
             for v_name in obs_views:
                 s, e = slice_map[l][v_name]
                 idx_O.extend(range(s, e))
-                # Find the value we encoded (match loop order above)
                 z_vals_O.append(z_obs_levels[l][obs_views.index(v_name)])
             
             idx_O = np.array(idx_O)
-            ZO = np.concatenate(z_vals_O) # Flat vector of all observed features
+            ZO = np.concatenate(z_vals_O) 
             
-            # Identify Targets
-            # We assume single target view for reconstruction simplicity, 
-            # but math supports multiple. Let's predict the first target view.
             t_name = tgt_views[0]
             s_t, e_t = slice_map[l][t_name]
             idx_U = np.arange(s_t, e_t)
             
-            # Load Sigma
             if f"Sigma_{l}_type" in npz and str(npz[f"Sigma_{l}_type"]) == "lowrank":
                 U = npz[f"Sigma_{l}_U"]
                 eig = npz[f"Sigma_{l}_eig"]
                 s2 = npz[f"Sigma_{l}_sigma2"]
                 
-                # Conditional Mean
-                z_target_flat = _cond_mean_block_lowrank(U, eig, s2, idx_U, idx_O, mu, ZO[:, None])
+                z_target_flat = _cond_mean_block_lowrank(U, eig, s2, idx_U, idx_O, mu, ZO)
             else:
-                # Diag fallback
-                var = npz[f"Sigma_{l}"]
-                # Independent means we just take the mean of the target
                 z_target_flat = mu[idx_U][None, :]
             
-            # Reshape back to tensor shape
-            # We need to know original tensor shape.
-            # z_dummy[l] has it.
-            ref_shape = z_dummy[l].shape
+            # Application de la forme 5D capturée dynamiquement
+            ref_shape = z_shapes[l]
             z_t_tensor = torch.from_numpy(z_target_flat).float().view(1, ref_shape[1], ref_shape[2], ref_shape[3], ref_shape[4])
             z_pred_levels.append(z_t_tensor.to(device))
 
-        # 3. Decode
         tgt_global_idx = all_views.index(tgt_views[0])
-        load_weights_into_model(model, blob, tgt_global_idx)
+        mdl_tgt = build_model_from_config(cfg, device, target_dhw=args.volume_size)
         
+        ok, note = load_weights_into_model(mdl_tgt, blob, tgt_global_idx)
+        if not ok: raise RuntimeError(f"Weights failed for {tgt_views[0]}: {note}")
+        _prime_if_needed(mdl_tgt, *args.volume_size, device)
+
+        z_pred_clean = []
+        for z in z_pred_levels:
+            z_safe = torch.nan_to_num(z, nan=0.0, posinf=20.0, neginf=-20.0)
+            z_safe = torch.clamp(z_safe, min=-20.0, max=20.0)
+            z_pred_clean.append(z_safe)
+
         with torch.no_grad():
-            x_rec, _ = model.forward_and_log_det(z_pred_levels)
-            x_rec = to01(_coerce_5d(x_rec, args.volume_size))
-            
-        out_name = Path(args.out_dir) / f"imputed_{i:04d}_{tgt_views[0]}.nii.gz"
+            x_rec, _ = mdl_tgt.forward_and_log_det(z_pred_clean)
+            x_rec = to01(_coerce_5d(x_rec, args.volume_size), winsorize=True)
+
+        out_path = Path(args.out_dir)
+        out_name = out_path / f"imputed_{i:04d}_{tgt_views[0]}.nii.gz"
         save_nifti(x_rec, out_name)
-        print(f"  Saved {out_name}")
+        save_mid_slice_png(x_rec, out_path / f"imputed_{i:04d}_{tgt_views[0]}_midslice.png")
+        
+        for v_obs in obs_views:
+            input_path = out_path / f"input_{i:04d}_{v_obs}.nii.gz"
+            if not input_path.exists():
+                save_nifti(obs_images[v_obs], input_path)
+                save_mid_slice_png(obs_images[v_obs], out_path / f"input_{i:04d}_{v_obs}_midslice.png")
 
 def main_recon_winsorize(argv=None):
     ap = argparse.ArgumentParser("recon-winsorize")
@@ -765,20 +751,21 @@ def main_recon_winsorize(argv=None):
     device = torch.device(args.devices)
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
     cfg = blob.get("config", {})
-    model = build_model_from_config(cfg, device)
-    load_weights_into_model(model, blob, 0)
+    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+    
+    _prime_if_needed(model, *args.volume_size, device)
+    ok, note = load_weights_into_model(model, blob, 0)
+    if not ok: raise RuntimeError(f"Weights failed: {note}")
     
     xi = _read_image_3d(Path(args.input), args.volume_size).to(device)
     
     with torch.no_grad():
         z, _ = model.inverse_and_log_det(xi)
         if not isinstance(z, list): z = [z]
-        
         z_clamped = []
         for t in z:
             thresh = torch.quantile(torch.abs(t), args.quantile)
             z_clamped.append(torch.clamp(t, -thresh, thresh))
-            
         xh, _ = model.forward_and_log_det(z_clamped)
         xh = to01(_coerce_5d(xh, args.volume_size))
         
@@ -797,11 +784,13 @@ def main_calc_distance(argv=None):
     device = torch.device(args.devices)
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
     cfg = blob.get("config", {})
-    model = build_model_from_config(cfg, device)
-    load_weights_into_model(model, blob, 0)
+    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+    
+    _prime_if_needed(model, *args.volume_size, device)
+    ok, note = load_weights_into_model(model, blob, 0)
+    if not ok: raise RuntimeError(f"Weights failed: {note}")
     
     cols = _read_manifest_csv(Path(args.manifest))
-    # Assume first column is what we want
     paths = [Path(p) for p in list(cols.values())[0]]
     
     results = []
@@ -813,11 +802,8 @@ def main_calc_distance(argv=None):
             with torch.no_grad():
                 z, _ = model.inverse_and_log_det(xi)
                 if not isinstance(z, list): z = [z]
-                
-                # Simple L2 norm of the latent vector
                 dist = 0.0
-                for t in z:
-                    dist += torch.sum(t ** 2).item()
+                for t in z: dist += torch.sum(t ** 2).item()
                 results.append((p.name, math.sqrt(dist)))
         except Exception as e:
             print(f"[warn] Failed {p}: {e}")
@@ -842,8 +828,11 @@ def main_recon_interpolate(argv=None):
     device = torch.device(args.devices)
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
     cfg = blob.get("config", {})
-    model = build_model_from_config(cfg, device)
-    load_weights_into_model(model, blob, 0)
+    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+    
+    _prime_if_needed(model, *args.volume_size, device)
+    ok, note = load_weights_into_model(model, blob, 0)
+    if not ok: raise RuntimeError(f"Weights failed: {note}")
     
     s = _read_image_3d(Path(args.source), args.volume_size).to(device)
     t = _read_image_3d(Path(args.target), args.volume_size).to(device)
@@ -855,20 +844,62 @@ def main_recon_interpolate(argv=None):
         if not isinstance(zt, list): zt = [zt]
         
         Path(args.out_dir).mkdir(exist_ok=True, parents=True)
-        
         alphas = np.linspace(0, 1, args.steps)
         for i, alpha in enumerate(alphas):
             zi = []
             for l in range(len(zs)):
                 zi.append(zs[l] * (1 - alpha) + zt[l] * alpha)
-            
             xi, _ = model.forward_and_log_det(zi)
             xi = to01(_coerce_5d(xi, args.volume_size))
             save_nifti(xi, Path(args.out_dir) / f"interp_{i:02d}_a{alpha:.2f}.nii.gz")
-            
     print(f"[ok] Saved {args.steps} frames to {args.out_dir}")
 
-# ---------------------- Entry Point ----------------------
+def main_sample(argv=None):
+    ap = argparse.ArgumentParser("LAM‑Flow 3D sample tool")
+    ap.add_argument("--ckpt", type=str, required=True)
+    ap.add_argument("--view-index", type=int, default=0)
+    ap.add_argument("--n-samples", type=int, default=1)
+    ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64")
+    ap.add_argument("--temperature", type=float, default=1.0)
+    ap.add_argument("--ema", action=argparse.BooleanOptionalAction, default=True)
+    ap.add_argument("--seed", type=int, default=12345)
+    ap.add_argument("--devices", type=str, default="cuda:0")
+    ap.add_argument("--out-dir", type=str, default="samples_3d")
+    args = ap.parse_args(argv)
+
+    ckpt_path = resolve_ckpt_path(Path(args.ckpt))
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    device = torch.device("cpu") if args.devices.lower() == "cpu" else torch.device(args.devices.split(",")[0])
+    set_deterministic(args.seed)
+
+    blob = torch.load(ckpt_path, map_location=device, weights_only=False)
+    cfg = blob.get("config", {})
+    
+    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+    
+    Dc, Hc, Wc = args.volume_size
+    _prime_if_needed(model, Dc, Hc, Wc, device)
+    
+    ok, note = load_weights_into_model(model, blob, view_idx=int(args.view_index), prefer_ema=bool(args.ema))
+    if not ok: raise RuntimeError(f"Weights failed: {note}")
+
+    if args.n_samples > 0:
+        print(f"[info] sampling {args.n_samples} volumes @ temp={args.temperature}")
+        with torch.no_grad():
+            for i in range(args.n_samples):
+                try: z_sample = model.sample(1, temperature=float(args.temperature))
+                except TypeError: z_sample = model.sample(1) 
+                    
+                x = _coerce_5d(z_sample, target_dhw=(Dc, Hc, Wc))
+                x = to01(x, winsorize=True)
+                
+                out_file = out_dir / f"sample_{i:04d}.nii.gz"
+                save_nifti(x, out_file)
+                save_mid_slice_png(x, out_dir / f"sample_{i:04d}_midslice.png")
+
+        print(f"[ok] wrote {args.n_samples} samples to {out_dir}")
 
 if __name__ == "__main__":
     table = {
@@ -880,15 +911,11 @@ if __name__ == "__main__":
         "calc-distance": main_calc_distance,
         "recon-interpolate": main_recon_interpolate
     }
-    
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print("Available subcommands:", ", ".join(sorted(table.keys())))
         sys.exit(0)
-
     cmd = sys.argv.pop(1)
     if cmd not in table:
         print(f"Unknown command: {cmd}")
-        print("Available:", ", ".join(sorted(table.keys())))
         sys.exit(1)
-
     sys.exit(table[cmd]())

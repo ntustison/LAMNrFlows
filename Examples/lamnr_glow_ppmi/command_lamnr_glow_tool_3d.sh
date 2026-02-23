@@ -33,7 +33,7 @@ manifest_dir="${base_dir}/manifests/"
 ckpt="${runs_dir}/training_state.pt"
 
 # Manifest CSVs: These link subject IDs to their respective T1 and FA image paths.
-manifest="${manifest_dir}/manifest_ppmi.csv"
+manifest="${manifest_dir}/manifest_ppmi_100.csv"
 manifest_short="${manifest_dir}/manifest_ppmi_short.csv"
 manifest_lesions="${manifest_dir}/manifest_brats_short.csv"  
 
@@ -56,7 +56,6 @@ dist_csv=${out_dir}/t1_distance_to_gaussian.csv
 ###############################################################################
 # PIPELINE EXECUTION START
 ###############################################################################
-
 
 ########################################
 # Fit a Gaussian model (full or of low-rank covariance).
@@ -88,6 +87,89 @@ else
 fi
 
 ###############################################################################
+# 6. Reconstruction 3D (Sanity Check : x -> z -> x_hat)
+###############################################################################
+# Vérifie la capacité du modèle à encoder et décoder fidèlement une image réelle.
+
+recon_out_dir="${out_dir}/reconstructions/"
+
+if [[ ! -d ${recon_out_dir} ]]; then
+  echo "Exécution de la reconstruction 3D (Sanity Check)..."
+  mkdir -p "${recon_out_dir}"
+
+  # Extraction du premier chemin T1 valide depuis le manifeste court
+  test_vol=$(tail -n +2 "${manifest_short}" | awk -F',' '{print $1}' | grep -v "^$" | head -n 1)
+
+  if [[ -f "${test_vol}" ]]; then
+    filename=$(basename "${test_vol}")
+    out_file="${recon_out_dir}/recon_${filename}"
+
+    echo "  Reconstruction de : ${filename}"
+
+    ${WHICH_PYTHON} lamnr_glow_tool_3d.py recon \
+      --ckpt ${ckpt} \
+      --gauss ${gaussian_lr} \
+      --manifest ${manifest_short} \
+      --views T1 \
+      --volume-size ${which_experiment} \
+      --out "${out_file}" \
+      --devices cpu
+      
+    echo "Reconstruction terminée. Fichier sauvegardé dans : ${out_file}"
+  else
+    echo "Erreur : Fichier d'entrée introuvable. Vérifiez le manifeste."
+  fi
+else
+  echo "Le répertoire de reconstruction existe déjà : ${recon_out_dir}. Ignoré."
+fi
+
+###############################################################################
+# 5. Échantillonnage (Génération de volumes 3D synthétiques)
+###############################################################################
+# Tire des échantillons aléatoires depuis la distribution normale (espace latent)
+# et les décode pour créer de nouvelles images 3D anatomiques.
+
+sample_out_dir="${out_dir}/generated_samples/"
+
+echo "Génération de nouveaux échantillons 3D (Sampling)..."
+mkdir -p "${sample_out_dir}"
+
+# --view-index 0 correspond généralement à la modalité T1 selon votre ordre d'entraînement
+# --temperature 0.8 réduit légèrement la variance pour des échantillons plus nets
+
+${WHICH_PYTHON} lamnr_glow_tool_3d.py sample \
+  --ckpt ${ckpt} \
+  --view-index 0 \
+  --n-samples 5 \
+  --volume-size ${which_experiment} \
+  --temperature 0.25 \
+  --out-dir "${sample_out_dir}" \
+  --devices cpu
+  
+echo "Échantillonnage terminé. Fichiers sauvegardés dans : ${sample_out_dir}"
+
+###############################################################################
+# 2. Imputation Gaussienne (T1 -> FA)
+###############################################################################
+# Prédit la modalité FA manquante à partir de la modalité T1 observée.
+# Utilise manifest_short pour accélérer les tests initiaux.
+
+impute_out_dir="${out_dir}/imputed_FA/"
+
+echo "Exécution de l'imputation conditionnelle (T1 -> FA)..."
+
+${WHICH_PYTHON} lamnr_glow_tool_3d.py gauss-impute \
+  --ckpt ${ckpt} \
+  --gauss ${gaussian_lr} \
+  --manifest ${manifest_short} \
+  --views T1,FA \
+  --observed T1 \
+  --target FA \
+  --volume-size ${which_experiment} \
+  --out-dir ${impute_out_dir} \
+  --devices cpu
+
+###############################################################################
 # 1. Calcul de Distance Latente (Détection d'anomalies / OOD)
 ###############################################################################
 # Évalue la distance entre les latents de chaque volume T1 et la moyenne de la population.
@@ -109,38 +191,12 @@ fi
 # fi
 
 ###############################################################################
-# 2. Imputation Gaussienne (T1 -> FA)
-###############################################################################
-# Prédit la modalité FA manquante à partir de la modalité T1 observée.
-# Utilise manifest_short pour accélérer les tests initiaux.
-
-# impute_out_dir="${out_dir}/imputed_FA/"
-
-# if [[ ! -d ${impute_out_dir} ]]; then
-#   echo "Exécution de l'imputation conditionnelle (T1 -> FA)..."
-  
-#   ${WHICH_PYTHON} lamnr_glow_tool_3d.py gauss-impute \
-#     --ckpt ${ckpt} \
-#     --gauss ${gaussian_lr} \
-#     --manifest ${manifest_short} \
-#     --views T1,FA \
-#     --observed T1 \
-#     --target FA \
-#     --volume-size ${which_experiment} \
-#     --out-dir ${impute_out_dir} \
-#     --devices ${DEVICE}
-
-# else
-#   echo "Le répertoire d'imputation existe déjà : ${impute_out_dir}. Ignoré."
-# fi
-
-###############################################################################
 # 3. Winsorisation (Suppression des Lésions/Artefacts)
 ###############################################################################
 # Restreint les valeurs extrêmes dans l'espace latent (quantiles) pour 
 # "guérir" ou atténuer les anomalies structurelles (ex: tumeurs de BraTS).
 
-winsorize_out_dir="${out_dir}/winsorized_lesions/"
+# winsorize_out_dir="${out_dir}/winsorized_lesions/"
 
 # if [[ ! -d ${winsorize_out_dir} ]]; then
 #   echo "Exécution de la winsorisation sur le jeu de données des lésions..."
