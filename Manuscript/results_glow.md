@@ -4,34 +4,97 @@
 
 ## Glow-based LAMNr Flows
 
-### Justification for 2D Slice-Based Methodology
+Many evaluations demonstrating the various capabilities of our proposed framework
+rely on 2D image slices instead of full 3D volumes due to the cubic scaling laws
+of memory consumption inherent to Normalizing Flows. Unlike standard CNNs, Glow
+architectures require storing all intermediate activations to compute exact
+gradients, which quickly saturates Video RAM (VRAM) even when leveraging memory-efficient
+strategies such as gradient accumulation.
 
-The decision to conduct the majority of experiments—specifically hyperparameter optimization and ablation studies—using 2D slice-based representations (**256 x 256**) instead of full 3D volumes was necessitated by the **cubic scaling laws** of memory consumption inherent to Normalizing Flows.
+**Computational Complexity and Hardware Constraints**
 
-#### Computational Complexity and VRAM Constraints
-Glow-based architectures require storing all intermediate activations for both forward and backward passes to facilitate exact gradient computation. While 2D convolutional neural networks (CNNs) scale quadratically ($N^2$) with spatial resolution, 3D architectures scale cubically ($N^3$). The disparity in voxel count across resolutions is detailed in the table below:
+The following table illustrates the exponential increase in voxel count compared
+to a baseline 2D slice:
 
 | Dimensionality | Resolution | Total Units (Pixels/Voxels) | Scaling Factor (vs. $256^2$) |
 | :--- | :--- | :--- | :--- |
-| **2D** | 256 x 256 | 65,536 | 1x |
-| **3D** | 64 x 64 x 64 | 262,144 | 4x |
-| **3D** | 128 x 128 x 128 | 2,097,152 | 32x |
-| **3D** | 256 x 256 x 256 | 16,777,216 | 256x |
+| **2D** | 256 $\times$ 256 | 65,536 | 1$\times$ |
+| **3D** | 48 $\times$ 48 $\times$ 48 | 110,592 | $\sim 1.7\times$ |
+| **3D** | 64 $\times$ 64 $\times$ 64 | 262,144 | 4$\times$ |
+| **3D** | 128 $\times$ 128 $\times$ 128 | 2,097,152 | 32$\times$ |
+| **3D** | 256 $\times$ 256 $\times$ 256 | 16,777,216 | 256$\times$ |
 
-#### Hardware Limitations
-Experimental procedures were executed using a single **NVIDIA RTX A6000 GPU (48 GB VRAM)**. Empirical measurements indicated that at a **64 x 64 x 64** resolution with an architecture depth of **L = 4** and width **K = 16**, VRAM consumption reached **29 GB** with a micro-batch size of **8**. Projections for higher resolutions indicate that:
+Experimental procedures were executed using a single NVIDIA RTX A6000 GPU (48 GB
+VRAM). Empirically, processing a 3D volume of $48^3$ voxels (depth $L=3$,
+$K=32$, 64 hidden channels) consumes nearly all available memory with a
+micro-batch size of 14. Increasing the resolution to $64^3$ voxels imposes
+strict architectural compromises, forcing a reduction in hidden channels to 48
+($L=3$, $K=32$) and batch size to 8 to prevent memory overflow. Projected memory
+requirements for $128^3$ or $256^3$ resolutions far exceed the 48 GB threshold,
+even with a batch size of 1. Future work concerns leveraging the existing 3D
+capabilities of our framework and the acquisition of high-capacity computational
+resources for image volumes $> 48^3$ voxels.
 
-* **128^3 Resolution**: Memory requirements for a batch size of **1** exceed the **48 GB** threshold using standard backpropagation.
-* **256^3 Resolution**: Estimated memory requirements exceed **320 GB**, rendering training impossible on standard workstation hardware without distributed model parallelism or reversible networking implementations.
+## Template
 
-#### Strategic Implementation
+\begin{figure}[htbp]
+    \centering
 
-A "2D-first" approach allowed for rapid iteration through the hyperparameter
-space—including learning rates, coupling layer complexity, and alignment loss
-weights—while maintaining an effective batch size of 128 to ensure
-convergence stability and robust ActNorm statistics. Findings were subsequently
-validated at $64 \times 64 \times 64$ resolution to ensure geometric and volumetric
-consistency.
+    % --- Baseline Row ---
+    \begin{subfigure}{0.32\textwidth}
+        \includegraphics[width=\linewidth]{Figures/PPMI_template0_256x256x256_slice138.png}
+        \caption{ANTsX Template}
+        \label{fig:template_antsx}
+    \end{subfigure}
+    \hspace{0.05\textwidth} % Space to center the two images
+    \begin{subfigure}{0.32\textwidth}
+        \includegraphics[width=\linewidth]{Figures/template_T1_mu_sharpened_256x256.png}
+        \caption{T1: $f^{-1}_{\theta}(0)$}
+        \label{fig:template_flow}
+    \end{subfigure}
+
+    \vspace{0.5cm} 
+
+    % --- Inliers (Min Distance) ---
+    \begin{subfigure}{0.32\textwidth}
+        \includegraphics[width=\linewidth]{Figures/sub-3859_ses-20120921_r0001_ppmixt1_min_total_t1_distance_to_gaussian_256x256_slice138.png}
+        \caption{Min Distance (Total)}
+        \label{fig:min_total}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.32\textwidth}
+        \includegraphics[width=\linewidth]{Figures/sub-3327_ses-20170127_r0002_ppmixt1_min_distL0_t1_distance_to_gaussian_256x256_slice138.png}
+        \caption{Min Distance (Level 0)}
+        \label{fig:min_L0}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.32\textwidth}
+        \includegraphics[width=\linewidth]{Figures/sub-3859_ses-20120921_r0001_ppmixt1_min_distL5_t1_distance_to_gaussian_256x256_slice138.png}
+        \caption{Min Distance (Level 5)}
+        \label{fig:min_L5}
+    \end{subfigure}
+    
+    \vspace{0.5cm} 
+    
+    % --- Outliers (Max Distance) ---
+    \begin{subfigure}{0.32\textwidth}
+        \includegraphics[width=\linewidth]{Figures/sub-3150_ses-20101109_r0001_ppmixt1_max_total_t1_distance_to_gaussian_256x256_slice138.png}
+        \caption{Max Distance (Total)}
+        \label{fig:max_total}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.32\textwidth}
+        \includegraphics[width=\linewidth]{Figures/sub-3318_ses-20120627_r0001_ppmixt1_max_distL0_t1_distance_to_gaussian_256x256_slice138.png}
+        \caption{Max Distance (Level 0)}
+        \label{fig:max_L0}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.32\textwidth}
+        \includegraphics[width=\linewidth]{Figures/sub-3586_ses-20160810_r0001_ppmixt1_max_distL5_t1_distance_to_gaussian_256x256_slice138.png}
+        \caption{Max Distance (Level 5)}
+        \label{fig:max_L5}
+    \end{subfigure}
+    
+    \caption{Visualization of the learned latent space across the cohort. The top row compares the standard population template with the mean image generated by the model. The subsequent rows illustrate the distance to the Gaussian prior distribution, identifying the most typical cases (minimum distance) and anomalies (maximum distance) across different resolution scales (Total, L0, L5).}
+    \label{fig:latent_space_distances}
+\end{figure}
+
 
 ### Leveraging approximate template $\leftrightsquigarrow$ subject geodesic linearity for image registration via latent winsorization
 
