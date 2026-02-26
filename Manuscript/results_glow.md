@@ -34,14 +34,30 @@ limitations[^comp].
     capabilities of our framework and the acquisition of high-capacity computational
     resources for image volumes $> 48^3$ voxels.
 
-* Generative sampling 
-* Fréchet mean approximation
+* __Generative sampling.__ Sampling in Normalizing/LAMNr Flows is achieved by drawing a
+  latent vector $z$ from the isotropic Gaussian base distribution, 
+  $z \sim \mathcal{N}(0, \tau^2 I)$, and passing it through the inverse of the learned bijective
+  mapping, $x = f^{-1}_\theta(z)$, to reconstruct the high-dimensional image.
+  Scaling the standard deviation of this prior with a temperature parameter
+  ($\tau$) allows for explicit control over the fundamental trade-off between
+  generating high-fidelity, canonical anatomies near the mean and exploring
+  diverse, lower-probability structural variations in the tails.
+
+* __Fréchet mean approximation.__ In the context of the learned data manifold,
+  the Fréchet mean of the anatomical distribution can be efficiently
+  approximated by decoding the origin of the latent space. By passing the
+  zero-vector of the isotropic Gaussian prior through the inverse flow, $x =
+  f^{-1}_\theta(0)$, we synthesize a canonical representation that captures the
+  central morphometric tendency of the cohort without the computational overhead
+  of iterative diffeomorphic averaging [@Avants:2010aa].
+
+* Conditional Gaussian imputation
 * Latent distances 
 * Pairwise image interpolation 
 * Winsorize (tumor)
 
 
-## Samples
+## Generative samples
 
 \begin{figure}[htbp]
     \centering
@@ -49,12 +65,10 @@ limitations[^comp].
     \begin{subfigure}{0.475\textwidth}
         \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.25.png}
         \caption{$\tau = 0.25$}
-        \label{fig:t0.25}
     \end{subfigure}\hfill
     \begin{subfigure}{0.475\textwidth}
         \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.50.png}
         \caption{$\tau = 0.50$}
-        \label{fig:t0.50}
     \end{subfigure}
 
     \vspace{0.2cm} 
@@ -62,12 +76,10 @@ limitations[^comp].
     \begin{subfigure}{0.475\textwidth}
         \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.75.png}
         \caption{$\tau = 0.75$}
-        \label{fig:t0.75}
     \end{subfigure}\hfill
     \begin{subfigure}{0.475\textwidth}
         \includegraphics[width=\linewidth]{Figures/samples_t1_temp_1.00.png}
         \caption{$\tau = 1.0$}
-        \label{fig:t1.00}
     \end{subfigure}
     
     \caption{Samples drawn from the learned LAMNr flow prior for T1-weighted
@@ -90,12 +102,10 @@ limitations[^comp].
     \begin{subfigure}{0.475\textwidth}
         \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.25.png}
         \caption{$\tau = 0.25$}
-        \label{fig:t0.25}
     \end{subfigure}\hfill
     \begin{subfigure}{0.475\textwidth}
         \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.50.png}
         \caption{$\tau = 0.50$}
-        \label{fig:t0.50}
     \end{subfigure}
 
     \vspace{0.2cm} 
@@ -103,12 +113,10 @@ limitations[^comp].
     \begin{subfigure}{0.475\textwidth}
         \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.75.png}
         \caption{$\tau = 0.75$}
-        \label{fig:t0.75}
     \end{subfigure}\hfill
     \begin{subfigure}{0.475\textwidth}
         \includegraphics[width=\linewidth]{Figures/samples_fa_temp_1.00.png}
         \caption{$\tau = 1.0$}
-        \label{fig:t1.00}
     \end{subfigure}
     
     \caption{Samples drawn from the learned LAMNr flow prior for Fractional
@@ -124,26 +132,40 @@ limitations[^comp].
     \label{fig:fa_samples}
 \end{figure}
 
-
-## Latent distances from $f^{-1}_{\theta}(0)$
+## Fréchet mean approximation 
 
 \begin{figure}[htbp]
     \centering
 
     % --- Baseline Row ---
-    \begin{subfigure}{0.32\textwidth}
+    \begin{subfigure}{0.45\textwidth}
         \includegraphics[width=\linewidth]{Figures/PPMI_template0_256x256x256_slice138.png}
         \caption{ANTsX Template}
         \label{fig:template_antsx}
     \end{subfigure}
     \hspace{0.05\textwidth} % Space to center the two images
-    \begin{subfigure}{0.32\textwidth}
+    \begin{subfigure}{0.45\textwidth}
         \includegraphics[width=\linewidth]{Figures/template_T1_mu_sharpened_256x256.png}
         \caption{T1: $f^{-1}_{\theta}(0)$}
         \label{fig:template_flow}
     \end{subfigure}
 
-    \vspace{0.5cm} 
+    \caption{Comparison of population Fr\'echet mean approximations. (a) The
+    standard ANTsX template, constructed via traditional iterative diffeomorphic
+    registration, representing the conventional spatial average. (b) The generative
+    mean, $f^{-1}_{\theta}(0)$, obtained by mapping the origin of the learned latent
+    Gaussian prior back to the anatomical image space. This flow-generated template
+    intrinsically captures the central morphological tendency of the dataset in a
+    single forward pass.}
+    \label{fig:frechet_mean}
+
+\end{figure}
+
+
+## Latent distances from $f^{-1}_{\theta}(0)$
+
+\begin{figure}[htbp]
+    \centering
 
     % --- Inliers (Min Distance) ---
     \begin{subfigure}{0.32\textwidth}
