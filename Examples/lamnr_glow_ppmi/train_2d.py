@@ -132,10 +132,39 @@ def _check_hw_divisible(H: int, W: int, L: int):
     if (H % r) or (W % r):
         raise ValueError(f"H and W must be divisible by 2**L={r}. Got H={H}, W={W}, L={L}")
 
-def to01(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    x_min = x.amin(dim=(2, 3), keepdim=True)
-    x_max = x.amax(dim=(2, 3), keepdim=True)
+def to01(x: torch.Tensor, eps: float = 1e-8, winsorize: bool = False) -> torch.Tensor:
+    """
+    Normalise sur toutes les dimensions spatiales.
+    Si winsorize=True, ignore les 1% de valeurs extrêmes 
+    pour préserver le contraste visuel (utile à haute température).
+    """
+    if x.ndim < 4:
+        return x
+    
+    spatial_dims = tuple(range(2, x.ndim))
+    
+    if winsorize:
+        # Aplatir les dimensions spatiales pour calculer les quantiles
+        x_flat = x.flatten(start_dim=2)
+        
+        # Isoler les bornes (1% et 99%)
+        q_low = torch.quantile(x_flat, 0.01, dim=2, keepdim=True)
+        q_high = torch.quantile(x_flat, 0.99, dim=2, keepdim=True)
+        
+        # Redimensionner pour correspondre à la forme originale (broadcasting)
+        view_shape = x.shape[:2] + (1,) * len(spatial_dims)
+        x_min = q_low.view(view_shape)
+        x_max = q_high.view(view_shape)
+        
+        # Écrêter les voxels aberrants
+        x = torch.clamp(x, min=x_min, max=x_max)
+    else:
+        # Comportement standard (min/max absolu) pour l'entraînement
+        x_min = x.amin(dim=spatial_dims, keepdim=True)
+        x_max = x.amax(dim=spatial_dims, keepdim=True)
+        
     return (x - x_min) / (x_max - x_min + eps)
+
 
 def bits_per_dim(logp: torch.Tensor, num_dims: int) -> torch.Tensor:
     return -logp / (np.log(2.0) * float(num_dims))  # [B]
@@ -630,7 +659,7 @@ def _save_samples_grid(model, n, temp, out_prefix, nrow=10, target_hw=None, warm
         if which_type not in valid:
             raise ValueError(f"_save_samples_grid: unrecognized which_type={which_type}")
 
-        x_to01 = to01(x) if which_type in ("to01", "both") else None
+        x_to01 = to01(x, winsorize=True) if which_type in ("to01", "both") else None
         x_clamp = x.clamp(0, 1) if which_type in ("clamp", "both") else None
 
         if x_to01 is not None:

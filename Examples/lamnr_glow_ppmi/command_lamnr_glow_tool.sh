@@ -157,16 +157,16 @@ fi
 #   tau > 1.0: Higher diversity but increased risk of artifacts.
 ########################################
 
-# for temp in 0.01 0.25 0.5 0.75 1.0 1.25 1.5;
-#   do
-#     echo "Sampling at temperature: ${temp}"
-#     ${WHICH_PYTHON} lamnr_glow_tool.py sample \
-#       --ckpt ${ckpt} \
-#       --view-index 0 --sample-grid-size 6x6 \
-#       --image-size 128x128 --temperature ${temp} \
-#       --devices ${DEVICE} --sample-grid-out ${out_dir}/Samples/samples_t1_temp_${temp}.png \
-#       --seed $RANDOM
-#   done 
+for temp in 0.10 0.25 0.50 0.75 1.0;
+  do
+    echo "Sampling at temperature: ${temp}"
+    ${WHICH_PYTHON} lamnr_glow_tool.py sample \
+      --ckpt ${ckpt} \
+      --view-index 0 --sample-grid-size 6x6 \
+      --image-size 256x256 --temperature ${temp} \
+      --devices ${DEVICE} --sample-grid-out ${out_dir}/Samples/samples_t1_temp_${temp}.png \
+      --seed $RANDOM
+  done 
 
 ########################################
 # Generates a population-level anatomical template.
@@ -196,20 +196,20 @@ fi
 # (e.g., keeping original shape at L4 while normalizing texture at L0).
 # Can also specify a target image for interpolation instead of the mean (--target-image)
 ########################################
-echo "Performing latent space interpolation between subject and population mean..."
-for t_val in 0.55 0.95 ;
-  do
-    echo "Interpolating at t=${t_val}"
-    ${WHICH_PYTHON} lamnr_glow_tool.py recon-interpolate \
-      --ckpt ${ckpt} \
-      --gauss ${gaussian_lr} \
-      --manifest ${manifest_lesions} \
-      --views T1 \
-      --slice-axis 2 --slice-index ${SLICE_INDEX} \
-      --devices ${DEVICE} \
-      --t ${t_val} \
-      --out ${out_dir}/interpolation/interp_t${t_val}.png
-  done
+# echo "Performing latent space interpolation between subject and population mean..."
+# for t_val in 0.55 0.95 ;
+#   do
+#     echo "Interpolating at t=${t_val}"
+#     ${WHICH_PYTHON} lamnr_glow_tool.py recon-interpolate \
+#       --ckpt ${ckpt} \
+#       --gauss ${gaussian_lr} \
+#       --manifest ${manifest_lesions} \
+#       --views T1 \
+#       --slice-axis 2 --slice-index ${SLICE_INDEX} \
+#       --devices ${DEVICE} \
+#       --t ${t_val} \
+#       --out ${out_dir}/interpolation/interp_t${t_val}.png
+#   done
 
 # ${WHICH_PYTHON} lamnr_glow_tool.py calc-distance \
 #   --ckpt ${ckpt} \

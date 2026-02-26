@@ -150,21 +150,40 @@ def _check_hw_divisible(
             raise ValueError(f"D must be divisible by 2**L={r}. Got D={D}, L={L}")
 
 
-def to01(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+def to01(x: torch.Tensor, eps: float = 1e-8, winsorize: bool = False) -> torch.Tensor:
     """
-    Normalize over all spatial dims.
-
-    Works for both:
-      - 2D: (N, C, H, W)
-      - 3D: (N, C, D, H, W)
+    Normalise les volumes 3D (N, C, D, H, W) ou images 2D (N, C, H, W) entre 0 et 1.
     """
     if x.ndim < 4:
         return x
+    
+    # Pour un volume 3D, spatial_dims sera (2, 3, 4)
     spatial_dims = tuple(range(2, x.ndim))
-    x_min = x.amin(dim=spatial_dims, keepdim=True)
-    x_max = x.amax(dim=spatial_dims, keepdim=True)
+    
+    if winsorize:
+        # torch.quantile ne supporte pas le float16, on force le calcul en float32
+        x_calc = x.float()
+        
+        # Aplatit (N, C, D, H, W) en (N, C, D*H*W)
+        x_flat = x_calc.flatten(start_dim=2)
+        
+        # Calcule les percentiles sur l'ensemble des voxels
+        q_low = torch.quantile(x_flat, 0.01, dim=2, keepdim=True).to(x.dtype)
+        q_high = torch.quantile(x_flat, 0.99, dim=2, keepdim=True).to(x.dtype)
+        
+        # Redimensionne en (N, C, 1, 1, 1) pour le broadcasting 3D
+        view_shape = x.shape[:2] + (1,) * len(spatial_dims)
+        x_min = q_low.view(view_shape)
+        x_max = q_high.view(view_shape)
+        
+        # Écrête les voxels aberrants
+        x = torch.clamp(x, min=x_min, max=x_max)
+    else:
+        # Comportement standard pour l'entraînement
+        x_min = x.amin(dim=spatial_dims, keepdim=True)
+        x_max = x.amax(dim=spatial_dims, keepdim=True)
+        
     return (x - x_min) / (x_max - x_min + eps)
-
 
 def bits_per_dim(logp: torch.Tensor, num_dims: int) -> torch.Tensor:
     return -logp / (np.log(2.0) * float(num_dims))  # [B]
