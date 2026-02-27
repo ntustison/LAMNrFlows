@@ -85,11 +85,15 @@ population effects from idiosyncratic noise [@Stone2020BreachersNeuroimaging;
 translation and disentanglement using CNNs, VAEs, or Diffusion models
 [@havaei2016hemis; @Chartsias2019SDNet; @yuan2024remind], they often lack the
 unique combination of exact likelihoods and one-shot invertible mappings
-required for rigorous computational anatomy.
+required for rigorous computational anatomy. Recent works have also explored
+normalizing flows for unsupervised MRI harmonization, but utilize the
+flow purely as a test-time density estimator to iteratively adapt an auxiliary
+translation network to an unknown target domain [@Beizaee2025].
 
-LAMNr flows bridge this gap by extending the SiMLR framework into a deep,
-likelihood-based architecture that linearizes the anatomical manifold. Instead
-of an explicit linear factorization in the observation domain, LAMNr maps each
+Unlike test-time adaptation strategies that require iterative network updates
+during inference, LAMNr flows bridge this gap by extending the SiMLR framework
+into a deep, likelihood-based architecture that linearizes the anatomical manifold.
+Instead of an explicit linear factorization in the observation domain, LAMNr maps each
 view into a shared multiscale latent space using normalizing flows, ensuring
 exact log-likelihoods and bijective mappings. By utilizing latent-alignment
 objectives (e.g., VICReg, InfoNCE) to identify shared coordinates, the framework
@@ -266,33 +270,45 @@ useful approach where common diffeomorphic anatomical assumptions are violated.
 ## Contributions
 
 We introduce Latent-Aligned Multiview Normalizing (LAMNr) flows, a general
-framework for Deep Computational Anatomy that learns shared and private
-latent structures across multiple views while preserving exact likelihoods and
+framework for deep computational anatomy that learns shared and private latent
+structures across multiple views while preserving exact likelihoods and
 invertibility. Within LAMNr, each view is equipped with a dedicated flow that
-maps observations to a structured latent space. Key contributions of this work 
-include:
+maps observations to a structured latent space. By anchoring the population to a
+known base distribution, the framework linearizes the anatomical manifold,
+ensuring that the latent origin serves as a principled approximation of the
+population Fréchet mean.
+
+Key contributions of this work include:
 
 1. **Unified Multiview Modeling:** We provide a shared coordinate system for
    heterogeneous data types, including 2D/3D images and tabular imaging-derived
    phenotypes (IDPs). For imaging, we adopt Glow-style multiscale architectures
    to retain spatial detail; for tabular blocks, we utilize integrated per-view
    flows.
+
 2. **Latent Alignment and Linearization:** Using subject-matched batches, we
    identify shared anatomical features via a library of alignment losses (e.g.,
    VICReg, InfoNCE). We optionally employ CCA or HSIC screens to restrict
    alignment to statistically shared directions, leaving the orthogonal
    complement to capture view-specific variation.
+
 3. **Closed-form Inference and Reconstruction:** We incorporate a conditional
    Gaussian layer to provide closed-form posteriors over arbitrary latent
    subsets. This yields a nonlinear, invertible extension of the shared/private
    decomposition found in SiMLR [@Avants2021NatCompSci].
+
 4. **Contrast-Robust Surrogates:** We demonstrate that substituting private
    latents with conditional means produces shared-latent reconstructions that
    preserve identity while suppressing idiosyncratic contrast. These
    "latent-mean" images act as robust representatives that empirically reduce
    diffeomorphic registration effort.
-5. **Open-source Implementation:** We provide a comprehensive PyTorch
-   implementation integrated with the ANTsX ecosystem (via ANTsTorch) for
-   data handling and registration, along with an updated `normflows` library and
-   full evaluation scripts to ensure reproducibility [@Tustison:2024aa;
-   @stimper2023normflows].
+
+5. **Open-source, 3D-capable Implementation:** Unlike many contemporary
+   flow-based tools restricted to 2D slice-wise processing [@Beizaee2025], we
+   provide a comprehensive, 2D and 3D PyTorch implementation.
+   Integrated with the ANTsX ecosystem (via ANTsTorch) for robust data handling
+   and registration, and accompanied by a significantly updated `normflows`
+   library, our release ensures reproducible, volume-level computational anatomy
+   [@Tustison:2024aa; @stimper2023normflows].
+
+Evaluations on multimodal MRI and multiview IDP datasets demonstrate that LAMNr flows improve calibrated likelihoods and downstream prediction while providing a single, exact framework for likelihood-calibrated multiview reasoning.
