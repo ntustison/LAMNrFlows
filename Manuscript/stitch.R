@@ -14,7 +14,7 @@ rmdFiles <- c( "format.md",
                "results_tabular_singleview.md",
                "results_tabular_multiview.md",
                "results_glow.md",
-               "future_work.md",
+               # "future_work.md",
                "acknowledgments.md",
                "references.md"
              )

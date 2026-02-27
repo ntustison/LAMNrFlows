@@ -150,7 +150,7 @@ def _check_hw_divisible(
             raise ValueError(f"D must be divisible by 2**L={r}. Got D={D}, L={L}")
 
 
-def to01(x: torch.Tensor, eps: float = 1e-8, winsorize: bool = False) -> torch.Tensor:
+def to01(x: torch.Tensor, eps: float = 1e-8, winsorize: bool = True) -> torch.Tensor:
     """
     Normalise les volumes 3D (N, C, D, H, W) ou images 2D (N, C, H, W) entre 0 et 1.
     """

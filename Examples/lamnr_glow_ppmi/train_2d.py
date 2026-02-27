@@ -132,7 +132,7 @@ def _check_hw_divisible(H: int, W: int, L: int):
     if (H % r) or (W % r):
         raise ValueError(f"H and W must be divisible by 2**L={r}. Got H={H}, W={W}, L={L}")
 
-def to01(x: torch.Tensor, eps: float = 1e-8, winsorize: bool = False) -> torch.Tensor:
+def to01(x: torch.Tensor, eps: float = 1e-8, winsorize: bool = True) -> torch.Tensor:
     """
     Normalise sur toutes les dimensions spatiales.
     Si winsorize=True, ignore les 1% de valeurs extrêmes 
