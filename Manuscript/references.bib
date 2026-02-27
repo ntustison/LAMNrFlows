@@ -1,12 +1,28 @@
 %% This BibTeX bibliography file was created using BibDesk.
 %% https://bibdesk.sourceforge.io/
 
-%% Created for Nick Tustison at 2026-02-01 15:33:57 -0800 
+%% Created for Nick Tustison at 2026-02-26 18:38:54 -0800 
 
 
 %% Saved with string encoding Unicode (UTF-8) 
 
 
+
+@article{Wen:2023aa,
+	abstract = {Accelerated magnetic resonance (MR) imaging attempts to reduce acquisition time by collecting data below the Nyquist rate. As an ill-posed inverse problem, many plausible solutions exist, yet the majority of deep learning approaches generate only a single solution. We instead focus on sampling from the posterior distribution, which provides more comprehensive information for downstream inference tasks. To do this, we design a novel conditional normalizing flow (CNF) that infers the signal component in the measurement operator's nullspace, which is later combined with measured data to form complete images. Using fastMRI brain and knee data, we demonstrate fast inference and accuracy that surpasses recent posterior sampling techniques for MRI. Code is available at https://github.com/jwen307/mri_cnf.},
+	author = {Wen, Jeffrey and Ahmad, Rizwan and Schniter, Philip},
+	date-added = {2026-02-26 18:37:25 -0800},
+	date-modified = {2026-02-26 18:37:25 -0800},
+	journal = {Proc Mach Learn Res},
+	journal-full = {Proceedings of machine learning research},
+	month = {Jul},
+	pages = {36926-36939},
+	pmc = {PMC10712023},
+	pmid = {38084206},
+	pst = {ppublish},
+	title = {A Conditional Normalizing Flow for Accelerated Multi-Coil MR Imaging},
+	volume = {202},
+	year = {2023}}
 
 @article{Avants:2008aa,
 	abstract = {One of the most challenging problems in modern neuroimaging is detailed characterization of neurodegeneration. Quantifying spatial and longitudinal atrophy patterns is an important component of this process. These spatiotemporal signals will aid in discriminating between related diseases, such as frontotemporal dementia (FTD) and Alzheimer's disease (AD), which manifest themselves in the same at-risk population. Here, we develop a novel symmetric image normalization method (SyN) for maximizing the cross-correlation within the space of diffeomorphic maps and provide the Euler-Lagrange equations necessary for this optimization. We then turn to a careful evaluation of our method. Our evaluation uses gold standard, human cortical segmentation to contrast SyN's performance with a related elastic method and with the standard ITK implementation of Thirion's Demons algorithm. The new method compares favorably with both approaches, in particular when the distance between the template brain and the target brain is large. We then report the correlation of volumes gained by algorithmic cortical labelings of FTD and control subjects with those gained by the manual rater. This comparison shows that, of the three methods tested, SyN's volume measurements are the most strongly correlated with volume measurements gained by expert labeling. This study indicates that SyN, with cross-correlation, is a reliable method for normalizing and making anatomical measurements in volumetric MRI of patients and at-risk elderly individuals.},
@@ -286,16 +302,6 @@
 	publisher = {Springer},
 	title = {Pattern Recognition and Machine Learning},
 	year = {2006}}
-
-@article{wen2023cnf,
-	author = {Wen, Jeffrey and Ahmad, Rizwan and Schniter, Philip},
-	date-added = {2025-10-29 21:18:43 -0700},
-	date-modified = {2025-10-29 21:18:43 -0700},
-	journal = {arXiv preprint arXiv:2306.01630},
-	title = {A Conditional Normalizing Flow for Accelerated Multi-Coil MR Imaging},
-	url = {https://arxiv.org/abs/2306.01630},
-	year = {2023},
-	bdsk-url-1 = {https://arxiv.org/abs/2306.01630}}
 
 @article{simkus2025cfmi,
 	author = {Simkus, Vaidotas and Gutmann, Michael U.},
@@ -1224,18 +1230,20 @@
 	doi = {10.1109/CVPR.2009.5206535},
 	pages = {2392--2399},
 	title = {The geometry of kernel density estimation on Riemannian manifolds},
-	year = {2009}}
+	year = {2009},
+	bdsk-url-1 = {https://doi.org/10.1109/CVPR.2009.5206535}}
 
- @article{salman2018deep,
-  title={Deep Diffeomorphic Normalizing Flows},
-  author={Salman, Hadi and Yadollahpour, Payman and Fletcher, Tom and Batmanghelich, Kayhan},
-  journal={arXiv preprint arXiv:1810.03256},
-  year={2018},
-  url={https://arxiv.org/abs/1810.03256}
-}
+@article{salman2018deep,
+	author = {Salman, Hadi and Yadollahpour, Payman and Fletcher, Tom and Batmanghelich, Kayhan},
+	journal = {arXiv preprint arXiv:1810.03256},
+	title = {Deep Diffeomorphic Normalizing Flows},
+	url = {https://arxiv.org/abs/1810.03256},
+	year = {2018},
+	bdsk-url-1 = {https://arxiv.org/abs/1810.03256}}
 
 @article{Miller2016aa,
 	author = {Miller, Karla L. and Alfaro-Almagro, Fidel and Bangerter, Neal K. and Thomas, David L. and Yacoub, Essa and Xu, Junqian and Bartsch, Andreas J. and Jbabdi, Saad and Sotiropoulos, Stamatios N. and Andersson, Jesper L. R. and Griffanti, Ludovica and Douaud, Gwena{\"e}lle and Okell, Thomas W. and Weale, Stephen and Dragonu, Iulius and Garratt, Samuel and Hudson, Sarah and Collins, Rory and Jenkinson, Mark and Matthews, Paul M. and Smith, Stephen M.},
+	doi = {10.1038/nn.4393},
 	journal = {Nature Neuroscience},
 	month = {Nov},
 	number = {11},
@@ -1243,14 +1251,13 @@
 	title = {Multimodal population brain imaging in the UK Biobank prospective epidemiological study},
 	volume = {19},
 	year = {2016},
-	doi = {10.1038/nn.4393}}
+	bdsk-url-1 = {https://doi.org/10.1038/nn.4393}}
 
- @article{Beizaee2025,
-  title={Harmonizing flows: Leveraging normalizing flows for unsupervised and source-free MRI harmonization},
-  author={Beizaee, Farzad and Lodygensky, Gregory A. and Adamson, Chris L. and Thompson, Deanne K. and Cheong, Jeanie L. Y. and Spittle, Alicia J. and Anderson, Peter J. and Desrosiers, Christian and Dolz, Jose},
-  journal={Medical Image Analysis},
-  volume={101},
-  pages={103483},
-  year={2025},
-  publisher={Elsevier}
-}
+@article{Beizaee2025,
+	author = {Beizaee, Farzad and Lodygensky, Gregory A. and Adamson, Chris L. and Thompson, Deanne K. and Cheong, Jeanie L. Y. and Spittle, Alicia J. and Anderson, Peter J. and Desrosiers, Christian and Dolz, Jose},
+	journal = {Medical Image Analysis},
+	pages = {103483},
+	publisher = {Elsevier},
+	title = {Harmonizing flows: Leveraging normalizing flows for unsupervised and source-free MRI harmonization},
+	volume = {101},
+	year = {2025}}

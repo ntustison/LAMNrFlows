@@ -304,11 +304,12 @@ Key contributions of this work include:
    diffeomorphic registration effort.
 
 5. **Open-source, 3D-capable Implementation:** Unlike many contemporary
-   flow-based tools restricted to 2D slice-wise processing [@Beizaee2025], we
-   provide a comprehensive, 2D and 3D PyTorch implementation.
-   Integrated with the ANTsX ecosystem (via ANTsTorch) for robust data handling
-   and registration, and accompanied by a significantly updated `normflows`
-   library, our release ensures reproducible, volume-level computational anatomy
-   [@Tustison:2024aa; @stimper2023normflows].
+   flow-based tools limited to 2D slice-wise processing
+   [@Beizaee2025;@Wen:2023aa], we provide a comprehensive, open-source, 2D and
+   3D PyTorch implementation, based on the `normflows` library
+   [@stimper2023normflows], which is integrated with the ANTsX ecosystem (via
+   ANTsTorch) for robust data handling and auxiliary functionality.
 
-Evaluations on multimodal MRI and multiview IDP datasets demonstrate that LAMNr flows improve calibrated likelihoods and downstream prediction while providing a single, exact framework for likelihood-calibrated multiview reasoning.
+Evaluations on multimodal MRI and multiview IDP datasets demonstrate that LAMNr
+flows improve calibrated likelihoods and downstream prediction while providing a
+single, exact framework for likelihood-calibrated multiview analysis.
