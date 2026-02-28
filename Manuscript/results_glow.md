@@ -111,7 +111,13 @@ limitations[^comp].
     réalistes et pénètre dans une zone morte, ce qui provoque l'artéfact en
     damier.
 
-
+* __Temperature scaling.__ Weighting a latent representation by a scalar factor
+  $\tau < 1.0$ contracts the vector toward the origin of the Gaussian
+  prior. This variance reduction rigorously preserves the topology of the
+  learned manifold, effectively suppressing out-of-distribution pathological
+  anomalies and shifting the subject's anatomy toward the healthy population
+  mean without introducing reconstruction artifacts. Figure
+  \ref{fig:temperature_scaling}.
 
 
 \begin{figure}[htbp]
@@ -306,6 +312,20 @@ limitations[^comp].
     \label{fig:interpolation}
 \end{figure}
 
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{Figures/temperature_scaling.pdf}
+    \caption{Effect of temperature scaling on anomaly expression. Weighting the
+    latent representation by a temperature factor $\tau$ contracts the vector
+    toward the origin. At a low value of $\tau = 0.01$, the reconstruction
+    approaches the mean of the healthy population. Increasing the temperature
+    scaling factor toward $\tau = 0.99$ increases the data variance. This
+    progression gradually reveals the expression of the out-of-distribution
+    anomaly, ultimately displaying the original subject with their complete
+    pathology.}
+    \label{fig:temperature_scaling}
+\end{figure}
 
 
 
