@@ -1,7 +1,9 @@
 
 ## Deep Computational Anatomy via Latent-Aligned Multiview Normalizing Flows
 
-![Deep Computational Anatomy](Manuscript/Figures/lamnr_templates.png)
+<img align="center" width="50%" src="Manuscript/Figures/lamnr_templates.png"><img align="center" width="45%" src="Manuscript/Figures/lamnr_flows_illustration.png">
+
+----
 
 Normalizing flows induce exact-likelihood, bijective mappings between data and
 latents, providing the necessary framework for Latent-Aligned
@@ -29,6 +31,7 @@ show improvements in calibrated likelihoods, dependence structure, and
 downstream prediction. Our framework facilitates likelihood-calibrated,
 interpretable multiview reasoning within a single, exact model that bridges deep
 learning with foundational principles of computational anatomy.
+
 
 ***
 
