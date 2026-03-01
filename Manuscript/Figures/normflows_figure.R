@@ -51,16 +51,26 @@ p1_a <- ggplot(base_data, aes(x = z, y = density)) +
     panel.background = element_rect(fill = "transparent", colour = NA))
 
 # set.seed()
-samples <- c(rnorm(250, mean = -1.5, sd = 0.3), 
-             rnorm(150, mean = 0.2, sd = 0.4),
-             rnorm(100, mean = 1.2, sd = 0.1))
+if( view == 1 ) {
+  samples <- c(rnorm(250, mean = -1.5, sd = 0.3), 
+               rnorm(150, mean = 0.2, sd = 0.4),
+               rnorm(100, mean = 1.2, sd = 0.1))
+} else if( view == 2 ) {              
+  samples <- c(rnorm(250, mean = -0.5, sd = 0.2), 
+               rnorm(100, mean = 0.75, sd = 0.2))
+} else {
+  samples <- c(rnorm(50, mean = -1.5, sd = 0.1), 
+               rnorm(250, mean = 0.2, sd = 0.3),
+               rnorm(200, mean = 1.2, sd = 0.7))
+}
+
 complex_samples <- data.frame(x = samples)
 
 p2_a <- ggplot(complex_samples, aes(x = x)) +
   geom_density(fill = p2a_color, alpha = 0.2, color = p2a_color, linewidth = 1.2) +
   geom_jitter(aes(y = -0.01), height = 0.005, alpha = 0.3, size = 0.8) +
   labs(title = "Input Data Distribution",
-       subtitle = "Observed Space ($\\mathcal{X}$)",
+       subtitle = "Observed Space: ($\\mathcal{X}$)",
        x = "Input Feature Value ($x$)", y = "") +
   theme_minimal() +
   theme(plot.title = element_text(face = "bold"),
@@ -68,7 +78,7 @@ p2_a <- ggplot(complex_samples, aes(x = x)) +
     panel.background = element_rect(fill = "transparent", colour = NA))
 
 row_1 <- p2_a + p1_a + 
-  plot_annotation(title = paste( "Single-View", view ),
+  plot_annotation(title = paste( "View", view ),
                   theme = theme(plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
                   plot.background = element_rect(fill = "transparent", colour = NA),
                   panel.background = element_rect(fill = "transparent", colour = NA)))
@@ -85,16 +95,19 @@ gen_trapezoid <- function(x_center, width, h_left, h_right, label_name) {
 }
 
 blocks_data <- rbind(
-  gen_trapezoid(2, 1.5, 2.5, 1.5, "T1"),
-  gen_trapezoid(6, 1.5, 2.5, 1.5, "T2"),
-  gen_trapezoid(14, 1.5, 2.5, 1.5, "Tn")
+  gen_trapezoid(2, 1.75, 2.5, 1.5, "T1"),
+  gen_trapezoid(6, 1.75, 2.5, 1.5, "T2"),
+  gen_trapezoid(14, 1.75, 2.5, 1.5, "Tn")
 )
 
 labels_data <- data.frame(
   x = c(2, 6, 10, 14),
   y = c(0, 0, 0, 0),
-  label = c("$T_1$", "$T_2$", "$\\dots$", "$T_n$")
-)
+  label = c(paste0( "$T_1^{(", view, ")}$" ), 
+            paste0( "$T_2^{(", view, ")}$" ),
+            "$\\dots$",  
+            paste0( "$T_n^{(", view, ")}$" )))
+
 
 arrows_fwd <- data.frame(
   x = c(0.0, 3.0, 7.0, 11.0, 15.0),
@@ -119,7 +132,7 @@ io_data <- data.frame(
 row_2 <- ggplot() +
   geom_polygon(data = blocks_data, aes(x = x, y = y, group = block), 
                fill = "#ecf0f1", color = "#2c3e50", linewidth = 1) +
-  geom_text(data = labels_data, aes(x = x, y = y, label = label), size = 7) +
+  geom_text(data = labels_data, aes(x = x, y = y, label = label), size = 6) +
   geom_text(data = io_data, aes(x = x, y = y, label = label), size = 7) +
   geom_segment(data = arrows_fwd, aes(x = x, y = y, xend = xend, yend = yend),
                arrow = arrow(length = unit(0.25, "cm"), type = "closed"), 
@@ -147,7 +160,7 @@ theme_transp <- theme(
 row_2_resized <- (plot_spacer() + row_2 + plot_spacer() + plot_layout(widths = c(1.5, 4, 1.5))) +
   plot_annotation(theme = theme_transp) & 
   theme_transp
-  
+
 # ==========================================
 # ASSEMBLAGE FINAL
 # ==========================================
