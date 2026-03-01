@@ -1,8 +1,7 @@
 
 ## Deep Computational Anatomy via Latent-Aligned Multiview Normalizing Flows
 
-![Deep Computational Anatomy](Manuscript/Figures/lamnr_templates.png){width="50%"}
-![LAMNr Flows](Manuscript/Figures/lamnr_flows_illustration.png){width="50%"}
+![Deep Computational Anatomy](Manuscript/Figures/lamnr_templates.png){width="50%"} ![LAMNr Flows](Manuscript/Figures/lamnr_flows_illustration.png){width="50%"}
 
 
 Normalizing flows induce exact-likelihood, bijective mappings between data and
