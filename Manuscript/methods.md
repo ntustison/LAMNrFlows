@@ -13,11 +13,11 @@
    Single-View 2, and Single-View 3. For each view, the data distribution in the
    observation space $\mathcal{X}$ is projected to a simplified base
    distribution in the latent space $\mathcal{Z}\sim\mathcal{N}(0,1)$. This
-   mapping is performed by a neural network modeling sequential bijections
+   mapping is performed by the individual normalizing flows sequential bijections
    ($T_1$, $T_2$, $\dots$, $T_n$). Joint alignment optimization is performed on
    latent distributions to drive convergence towards a harmonized shared space
    through the application of the alignment loss function
-   $\mathcal{L}_{align}(\{\phi_{v}^{(v)}(z_{S,n}^{(v)})\}_{v,n})$}.
+   $\mathcal{L}_{align}(\{\phi_{v}^{(v)}(z_{S,n}^{(v)})\}_{v,n})$.}
    \label{fig:lamnr_flows_illustration}
 \end{figure}
 

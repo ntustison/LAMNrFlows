@@ -93,6 +93,9 @@ p_single <- ggplot(df_combined, aes(x = Dim1, y = Dim2, color = View, linetype =
   stat_ellipse(linewidth = 2, level = 0.75, alpha = 0.35) +
   stat_ellipse(linewidth = 2, level = 0.5, alpha = 0.25) +
   stat_ellipse(linewidth = 2, level = 0.25, alpha = 0.15) +
+  annotate("text", x = 3.0, y = 5.0, label = "View 1", size = 5, fontface = "bold") +
+  annotate("text", x = -4.5, y = 2.0, label = "View 2", size = 5, fontface = "bold") +
+  annotate("text", x = 2.75, y = -2.15, label = "View 3", size = 5, fontface = "bold") +
   scale_color_manual(values = view_colors) +
   scale_linetype_manual(values = c("Before" = "solid", "After" = "solid")) +
   labs(title = "",
