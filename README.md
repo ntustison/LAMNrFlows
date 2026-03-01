@@ -30,6 +30,8 @@ downstream prediction. Our framework facilitates likelihood-calibrated,
 interpretable multiview reasoning within a single, exact model that bridges deep
 learning with foundational principles of computational anatomy.
 
+![LAMNr Flows](Manuscript/Figures/lamnr_flows_illustration.png)
+
 ***
 
 ### RealNVP (tabular data)
