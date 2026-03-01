@@ -99,7 +99,7 @@ limitations[^comp].
     distance fixe de ce centre. 
         
     * __L'Ensemble Typique (Typical Set)__ : Cet anneau sphérique est ce qu'on
-    appelle la variété de haute probabilité (High-Probability Manifold). *
+    appelle la variété de haute probabilité (High-Probability Manifold). 
         
     * __L'équation $\|z - \mu\| \approx \text{const}$__ : Cette formule
     mathématique indique que la distance Euclidienne (la norme $\|\cdot\|$)
