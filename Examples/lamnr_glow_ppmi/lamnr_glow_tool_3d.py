@@ -1299,7 +1299,6 @@ def main_recon_interpolate(argv=None):
     ap = argparse.ArgumentParser("LAM-Flow 3D Latent Interpolation")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
     ap.add_argument("--gauss", type=str, required=True, help="Gaussian model (.npz) - Required for Mu-centered Slerp.")
-    ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV (Source images)")
     ap.add_argument("--views", type=str, required=True, help="Views list (e.g. T1,FA)")
     ap.add_argument("--view-index", type=int, default=0, help="View to process")
     ap.add_argument("--volume-size", type=str, default="64x64x64", help="DxHxW") 
@@ -1307,13 +1306,21 @@ def main_recon_interpolate(argv=None):
     ap.add_argument("--devices", type=str, default="cuda:0")
     ap.add_argument("--out-dir", type=str, required=True, help="Output directory for NIfTI frames")
     
-    # Options d'interpolation
+    # Options Source / Target
+    ap.add_argument("--manifest", type=str, default=None, 
+                    help="Manifest CSV (Source images - optional if --source-image is provided)")
+    ap.add_argument("--source-image", type=str, default=None,
+                    help="Optional single source 3D image. If set, ignores the manifest.")
     ap.add_argument("--target-image", type=str, default=None,
                     help="Optional target image path. If not set, interpolates towards Gaussian mean.")
     ap.add_argument("--steps", type=int, default=5, 
                     help="Number of interpolation steps (frames) to generate between Target (t=0) and Source (t=1).")
+    
     args = ap.parse_args(argv)
     
+    if not args.manifest and not args.source_image:
+        raise ValueError("You must provide either --manifest or --source-image.")
+        
     device = torch.device(args.devices)
     
     if isinstance(args.volume_size, str):
@@ -1332,10 +1339,17 @@ def main_recon_interpolate(argv=None):
     views_list = [v.strip() for v in args.views.split(",")]
     vname = views_list[int(args.view_index)]
 
-    # 2. Chargement Manifest Source
-    cols = _read_manifest_csv(Path(args.manifest))
-    _, per_view_paths = _resolve_views(cols, Path(args.manifest).parent, args.views)
-    paths = per_view_paths[int(args.view_index)]
+    # 2. Chargement Source (Manifest ou Image Unique)
+    paths = []
+    if args.source_image:
+        src_path = Path(args.source_image)
+        if not src_path.exists(): raise FileNotFoundError(f"Source image not found: {src_path}")
+        paths = [src_path]
+        print(f"[info] Using single source 3D image: {src_path.name}")
+    else:
+        cols = _read_manifest_csv(Path(args.manifest))
+        _, per_view_paths = _resolve_views(cols, Path(args.manifest).parent, args.views)
+        paths = per_view_paths[int(args.view_index)]
 
     # 3. Chargement Inconditionnel de la Moyenne Gaussienne (\mu)
     print(f"[info] Loading Gaussian Mean (Mu) for centering...")
