@@ -1235,15 +1235,11 @@ def main_calc_distance(argv=None):
 def main_recon_interpolate(argv=None):
     """
     Interpole entre une cible (Moyenne Gaussienne ou Image Cible) et un sujet 3D.
-    Utilise l'interpolation sphérique (Slerp) pour éviter les artéfacts hors-distribution.
+    Utilise l'interpolation sphérique (Slerp) centrée sur \mu pour éviter les artéfacts hors-distribution.
     Génère une séquence de volumes NIfTI représentant la transition.
     """
     
     def _slerp(t: float, v0: torch.Tensor, v1: torch.Tensor, DOT_THRESHOLD: float = 0.9995):
-        """
-        Interpolation linéaire sphérique (Slerp) pour les vecteurs latents (B, D).
-        Interpole la direction sur l'hyper-sphère et la norme linéairement.
-        """
         v0_norm = torch.norm(v0, dim=1, keepdim=True)
         v1_norm = torch.norm(v1, dim=1, keepdim=True)
         
@@ -1272,11 +1268,11 @@ def main_recon_interpolate(argv=None):
 
     ap = argparse.ArgumentParser("LAM-Flow 3D Latent Interpolation")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
-    ap.add_argument("--gauss", type=str, default=None, help="Gaussian model (.npz). Required if no target image is provided.")
+    ap.add_argument("--gauss", type=str, required=True, help="Gaussian model (.npz) - Required for Mu-centered Slerp.")
     ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV (Source images)")
     ap.add_argument("--views", type=str, required=True, help="Views list (e.g. T1,FA)")
     ap.add_argument("--view-index", type=int, default=0, help="View to process")
-    ap.add_argument("--volume-size", type=str, default="64x64x64", help="DxHxW") # Modifié parse_dhw si non défini, assumed parsed later
+    ap.add_argument("--volume-size", type=str, default="64x64x64", help="DxHxW") 
     ap.add_argument("--batch", type=int, default=1, help="Number of source subjects to process")
     ap.add_argument("--devices", type=str, default="cuda:0")
     ap.add_argument("--out-dir", type=str, required=True, help="Output directory for NIfTI frames")
@@ -1290,7 +1286,6 @@ def main_recon_interpolate(argv=None):
     
     device = torch.device(args.devices)
     
-    # Parsing volume_size si nécessaire (adaptation si parse_dhw n'était pas actif dans add_argument)
     if isinstance(args.volume_size, str):
         v_parts = args.volume_size.lower().split("x")
         args.volume_size = (int(v_parts[0]), int(v_parts[1]), int(v_parts[2]))
@@ -1312,13 +1307,36 @@ def main_recon_interpolate(argv=None):
     _, per_view_paths = _resolve_views(cols, Path(args.manifest).parent, args.views)
     paths = per_view_paths[int(args.view_index)]
 
-    # 3. Détermination de la Cible (z_target)
+    # 3. Chargement Inconditionnel de la Moyenne Gaussienne (\mu)
+    print(f"[info] Loading Gaussian Mean (Mu) for centering...")
+    npz = np.load(args.gauss, allow_pickle=True)
+    L = int(npz["L"])
+    views_g = list(npz["views"])
+    level_sizes = [int(sz) for sz in npz["dims_per_view_L0"]]
+    
+    if vname not in views_g: raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
+    
+    # Extraction des tenseurs \mu par niveau
+    mu_tensors = []
+    for l in range(L):
+        curr = 0
+        for v in views_g:
+            if v == vname:
+                s, e = curr, curr + level_sizes[l]
+                break
+            curr += level_sizes[l]
+            
+        mu_flat = npz[f"mu_{l}"][s:e]
+        mu_tensors.append(torch.from_numpy(mu_flat).float().to(device))
+
+    # 4. Détermination de la Cible (z_target)
     z_target_list = []
+    is_slerp = False
     
     if args.target_image:
         tgt_path = Path(args.target_image)
         if not tgt_path.exists(): raise FileNotFoundError(f"Target image not found: {tgt_path}")
-        print(f"[info] Target: Specific Image ({tgt_path.name})")
+        print(f"[info] Target: Specific Image ({tgt_path.name}) -> Using Mu-centered Slerp")
         
         xt = _read_image_3d(tgt_path, target_dhw=args.volume_size).to(device)
         with torch.no_grad():
@@ -1326,40 +1344,21 @@ def main_recon_interpolate(argv=None):
             if not isinstance(z_tgt_raw, list): z_tgt_raw = [z_tgt_raw]
             for z in z_tgt_raw:
                 z_target_list.append(z.clone()) # (1, C, D, H, W)
+        is_slerp = True
     else:
-        if not args.gauss:
-            raise RuntimeError("You must provide --gauss if no --target-image is specified.")
-        print(f"[info] Target: Gaussian Mean (Mu)")
-        npz = np.load(args.gauss, allow_pickle=True)
-        L = int(npz["L"])
-        views_g = list(npz["views"])
-        level_sizes = [int(sz) for sz in npz["dims_per_view_L0"]]
-        
-        if vname not in views_g: raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
-        
-        # On utilise un encodage factice juste pour obtenir la forme 5D exacte
+        print(f"[info] Target: Gaussian Mean (Mu) -> Using standard Lerp")
+        # On utilise un encodage factice pour obtenir la forme 5D exacte de la cible
         dummy = torch.zeros(1, 1, args.volume_size[0], args.volume_size[1], args.volume_size[2], device=device)
         with torch.no_grad():
             z_dummy, _ = model.inverse_and_log_det(dummy)
             if not isinstance(z_dummy, list): z_dummy = [z_dummy]
 
         for l in range(L):
-            mu_l = npz[f"mu_{l}"]
-            
-            # Calcul de l'offset pour cette vue
-            curr = 0
-            for v in views_g:
-                if v == vname:
-                    s, e = curr, curr + level_sizes[l]
-                    break
-                curr += level_sizes[l]
-                
-            mu_flat = mu_l[s:e]
             ref_shape = z_dummy[l].shape
-            mu_tensor = torch.from_numpy(mu_flat).float().view(1, ref_shape[1], ref_shape[2], ref_shape[3], ref_shape[4]).to(device)
-            z_target_list.append(mu_tensor)
+            mu_t = mu_tensors[l].view(1, ref_shape[1], ref_shape[2], ref_shape[3], ref_shape[4])
+            z_target_list.append(mu_t)
 
-    # 4. Boucle d'Interpolation (Sujet par Sujet)
+    # 5. Boucle d'Interpolation (Sujet par Sujet)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     bs = max(1, int(args.batch))
@@ -1379,39 +1378,33 @@ def main_recon_interpolate(argv=None):
             base_name = Path(pth).name.split('.')[0]
             subj_dir = out_dir / f"interp_{i:03d}_{base_name}"
             subj_dir.mkdir(exist_ok=True)
-
-            is_slerp = args.target_image is not None
-            print(f"[info] Interpolating Latents ({'Slerp' if is_slerp else 'Lerp'})...")
             
             for step_idx, alpha in enumerate(alphas):
                 z_interp_list = []
-                for l, (z_src, z_tgt) in enumerate(zip(z_source_list, z_target_list)):
+                for l, (z_src, z_tgt, mu_t) in enumerate(zip(z_source_list, z_target_list, mu_tensors)):
                     
                     B, C, D_dim, H, W = z_src.shape
                     
-                    # Aplatir en 2D (B, -1) pour le Slerp
                     z_src_flat = z_src.view(B, -1)
                     z_tgt_flat = z_tgt.view(B, -1)
+                    mu_flat_b = mu_t.view(1, -1)
                     
-                    # Application du Slerp
-                    # alpha = 0.0 -> Target (Cible)
-                    # alpha = 1.0 -> Source
                     if is_slerp:
-                        # Slerp: Rotation sur la sphère (Image vers Image)
-                        z_new_flat = _slerp(alpha, z_tgt_flat, z_src_flat)
+                        # Slerp centré sur \mu
+                        z_src_c = z_src_flat - mu_flat_b
+                        z_tgt_c = z_tgt_flat - mu_flat_b
+                        z_new_c = _slerp(float(alpha), z_tgt_c, z_src_c)
+                        z_new_flat = z_new_c + mu_flat_b
                     else:
-                        # Lerp: Ligne droite vers le centre (Image vers Moyenne)
-                        z_new_flat = z_tgt_flat + alpha * (z_src_flat - z_tgt_flat)
-
-                    # Reshape en 5D (B, C, D, H, W)
-                    z_new = z_new_flat.view(B, C, D_dim, H, W)
+                        # Lerp vers la moyenne
+                        z_new_flat = z_tgt_flat + float(alpha) * (z_src_flat - z_tgt_flat)
                     
+                    z_new = z_new_flat.view(B, C, D_dim, H, W)
                     z_interp_list.append(z_new)
                 
                 xh, _ = model.forward_and_log_det(z_interp_list)
                 xh = to01(_coerce_5d(xh, args.volume_size), winsorize=True)
                 
-                # Sauvegarde NIfTI et PNG pour chaque frame
                 out_name = subj_dir / f"frame_{step_idx:02d}_alpha{alpha:.2f}.nii.gz"
                 save_nifti(xh, out_name)
                 save_mid_slice_png(xh, subj_dir / f"frame_{step_idx:02d}_alpha{alpha:.2f}_midslice.png")
