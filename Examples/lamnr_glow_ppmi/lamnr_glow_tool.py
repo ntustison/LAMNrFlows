@@ -171,34 +171,37 @@ def warmup_actnorm_with_real_batch(model, x_real: torch.Tensor):
             except Exception:
                 continue
 
-def to01(
-    x: torch.Tensor,
-    eps: float = 1e-8,
-    winsorize: bool = False,
-    upper_q: float = 0.99,
-) -> torch.Tensor:
+def to01(x: torch.Tensor, eps: float = 1e-8, winsorize: bool = True) -> torch.Tensor:
     """
-    Per-image/channel normalization to [0, 1] over spatial dims (H,W).
-
-    If winsorize=True, values above the per-image/channel upper_q quantile
-    are clipped before min-max normalization, so a few spikes do not
-    dominate the scaling.
-
-    Expects x shaped (N, C, H, W) or anything that can be viewed that way.
+    Normalise sur toutes les dimensions spatiales.
+    Si winsorize=True, ignore les 1% de valeurs extrêmes 
+    pour préserver le contraste visuel (utile à haute température).
     """
-    if not torch.is_floating_point(x):
-        x = x.float()
-
+    if x.ndim < 4:
+        return x
+    
+    spatial_dims = tuple(range(2, x.ndim))
+    
     if winsorize:
-        # Flatten spatial dims, compute quantile per (N,C), then reshape
-        N, C, H, W = x.shape
-        flat = x.view(N, C, -1)                              # (N,C,HW)
-        hi = torch.quantile(flat, upper_q, dim=-1, keepdim=True)  # (N,C,1)
-        hi = hi.view(N, C, 1, 1)                             # (N,C,1,1)
-        x = torch.minimum(x, hi)
-
-    x_min = x.amin(dim=(2, 3), keepdim=True)
-    x_max = x.amax(dim=(2, 3), keepdim=True)
+        # Aplatir les dimensions spatiales pour calculer les quantiles
+        x_flat = x.flatten(start_dim=2)
+        
+        # Isoler les bornes (1% et 99%)
+        q_low = torch.quantile(x_flat, 0.01, dim=2, keepdim=True)
+        q_high = torch.quantile(x_flat, 0.99, dim=2, keepdim=True)
+        
+        # Redimensionner pour correspondre à la forme originale (broadcasting)
+        view_shape = x.shape[:2] + (1,) * len(spatial_dims)
+        x_min = q_low.view(view_shape)
+        x_max = q_high.view(view_shape)
+        
+        # Écrêter les voxels aberrants
+        x = torch.clamp(x, min=x_min, max=x_max)
+    else:
+        # Comportement standard (min/max absolu) pour l'entraînement
+        x_min = x.amin(dim=spatial_dims, keepdim=True)
+        x_max = x.amax(dim=spatial_dims, keepdim=True)
+        
     return (x - x_min) / (x_max - x_min + eps)
 
 
@@ -217,6 +220,7 @@ def resample_with_ants_spacing(x: torch.Tensor,
         xs = []
         for i in range(N):
             arr = x[i, c].detach().cpu().numpy()
+            arr = np.rot90(arr, k=1)
             img = ants.from_numpy(arr)
             try:
                 img.set_spacing((float(native_spacing[0]), float(native_spacing[1])))
@@ -244,6 +248,7 @@ def resample_with_ants_size(x: torch.Tensor,
         xs = []
         for i in range(N):
             arr = x[i, c].detach().cpu().numpy()
+            arr = np.rot90(arr, k=1)
             img = ants.from_numpy(arr)
             if native_spacing is not None:
                 try:
@@ -431,10 +436,11 @@ def _coerce_nchw_4d(x, target_hw=None):
             x = F.interpolate(x, size=(Ht, Wt), mode="bilinear", align_corners=False)
     return x
 
-def save_grid(x: torch.Tensor, out_path: Path, nrow: int, target_hw: Tuple[int, int] | None):
+def save_grid(x: torch.Tensor, out_path: Path, nrow: int, target_hw: Tuple[int, int] | None, winsorize = True):
 
     x = _coerce_nchw_4d(x, target_hw=target_hw)
-    x = torch.clamp(x, 0.0, 1.0)
+    x = to01(x, winsorize=winsorize)
+    x = x.rot90(k=1, dims=(2, 3))  # rotate back to (H,W) for correct orientation
     
     out_path = Path(out_path)
     ext = "".join(out_path.suffixes).lower()
@@ -450,7 +456,8 @@ def save_grid(x: torch.Tensor, out_path: Path, nrow: int, target_hw: Tuple[int, 
         else:
             arr_ants = arr[0, 0]
             
-        ants_img = ants.from_numpy(np.flip(arr_ants, axis=(1,0))) 
+        # ants_img = ants.from_numpy(np.flip(arr_ants, axis=(1,0))) 
+        ants_img = ants.from_numpy(arr_ants)
         ants.image_write(ants_img, str(out_path))
 
     else:
@@ -2168,12 +2175,12 @@ def main_recon_template(argv=None):
     save_grid(panel, outp, nrow=nrow, target_hw=(Hc, Wc))
     print(f"[recon-template] wrote {outp}")
 
-def main_recon_winsorize(argv=None):
+def main_recon_temperature(argv=None):
     """
-    Encode an image, winsorize (clamp) the latents, and reconstruct. 
-    Supports global thresholds and per-level overrides.
+    Encode an image, scales the latents by a temperature factor (tau), and reconstructs. 
+    Supports global temperatures and per-level overrides.
     """
-    ap = argparse.ArgumentParser("LAM-Flow Recon Winsorize")
+    ap = argparse.ArgumentParser("LAM-Flow Recon Temperature Scaling")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
     ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV")
     ap.add_argument("--views", type=str, required=True, help="Views list (e.g. T1,FA)")
@@ -2184,16 +2191,14 @@ def main_recon_winsorize(argv=None):
     ap.add_argument("--devices", type=str, default="cuda:0")
     ap.add_argument("--out", type=str, required=True, help="Output PNG panel")
     
-    # Options de Winsorization Globales
-    ap.add_argument("--quantile", type=float, default=0.99, 
-                    help="Global quantile threshold (default: 0.99).")
-    ap.add_argument("--hard-threshold", type=float, default=None,
-                    help="Global hard threshold (e.g. 3.0). Overrides quantile if set.")
+    # Option de Température Globale
+    ap.add_argument("--tau", type=float, default=0.99, 
+                    help="Global temperature scaling factor (default: 0.99). Values < 1.0 pull towards the mean.")
     
     # Option par niveau (Granularité)
-    ap.add_argument("--winsorize-level", action="append", type=str,
-                    help="Override threshold for a specific level. Format 'level,value'. "
-                         "Example: '--winsorize-level 0,0.999 --winsorize-level 4,0.95'. "
+    ap.add_argument("--tau-level", action="append", type=str,
+                    help="Override temperature for a specific level. Format 'level,value'. "
+                         "Example: '--tau-level 0,0.95 --tau-level 4,0.8'. "
                          "Can be repeated.")
 
     args = ap.parse_args(argv)
@@ -2201,8 +2206,8 @@ def main_recon_winsorize(argv=None):
 
     # --- Parsing des overrides par niveau ---
     level_overrides = {}
-    if args.winsorize_level:
-        for item in args.winsorize_level:
+    if args.tau_level:
+        for item in args.tau_level:
             try:
                 parts = item.split(',')
                 if len(parts) != 2: raise ValueError
@@ -2210,10 +2215,10 @@ def main_recon_winsorize(argv=None):
                 val = float(parts[1])
                 level_overrides[lvl] = val
             except ValueError:
-                raise RuntimeError(f"Invalid format for --winsorize-level: '{item}'. Expected 'level,value'.")
+                raise RuntimeError(f"Invalid format for --tau-level: '{item}'. Expected 'level,value'.")
         print(f"[info] Per-level overrides: {level_overrides}")
 
-    # 1. Chargement Modèle & Données (Standard)
+    # 1. Chargement Modèle & Données
     ckpt_path = resolve_ckpt_path(Path(args.ckpt))
     try:
         blob = torch.load(ckpt_path, map_location=device, weights_only=True)
@@ -2226,9 +2231,6 @@ def main_recon_winsorize(argv=None):
     _prime_if_needed(model, Hc, Wc, device=device)
 
     manifest_path = Path(args.manifest)
-    # ... (Logique de chargement manifest/images identique à main_recon) ...
-    # [Pour la brièveté, je reprends la partie chargement simplifiée, 
-    #  assurez-vous d'utiliser le code complet de lecture d'image ici]
     cols = _read_manifest_csv(manifest_path)
     view_names, per_view_paths = _resolve_views(cols, manifest_path.parent, args.views)
     
@@ -2246,50 +2248,34 @@ def main_recon_winsorize(argv=None):
         xi = torch.nn.functional.interpolate(xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear").squeeze(0)
         xi = to01(xi.unsqueeze(0)).squeeze(0)
         xs.append(xi)
-    xb = torch.stack(xs, dim=0)    # 3. Encodage x -> z
+        
+    # Correction PyTorch : Transfert du tenseur sur le périphérique
+    xb = torch.stack(xs, dim=0).to(device)
+    
+    # 3. Encodage x -> z
     z_list = _encode_latents(model, xb)
     
-    # 4. Winsorization Granulaire
-    z_clamped_list = []
-    
-    is_hard_global = (args.hard_threshold is not None)
-    
-    print(f"[info] Winsorizing latents (Global Mode: {'Hard' if is_hard_global else 'Quantile'})")
+    # 4. Temperature Scaling Granulaire
+    z_scaled_list = []
+    print(f"[info] Scaling latents with temperature...")
 
     for l, z in enumerate(z_list):
-        z_flat = z.view(z.shape[0], -1) 
-        
-        # Déterminer la valeur cible pour ce niveau
+        # Déterminer la valeur cible de la température pour ce niveau
         if l in level_overrides:
-            val_target = level_overrides[l]
-            # On assume que l'override suit le même "Mode" que le global
-            # Si global=Hard, override=3.0 -> Hard 3.0
-            # Si global=Quantile, override=0.95 -> Quantile 0.95
-            is_hard_level = is_hard_global 
+            tau = float(level_overrides[l])
             mode_str = "Override"
         else:
-            val_target = args.hard_threshold if is_hard_global else args.quantile
-            is_hard_level = is_hard_global
+            tau = float(args.tau)
             mode_str = "Global"
 
-        if is_hard_level:
-            # Mode Hard Threshold
-            thresh = float(val_target)
-            z_clamped = torch.clamp(z, min=-thresh, max=thresh)
-            pct_clipped = (torch.abs(z) > thresh).float().mean().item() * 100
-        else:
-            # Mode Quantile
-            q_val = float(val_target)
-            abs_z = torch.abs(z_flat)
-            thresh = torch.quantile(abs_z, q_val).item()
-            z_clamped = torch.clamp(z, min=-thresh, max=thresh)
-            pct_clipped = (abs_z > thresh).float().mean().item() * 100
-
-        print(f"  Level {l} ({mode_str}): target={val_target}, thresh={thresh:.3f}, clipped={pct_clipped:.2f}%")
-        z_clamped_list.append(z_clamped)
+        # Multiplication scalaire (Conserve la distribution Gaussienne)
+        z_scaled = z * tau
+        
+        print(f"  Level {l} ({mode_str}): tau={tau}")
+        z_scaled_list.append(z_scaled)
 
     # 5. Décodage & Sauvegarde
-    xh = _decode_latents(model, z_clamped_list, target_hw=(Hc, Wc))
+    xh = _decode_latents(model, z_scaled_list, target_hw=(Hc, Wc))
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2297,25 +2283,48 @@ def main_recon_winsorize(argv=None):
     if os.path.splitext(args.out)[1].lower() in [".png", ".jpg", ".jpeg", ".bmp", ".tiff"]:
         panel = make_recon_panel(xb, xh)
         save_grid(panel, Path(args.out), nrow=3, target_hw=(Hc, Wc))
-        print(f"[ok] Saved winsorized recon panel to {args.out}")
+        print(f"[ok] Saved temperature scaled recon panel to {args.out}")
     elif os.path.splitext(args.out)[1].lower() in [".nii", ".gz"]:
         import ants
         xh = _coerce_nchw_4d(xh, target_hw=(Hc, Wc))
         ants_img = ants.from_numpy(np.flip(xh.squeeze().cpu().numpy(), axis=(1,0))) 
         ants.image_write(ants_img, args.out)
-        print(f"[ok] Saved winsorized recon to {args.out}")
-
+        print(f"[ok] Saved temperature scaled recon to {args.out}")
+        
 def main_recon_interpolate(argv=None):
     """
-    Interpole entre une cible (moyenne Gaussienne OU image cible) et le latent du sujet.
-    z_new = (1 - t) * z_target + t * z_source
-    
-    Arguments:
-      --target-image (path) : Image cible optionnelle. Si absent, utilise la moyenne Gaussienne (mu).
-      --t (float) : Facteur global.
-          t=0.0 -> Cible (Moyenne ou Target Image)
-          t=1.0 -> Source (Original Image)
+    Interpole entre une cible et le latent du sujet.
+    Utilise Slerp centré sur la moyenne empirique (\mu) pour l'interpolation Image-Image,
+    et Lerp pour l'interpolation Image-Moyenne.
     """
+    
+    def _slerp(t: float, v0: torch.Tensor, v1: torch.Tensor, DOT_THRESHOLD: float = 0.9995):
+        v0_norm = torch.norm(v0, dim=1, keepdim=True)
+        v1_norm = torch.norm(v1, dim=1, keepdim=True)
+        
+        v0_norm_safe = torch.clamp(v0_norm, min=1e-8)
+        v1_norm_safe = torch.clamp(v1_norm, min=1e-8)
+        
+        v0_dir = v0 / v0_norm_safe
+        v1_dir = v1 / v1_norm_safe
+        
+        dot = torch.sum(v0_dir * v1_dir, dim=1, keepdim=True)
+        dot = torch.clamp(dot, -1.0, 1.0)
+        
+        omega = torch.acos(dot)
+        sin_omega = torch.sin(omega)
+        
+        lerp_mask = (torch.abs(dot) > DOT_THRESHOLD)
+        
+        mag = (1.0 - t) * v0_norm + t * v1_norm
+        
+        slerp_dir = (torch.sin((1.0 - t) * omega) / sin_omega) * v0_dir + (torch.sin(t * omega) / sin_omega) * v1_dir
+        res = slerp_dir * mag
+        
+        lerp_res = (1.0 - t) * v0 + t * v1
+        
+        return torch.where(lerp_mask, lerp_res, res)
+
     ap = argparse.ArgumentParser("LAM-Flow Latent Interpolation")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
     ap.add_argument("--gauss", type=str, required=True, help="Gaussian model (.npz or .pt)")
@@ -2328,7 +2337,6 @@ def main_recon_interpolate(argv=None):
     ap.add_argument("--devices", type=str, default="cuda:0")
     ap.add_argument("--out", type=str, required=True, help="Output PNG panel")
     
-    # Options d'interpolation
     ap.add_argument("--target-image", type=str, default=None,
                     help="Optional target image path. If not set, interpolates towards Gaussian mean.")
     ap.add_argument("--t", type=float, default=0.5, 
@@ -2339,7 +2347,6 @@ def main_recon_interpolate(argv=None):
     args = ap.parse_args(argv)
     device = torch.device(args.devices)
 
-    # --- Parsing des overrides ---
     level_overrides = {}
     if args.interp_level:
         for item in args.interp_level:
@@ -2356,7 +2363,6 @@ def main_recon_interpolate(argv=None):
     try:
         blob = torch.load(ckpt_path, map_location=device, weights_only=True)
     except Exception as e:
-        print(f"[warn] weights_only load failed: {e}. Retrying standard load.")
         blob = torch.load(ckpt_path, map_location=device)
 
     cfg = blob.get("config", {})
@@ -2383,81 +2389,95 @@ def main_recon_interpolate(argv=None):
         xi = torch.nn.functional.interpolate(xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear").squeeze(0)
         xi = to01(xi.unsqueeze(0)).squeeze(0)
         xs.append(xi)
-    xb = torch.stack(xs, dim=0).to(device) # (B, 1, H, W)
+    xb = torch.stack(xs, dim=0).to(device)
 
     # 3. Encodage Source (x -> z_source)
     z_source_list = _encode_latents(model, xb)
 
-    # 4. Détermination de la Cible (z_target)
+    # 4. Chargement de la Moyenne Gaussienne (\mu) pour le centrage
+    print(f"[info] Loading Gaussian Mean (Mu)...")
+    gauss_blob = _load_gaussian_model(Path(args.gauss))
+    views_g, dims_tbl, shapes_by_view, L = _validate_gauss_blob(gauss_blob)
+    if vname not in views_g: raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
+    v_idx_g = views_g.index(vname)
+    mu_list_raw = gauss_blob["mu"]
+
+    level_view_slices = []
+    raw_slices = gauss_blob.get("level_view_slices", None)
+    if raw_slices:
+        for l in range(L):
+            row = raw_slices[l]
+            if isinstance(row, dict): row = {int(k): tuple(v) for k, v in row.items()}
+            else: row = {vi: tuple(row[vi]) for vi in range(len(views_g))}
+            level_view_slices.append(row)
+    else:
+        for l in range(L):
+            off = 0; row = {}
+            for vi in range(len(views_g)):
+                d = int(np.asarray(dims_tbl[vi][l]).item()); row[vi] = (off, off+d); off += d
+            level_view_slices.append(row)
+
+    # Préparation des tenseurs \mu par niveau
+    mu_tensors = []
+    for l in range(L):
+        a, b = level_view_slices[l][v_idx_g]
+        mu_flat = np.asarray(mu_list_raw[l], dtype=np.float64).ravel()[a:b]
+        mu_tensors.append(torch.from_numpy(mu_flat).float().to(device))
+
+    # 5. Détermination de la Cible (z_target)
     z_target_list = []
+    is_slerp = False
 
     if args.target_image:
-        # Cas A: Cible = Image Spécifique
         tgt_path = Path(args.target_image)
         if not tgt_path.exists():
             raise FileNotFoundError(f"Target image not found: {tgt_path}")
         
-        print(f"[info] Interpolating towards target image: {tgt_path.name}")
+        print(f"[info] Target: Image ({tgt_path.name}) -> Using Mu-centered Slerp")
         xt = _read_image_any(tgt_path, args.slice_axis, args.slice_index)
         xt = torch.nn.functional.interpolate(xt.unsqueeze(0), size=(Hc, Wc), mode="bilinear").squeeze(0)
         xt = to01(xt.unsqueeze(0)).squeeze(0)
-        xb_target = xt.unsqueeze(0).to(device) # (1, 1, H, W)
+        xb_target = xt.unsqueeze(0).to(device)
         
-        # Si on a un batch source > 1, on répète la cible
         if xb.shape[0] > 1:
             xb_target = xb_target.expand(xb.shape[0], -1, -1, -1)
             
         z_target_list = _encode_latents(model, xb_target)
+        is_slerp = True
     
     else:
-        # Cas B: Cible = Moyenne Gaussienne (Mu)
-        print(f"[info] Interpolating towards Gaussian Mean (Mu)")
-        gauss_blob = _load_gaussian_model(Path(args.gauss))
-        views_g, dims_tbl, shapes_by_view, L = _validate_gauss_blob(gauss_blob)
-        if vname not in views_g: raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
-        v_idx_g = views_g.index(vname)
-        mu_list_raw = gauss_blob["mu"]
-
-        # Offsets
-        level_view_slices = []
-        raw_slices = gauss_blob.get("level_view_slices", None)
-        if raw_slices:
-            for l in range(L):
-                row = raw_slices[l]
-                if isinstance(row, dict): row = {int(k): tuple(v) for k, v in row.items()}
-                else: row = {vi: tuple(row[vi]) for vi in range(len(views_g))}
-                level_view_slices.append(row)
-        else:
-            for l in range(L):
-                off = 0; row = {}
-                for vi in range(len(views_g)):
-                    d = int(np.asarray(dims_tbl[vi][l]).item()); row[vi] = (off, off+d); off += d
-                level_view_slices.append(row)
-
+        print(f"[info] Target: Gaussian Mean -> Using standard Lerp")
         for l, z in enumerate(z_source_list):
             B, C, H, W = z.shape
-            a, b = level_view_slices[l][v_idx_g]
-            mu_flat = np.asarray(mu_list_raw[l], dtype=np.float64).ravel()[a:b]
-            mu_tensor = torch.from_numpy(mu_flat).float().to(device).view(1, C, H, W)
-            # Expand pour matcher le batch size
-            z_target_list.append(mu_tensor.expand(B, C, H, W))
+            mu_t = mu_tensors[l].view(1, C, H, W)
+            z_target_list.append(mu_t.expand(B, C, H, W))
 
-    # 5. Interpolation
+    # 6. Interpolation
     z_interp_list = []
-    print(f"[info] Interpolating Latents...")
     
-    for l, (z_src, z_tgt) in enumerate(zip(z_source_list, z_target_list)):
+    for l, (z_src, z_tgt, mu_t) in enumerate(zip(z_source_list, z_target_list, mu_tensors)):
         t_level = level_overrides.get(l, float(args.t))
         
-        # Formule : z_new = z_tgt + t * (z_src - z_tgt)
-        # t=1.0 -> z_src
-        # t=0.0 -> z_tgt
-        z_new = z_tgt + t_level * (z_src - z_tgt)
+        B, C, H, W = z_src.shape
+        z_src_flat = z_src.view(B, -1)
+        z_tgt_flat = z_tgt.view(B, -1)
+        mu_flat_b = mu_t.view(1, -1)
         
+        if is_slerp:
+            # Slerp rigoureux : On soustrait la moyenne, on pivote, on rajoute la moyenne
+            z_src_c = z_src_flat - mu_flat_b
+            z_tgt_c = z_tgt_flat - mu_flat_b
+            z_new_c = _slerp(t_level, z_tgt_c, z_src_c)
+            z_new_flat = z_new_c + mu_flat_b
+        else:
+            # Lerp classique vers la moyenne (t=0 -> z_tgt, t=1 -> z_src)
+            z_new_flat = z_tgt_flat + t_level * (z_src_flat - z_tgt_flat)
+            
+        z_new = z_new_flat.view(B, C, H, W)
         print(f"  Level {l}: t={t_level}")
         z_interp_list.append(z_new)
 
-    # 6. Décodage et Sauvegarde
+    # 7. Décodage et Sauvegarde
     xh = _decode_latents(model, z_interp_list, target_hw=(Hc, Wc))
     
     out_path = Path(args.out)
@@ -2470,29 +2490,24 @@ def main_recon_interpolate(argv=None):
         ants.image_write(ants_img, str(out_path))
         print(f"[ok] Saved interpolated NIfTI to {out_path}")
     else:
-        # Panel: [ Source | Interpolated | Target ]
-        # On décode la cible pour l'affichage si on est en mode image
         if args.target_image:
              x_tgt_decoded = _decode_latents(model, z_target_list, target_hw=(Hc, Wc))
-             # Panel 3 colonnes: Source | Interp | Target
-             panel = torch.cat([xb, xh, x_tgt_decoded], dim=0) 
-             # Réorganiser pour save_grid (nrow=3) -> [S1, I1, T1, S2, I2, T2...]
-             # Hack rapide pour l'affichage : on crée une liste
              panels_list = []
              for i in range(xb.shape[0]):
                  panels_list.extend([xb[i:i+1], xh[i:i+1], x_tgt_decoded[i:i+1]])
              panel = torch.cat(panels_list, dim=0)
              save_grid(panel, out_path, nrow=3, target_hw=(Hc, Wc))
         else:
-             # Mode Moyenne: [ Source | Interpolated | Diff ]
              panel = make_recon_panel(xb, xh)
              save_grid(panel, out_path, nrow=3, target_hw=(Hc, Wc))
              
         print(f"[ok] Saved interpolated panel to {out_path}")
+        
 
 def main_calc_distance(argv=None):
     """
-    Calcule la distance Euclidienne (L2) entre les latents d'une image et une référence.
+    Calcule la distance Euclidienne Standardisée (Mahalanobis diagonale) 
+    entre les latents d'une image et une référence.
     Référence par défaut : Moyenne Gaussienne (Mu).
     Référence optionnelle : Une image cible (--target-image).
     
@@ -2519,7 +2534,7 @@ def main_calc_distance(argv=None):
     ap.add_argument("--save-levels", action=argparse.BooleanOptionalAction, default=True,
                     help="Include separate columns for distance at each level.")
     
-    # NOUVEAU : Option Image Cible
+    # Option Image Cible
     ap.add_argument("--target-image", type=str, default=None,
                     help="Optional target image path. If set, calculates distance to this image instead of the Gaussian mean.")
 
@@ -2540,7 +2555,7 @@ def main_calc_distance(argv=None):
     model.eval()
     _prime_if_needed(model, Hc, Wc, device=device)
 
-    # 2. Chargement Gaussien (Utilisé pour L, views, et Mu si pas de target)
+    # 2. Chargement Gaussien (Utilisé pour L, views, Mu et Sigma)
     gauss_blob = _load_gaussian_model(Path(args.gauss))
     views_g, dims_tbl, shapes_by_view, L = _validate_gauss_blob(gauss_blob)
 
@@ -2562,49 +2577,72 @@ def main_calc_distance(argv=None):
     total_imgs = len(paths)
 
     # ---------------------------------------------------------
-    # 4. PRÉPARATION DE LA RÉFÉRENCE (Moyenne ou Target Image)
+    # 4. PRÉPARATION DE LA RÉFÉRENCE ET DE LA VARIANCE
     # ---------------------------------------------------------
     reference_latents = [] # Liste de tenseurs (1, D) pour chaque niveau
+    variance_latents = []  # Liste de tenseurs (1, D) pour la pondération
 
+    mode = str(gauss_blob.get("mode", "perlevel")).lower()
+    Sigma_list = gauss_blob.get("Sigma", None)
+    if Sigma_list is None:
+        raise RuntimeError("Gaussian model has no 'Sigma' field to compute standardized distance.")
+
+    # Calcul des offsets (slices) pour extraire les blocs spécifiques à la vue
+    level_view_slices = []
+    raw_slices = gauss_blob.get("level_view_slices", None)
+    if raw_slices:
+        for l in range(L):
+            row = raw_slices[l]
+            if isinstance(row, dict): row = {int(k): tuple(v) for k, v in row.items()}
+            else: row = {vi: tuple(row[vi]) for vi in range(len(views_g))}
+            level_view_slices.append(row)
+    else:
+        for l in range(L):
+            off = 0; row = {}
+            for vi in range(len(views_g)):
+                d = int(np.asarray(dims_tbl[vi][l]).item()); row[vi] = (off, off+d); off += d
+            level_view_slices.append(row)
+
+    print(f"[info] Extracting latent variances for standardized distance...")
+    for l in range(L):
+        a, b = level_view_slices[l][v_idx_g]
+        Sig_l = Sigma_list[l] if mode == "perlevel" else Sigma_list[0]
+        
+        # Extraction de la diagonale de la covariance selon son format
+        if isinstance(Sig_l, dict) and Sig_l.get("type") == "lowrank":
+            U_full = np.asarray(Sig_l["U"], dtype=np.float64)
+            eig = np.asarray(Sig_l["eig"], dtype=np.float64)
+            sigma2 = float(Sig_l.get("sigma2", 0.0))
+            U_v = U_full[a:b, :]
+            var_flat = np.sum((U_v ** 2) * eig, axis=1) + sigma2
+        else:
+            S_full = np.asarray(Sig_l, dtype=np.float64)
+            if S_full.ndim == 1:
+                var_flat = S_full[a:b]
+            else:
+                var_flat = np.diag(S_full)[a:b]
+                
+        var_tensor = torch.from_numpy(var_flat).float().to(device).view(1, -1)
+        variance_latents.append(var_tensor)
+
+    # Détermination de la référence (Cible ou Moyenne)
     if args.target_image:
         tgt_path = Path(args.target_image)
         if not tgt_path.exists(): raise FileNotFoundError(f"Target image not found: {tgt_path}")
         print(f"[info] Reference: Target Image ({tgt_path.name})")
         
-        # Encodage de l'image cible
         xt = _read_image_any(tgt_path, args.slice_axis, args.slice_index)
         xt = torch.nn.functional.interpolate(xt.unsqueeze(0), size=(Hc, Wc), mode="bilinear").squeeze(0)
         xt = to01(xt.unsqueeze(0)).squeeze(0)
         xb_target = xt.unsqueeze(0).to(device)
         
-        # On obtient la liste des latents pour la cible
         z_tgt_list = _encode_latents(model, xb_target)
-        
-        # On stocke sous forme aplatie (1, D)
         for z in z_tgt_list:
-            reference_latents.append(z.view(1, -1).detach()) # Detach pour être sûr
+            reference_latents.append(z.view(1, -1).detach())
 
     else:
         print(f"[info] Reference: Gaussian Mean (Mu)")
         mu_list_raw = gauss_blob["mu"]
-        
-        # Calcul des offsets (slices) pour extraire Mu spécifique à la vue
-        level_view_slices = []
-        raw_slices = gauss_blob.get("level_view_slices", None)
-        if raw_slices:
-             for l in range(L):
-                row = raw_slices[l]
-                if isinstance(row, dict): row = {int(k): tuple(v) for k, v in row.items()}
-                else: row = {vi: tuple(row[vi]) for vi in range(len(views_g))}
-                level_view_slices.append(row)
-        else:
-            for l in range(L):
-                off = 0; row = {}
-                for vi in range(len(views_g)):
-                    d = int(np.asarray(dims_tbl[vi][l]).item()); row[vi] = (off, off+d); off += d
-                level_view_slices.append(row)
-
-        # Extraction et conversion en tenseurs
         for l in range(L):
             a, b = level_view_slices[l][v_idx_g]
             mu_flat = np.asarray(mu_list_raw[l], dtype=np.float64).ravel()[a:b]
@@ -2618,7 +2656,7 @@ def main_calc_distance(argv=None):
     out_csv = Path(args.out)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"[info] Calculating distances for {total_imgs} images...")
+    print(f"[info] Calculating standardized L2 distances for {total_imgs} images...")
 
     with open(out_csv, "w", newline="") as f:
         writer = csv.writer(f)
@@ -2629,7 +2667,6 @@ def main_calc_distance(argv=None):
             header += [f"dist_L{l}" for l in range(L)]
         writer.writerow(header)
 
-        # Barre de progression
         with tqdm(total=total_imgs, unit="img", desc="Processing") as pbar:
             for i in range(0, total_imgs, bs):
                 batch_paths = paths[i : i + bs]
@@ -2651,19 +2688,18 @@ def main_calc_distance(argv=None):
                     continue
 
                 xb = torch.stack(xs, dim=0).to(device)
-
-                # Inference
                 z_list = _encode_latents(model, xb)
+                
                 B = xb.shape[0]
                 dists_per_level = np.zeros((B, L), dtype=np.float64)
                 
-                # Calcul Distances par niveau
                 for l, z in enumerate(z_list):
-                    ref = reference_latents[l] # (1, D)
-                    z_flat = z.view(B, -1)     # (B, D)
+                    ref = reference_latents[l] 
+                    var = variance_latents[l]  # Variance récupérée
+                    z_flat = z.view(B, -1)     
                     
-                    # Broadcasting automatique: (B, D) - (1, D)
-                    dist_sq = torch.sum((z_flat - ref) ** 2, dim=1).cpu().numpy()
+                    # Formule : somme( (z - ref)^2 / variance )
+                    dist_sq = torch.sum(((z_flat - ref) ** 2) / (var + 1e-6), dim=1).cpu().numpy()
                     dists_per_level[:, l] = np.sqrt(dist_sq)
 
                 # Écriture
@@ -3241,162 +3277,50 @@ def main_gauss_impute(argv=None):
     model produced by `gauss-fit` and a trained LAM-Flow checkpoint.
     """
 
-    def _load_gaussian_model(gauss_path: Path) -> Dict[str, Any]:
-        """
-        Load Gaussian model saved by gauss-fit (.pt or .npz).
-        Returns a dict with keys:
-        - mode: "perlevel" or "merged"
-        - estimator: "full"|"diag"|"lw"|"oas"|"lowrank"
-        - views: list[str]
-        - N, H, W, L: ints
-        - dims_per_level_per_view: V x L list of ints
-        - shapes_by_view: optional V x L list of (C,H,W)
-        - level_view_slices: optional L x V list of (start,end) in level-flat space
-        - mu: list[(D_l,)] if perlevel else (D_total,)
-        - Sigma: list[np.ndarray or dict] if perlevel else np.ndarray or dict
-        """
-        gauss_path = Path(gauss_path)
-        if not gauss_path.exists():
-            raise FileNotFoundError(f"Gaussian file not found: {gauss_path}")
-
-        if str(gauss_path).endswith(".pt"):
-            try:
-                blob = torch.load(gauss_path, map_location="cpu", weights_only=True)
-            except Exception as e:  # UnpicklingError from weights_only lands here
-                print(f"[warn] weights_only load failed ({e.__class__.__name__}: {e}); retrying without weights_only")
-                blob = torch.load(gauss_path, map_location="cpu")
-            return blob
-
-        npz = np.load(str(gauss_path), allow_pickle=True)
-        keys = set(npz.files)
-        blob: Dict[str, Any] = {}
-
-        def _scalar(k, cast=int, default=None):
-            if k in keys:
-                try:
-                    return cast(np.array(npz[k]).ravel()[0])
-                except Exception:
-                    try:
-                        return cast(npz[k].tolist())
-                    except Exception:
-                        return cast(npz[k])
-            return default
-
-        blob["mode"] = (np.array(npz["mode"]).tolist() if "mode" in keys else "perlevel")
-        blob["estimator"] = (np.array(npz["estimator"]).tolist() if "estimator" in keys else "full")
-        blob["N"] = _scalar("N", int, None)
-        blob["H"] = _scalar("H", int, None)
-        blob["W"] = _scalar("W", int, None)
-        blob["L"] = _scalar("L", int, None)
-
-        if "views" in keys:
-            vv = np.array(npz["views"]).tolist()
-            blob["views"] = [str(x) for x in (vv if isinstance(vv, list) else [vv])]
-
-        # dims and stats may be JSON strings inside NPZ
-        if "dims_json" in keys:
-            blob["dims_per_level_per_view"] = json.loads(str(np.array(npz["dims_json"]).tolist()))
-        if "stats_json" in keys:
-            blob["stats"] = json.loads(str(np.array(npz["stats_json"]).tolist()))
-
-        # shapes and slices (optional)
-        if "shapes_json" in keys:
-            blob["shapes_by_view"] = json.loads(str(np.array(npz["shapes_json"]).tolist()))
-        if "slices_json" in keys:
-            blob["level_view_slices"] = json.loads(str(np.array(npz["slices_json"]).tolist()))
-
-        # per-level preferred path
-        L = int(blob.get("L", 0) or 0)
-        if any(f.startswith("mu_") for f in keys):
-            mu_list, Sig_list = [], []
-            for i in range(L):
-                mu_list.append(np.array(npz[f"mu_{i}"]))
-                if f"Sigma_{i}_type" in keys and str(np.array(npz[f"Sigma_{i}_type"]).tolist()) == "lowrank":
-                    Sig_list.append({
-                        "type": "lowrank",
-                        "U": np.array(npz[f"Sigma_{i}_U"]),
-                        "eig": np.array(npz[f"Sigma_{i}_eig"]),
-                        "sigma2": float(np.array(npz[f"Sigma_{i}_sigma2"]).ravel()[0]),
-                    })
-                else:
-                    Sig_list.append(np.array(npz.get(f"Sigma_{i}")))
-            blob["mu"] = mu_list
-            blob["Sigma"] = Sig_list
-            blob["mode"] = "perlevel"
-            return blob
-
-        # merged fallback
-        if "mu" in keys:
-            blob["mu"] = np.array(npz["mu"])
-            if "Sigma_type" in keys and str(np.array(npz["Sigma_type"]).tolist()) == "lowrank":
-                blob["Sigma"] = {
-                    "type": "lowrank",
-                    "U": np.array(npz["Sigma_U"]),
-                    "eig": np.array(npz["Sigma_eig"]),
-                    "sigma2": float(np.array(npz["Sigma_sigma2"]).ravel()[0]),
-                }
-            elif "Sigma" in keys:
-                blob["Sigma"] = np.array(npz["Sigma"])
-            return blob
-
-        # legacy object arrays
-        if "mu" in keys and np.array(npz["mu"]).dtype == object:
-            blob["mu"] = np.array(npz["mu"]).tolist()
-            if "Sigma" in keys:
-                blob["Sigma"] = np.array(npz["Sigma"]).tolist()
-            return blob
-
-        raise RuntimeError(f"Unrecognized NPZ contents in {gauss_path}; keys={sorted(keys)}")
-
-    # ---------- helpers (lowrank + robust SPD solve + torch cov-space solver) ----------
-
     def _cond_mean_block_lowrank(U: np.ndarray, eig: np.ndarray, sigma2: float,
                                  idx_U: list[int], idx_O: list[int],
                                  mu: np.ndarray, ZO: np.ndarray,
                                  base_ridge: float = 0.0, max_tries: int = 10):
-
-        def _spd_solve_cholesky(SOO: np.ndarray, B: np.ndarray, base_ridge: float = 0.0, max_tries: int = 8):
-            SOO = np.asarray(SOO, dtype=np.float64)
-            B   = np.asarray(B,   dtype=np.float64)
-            SOO = 0.5 * (SOO + SOO.T)
-            D = SOO.shape[0]
-            I = np.eye(D, dtype=np.float64)
-            lam = max(float(base_ridge), 1e-8 * (np.trace(SOO) / max(D, 1)))
-            for _ in range(max_tries):
-                try:
-                    L = np.linalg.cholesky(SOO + lam * I)
-                    Y = np.linalg.solve(L, B)
-                    X = np.linalg.solve(L.T, Y)
-                    if np.all(np.isfinite(X)):
-                        return X, lam
-                except np.linalg.LinAlgError:
-                    pass
-                lam *= 10.0
-            X, *_ = np.linalg.lstsq(SOO + lam * I, B, rcond=None)
-            return X, lam
-
-        U   = np.asarray(U,   dtype=np.float64)
+        """
+        Imputation conditionnelle 2D ultra-rapide via l'identité Push-Through.
+        Remplace la décomposition de Cholesky D_O x D_O par une inversion r x r.
+        """
+        U = np.asarray(U, dtype=np.float64)
         eig = np.asarray(eig, dtype=np.float64)
-        mu  = np.asarray(mu,  dtype=np.float64).ravel()
-        ZO  = np.asarray(ZO,  dtype=np.float64)
-        U_O = U[idx_O, :]    # (D_O, r)
-        U_U = U[idx_U, :]    # (D_U, r)
-        Lam = np.diag(eig) if eig.ndim == 1 else eig
-        SOO = U_O @ Lam @ U_O.T
-        if sigma2 > 0.0:
-            SOO = SOO + float(sigma2) * np.eye(SOO.shape[0], dtype=np.float64)
-        dO = (ZO - mu[idx_O][None, :]).T  # (D_O, N)
-        X, lam = _spd_solve_cholesky(SOO, dO, base_ridge=base_ridge, max_tries=max_tries)
-        Y  = U_O.T @ X       # (r,N)
-        TY = Lam @ Y         # (r,N)
-        add = U_U @ TY       # (D_U,N)
-        zU = mu[idx_U][:, None] + add  # (D_U,N)
-        return zU.T, lam, SOO  # (N,D_U), lam, SOO
+        mu = np.asarray(mu, dtype=np.float64).ravel()
+        ZO = np.asarray(ZO, dtype=np.float64)
+        
+        if ZO.ndim == 1:
+            ZO = ZO[None, :]
+            
+        U_O = U[idx_O, :] 
+        U_U = U[idx_U, :] 
+        
+        s2 = max(float(sigma2) + float(base_ridge), 1e-6)
+            
+        dO = (ZO - mu[idx_O][None, :]).T 
+        
+        sqrt_eig = np.sqrt(np.clip(eig, 0.0, None))
+        A_T = U_O.T * sqrt_eig[:, None]  
+        
+        K = A_T @ A_T.T + s2 * np.eye(len(eig), dtype=np.float64) 
+        rhs = A_T @ dO 
+        
+        try:
+            w = np.linalg.solve(K, rhs)
+        except np.linalg.LinAlgError:
+            w, _, _, _ = np.linalg.lstsq(K, rhs, rcond=None)
+            
+        v_target = sqrt_eig[:, None] * w 
+        projection = U_U @ v_target 
+        zU = mu[idx_U][:, None] + projection
+        
+        return zU.T
 
     @torch.no_grad()
     def _torch_conditional_gaussian_impute(
         z_obs_np, idx_obs, idx_mis, mu_np, Sigma_np,
-        jitter: float = 1e-4, sample: bool = False, tau: float = 1.0, max_tries: int = 7,
+        jitter: float = 1e-4, max_tries: int = 7,
     ):
         device = torch.device("cpu")
         z_obs = torch.as_tensor(z_obs_np, dtype=torch.double, device=device)      # (B, d_O)
@@ -3409,8 +3333,6 @@ def main_gauss_impute(argv=None):
         S_OO = 0.5*(S.index_select(0, idx_O).index_select(1, idx_O) +
                     S.index_select(0, idx_O).index_select(1, idx_O).T)
         S_MO = S.index_select(0, idx_M).index_select(1, idx_O)
-        S_MM = 0.5*(S.index_select(0, idx_M).index_select(1, idx_M) +
-                    S.index_select(0, idx_M).index_select(1, idx_M).T)
 
         I = torch.eye(S_OO.shape[0], dtype=S_OO.dtype, device=device)
         jj = float(jitter)
@@ -3426,27 +3348,7 @@ def main_gauss_impute(argv=None):
         alpha = torch.linalg.solve_triangular(L.T, y, upper=True).T  # (B, d_O)
         mean_cond = mu_M.unsqueeze(0) + alpha @ S_MO.T               # (B, d_M)
 
-        if not sample:
-            return mean_cond.to(torch.float32).cpu().numpy()
-
-        S_OM = S_MO.T
-        yK = torch.linalg.solve_triangular(L, S_OM, upper=False)
-        K  = torch.linalg.solve_triangular(L.T, yK, upper=True)
-        S_cond = 0.5*((S_MM - S_MO @ K) + (S_MM - S_MO @ K).T)
-
-        Iu = torch.eye(S_cond.shape[0], dtype=S_cond.dtype, device=device)
-        jj2 = float(jitter)
-        for _ in range(max_tries):
-            try:
-                Lc = torch.linalg.cholesky(S_cond + jj2*Iu)
-                break
-            except RuntimeError:
-                jj2 *= 10.0
-
-        B = z_obs.shape[0]
-        eps = torch.randn((B, Lc.shape[0]), dtype=S_cond.dtype, device=device)
-        samples = mean_cond + (eps @ Lc.T)*float(tau)
-        return samples.to(torch.float32).cpu().numpy()
+        return mean_cond.to(torch.float32).cpu().numpy()
 
     # ---------------------------------- args ----------------------------------
     import argparse
@@ -3470,25 +3372,13 @@ def main_gauss_impute(argv=None):
     ap.add_argument("--devices", type=str, default="cuda:0",
                     help="Computing device to use (e.g., 'cuda:0' or 'cpu').")
     ap.add_argument("--batch", type=int, default=64,
-                    help="Batch size for processing. Reduce to 1-4 if experiencing memory issues.")
-    ap.add_argument("--strategy", type=str, choices=["mean", "sample"], default="mean",
-                    help="Imputation strategy: 'mean' for conditional mean (sharp/clean) or 'sample' for stochastic sampling (textured).")
-    ap.add_argument("--samples", type=int, default=1,
-                    help="Number of stochastic samples to generate per subject if strategy is 'sample'.")
-    ap.add_argument("--temperature", type=float, default=1.0,
-                    help="Scaling factor for the latent variance during stochastic sampling.")
+                    help="Batch size for processing.")
     ap.add_argument("--outdir", type=str, required=True,
                     help="Directory where the imputed images will be saved.")
     ap.add_argument("--output-format", type=str, choices=["nii","nii.gz","png"], default="nii.gz",
                     help="File format for saving the results. NIfTI (.nii.gz) is recommended for medical data.")
     ap.add_argument("--pairs-csv", type=str, default=None,
                     help="Optional path to save a CSV mapping observed files to their imputed counterparts.")
-    ap.add_argument("--seed", type=int, default=1234,
-                    help="Random seed for reproducible stochastic sampling.")
-    ap.add_argument("--safe-latent", type=str, choices=["none","clamp"], default="none",
-                    help="Optional safety mechanism to prevent extreme values in the imputed latent space.")
-    ap.add_argument("--safe-k", type=float, default=2.0,
-                    help="The k-sigma threshold used if safe-latent is set to 'clamp'.")
     args = ap.parse_args(argv)
 
     views = [v.strip() for v in args.views.split(",") if v.strip()]
@@ -3519,29 +3409,24 @@ def main_gauss_impute(argv=None):
 
     # ------------------------------- gaussian ---------------------------------
     gauss_path = Path(args.gauss)
-    g = _load_gaussian_model(gauss_path)                   # <-- ACTUALLY LOAD IT
+    g = _load_gaussian_model(gauss_path)                   
 
-    # Strong validation; returns canonical fields we use below
     views_header, dims_tbl, shapes_by_view, L = _validate_gauss_blob(g)
 
-    # Bind metadata AFTER load/validate
     mode      = str(g.get("mode", "perlevel")).lower()
     estimator = str(g.get("estimator", "full")).lower()
     stats     = g.get("stats", None)
 
-    # Σ stats (optional)
     if isinstance(stats, list):
         for i, st in enumerate(stats):
             if isinstance(st, dict) and "lambda_min" in st:
                 print(f"[Σ L{i}] λmin={st.get('lambda_min'):.3e}, λmax={st.get('lambda_max'):.3e}, cond={st.get('cond'):.3e}")
 
-    # ---------- enforce header view order (exact as fit) and rebuild slices from dims ----------
-    views = views_header[:]             # force the exact order used at fit time
+    views = views_header[:]             
     obs   = [v for v in views if v in obs]
     tgt   = [v for v in views if v in tgt]
-    view_index = {v: i for i, v in enumerate(views)}  # header index mapping
+    view_index = {v: i for i, v in enumerate(views)}  
 
-    # Rebuild per-level slice offsets directly from dims_tbl (the authority that Σ used)
     level_view_slices = []
     V = len(views)
     for l in range(L):
@@ -3553,7 +3438,6 @@ def main_gauss_impute(argv=None):
             off += d
         level_view_slices.append(row)
 
-    # Quick internal consistency between slices and dims_tbl
     for l in range(L):
         for vi, vname in enumerate(views):
             a, b = level_view_slices[l][vi]
@@ -3563,7 +3447,6 @@ def main_gauss_impute(argv=None):
                     f"[gauss] slice mismatch at level {l}, view '{vname}': slice={b-a}, dims_tbl={exp}. "
                     "Re-run gauss-fit; your stored dims and shapes are inconsistent."
                 )
-
 
     # ------------------------------- manifest ---------------------------------
     manifest_path = Path(args.manifest)
@@ -3599,7 +3482,6 @@ def main_gauss_impute(argv=None):
     def encode_view(vname: str):
         v_idx = view_index[vname]
 
-        # Fresh model instance for THIS view (mirrors gauss-fit)
         mdl = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc}, device=device)
         mdl.eval()
         _prime_if_needed(mdl, Hc, Wc, device=device)
@@ -3612,16 +3494,15 @@ def main_gauss_impute(argv=None):
 
         bs = max(1, int(args.batch))
 
-        # Real-batch ActNorm warmup (safe no-op if helper missing)
         try:
             warm_n = min(bs, len(per_view_paths[v_idx]))
             warm_xs = []
             for pth in per_view_paths[v_idx][:warm_n]:
-                xi = _read_image_any(pth, int(args.slice_axis), int(args.slice_index))  # (1,h,w) in [0,1]
+                xi = _read_image_any(pth, int(args.slice_axis), int(args.slice_index))  
                 xi = torch.nn.functional.interpolate(
                     xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False
                 ).squeeze(0)
-                xi = to01(xi.unsqueeze(0)).squeeze(0)  # match gauss-fit/train preprocessing
+                xi = to01(xi.unsqueeze(0)).squeeze(0)  
                 warm_xs.append(xi)
             if warm_xs and "warmup_actnorm_with_real_batch" in globals():
                 xb_warm = torch.stack(warm_xs, dim=0).to(device=device, dtype=torch.float32)
@@ -3642,23 +3523,23 @@ def main_gauss_impute(argv=None):
                 device_type=("cuda" if device.type == "cuda" else "cpu"), enabled=False
             ):
                 if hasattr(mdl, "inverse_and_log_det"):
-                    z, _ = mdl.inverse_and_log_det(xb)  # x->z
+                    z, _ = mdl.inverse_and_log_det(xb) 
                 elif hasattr(mdl, "inverse"):
                     z, _ = mdl.inverse(xb)
                 else:
                     raise RuntimeError("Model lacks inverse mapping")
-            zl = _flatten_latents_by_level(z)  # list of (B, D_l)
+            zl = _flatten_latents_by_level(z)  
             if acc is None:
                 acc = [[] for _ in range(len(zl))]
             for li, arr in enumerate(zl):
                 acc[li].append(arr.detach().cpu())
 
         for pth in per_view_paths[v_idx]:
-            xi = _read_image_any(pth, int(args.slice_axis), int(args.slice_index))  # (1,h,w) in [0,1]
+            xi = _read_image_any(pth, int(args.slice_axis), int(args.slice_index))  
             xi = torch.nn.functional.interpolate(
                 xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False
             ).squeeze(0)
-            xi = to01(xi.unsqueeze(0)).squeeze(0)  # explicit, like gauss-fit
+            xi = to01(xi.unsqueeze(0)).squeeze(0)  
             batch.append(xi)
             if len(batch) >= bs:
                 flush()
@@ -3666,21 +3547,18 @@ def main_gauss_impute(argv=None):
             flush()
         return [torch.cat(chunks, dim=0) for chunks in acc], torch.cat(all_images, dim=0)
 
-    # Exécution de l'encodage pour chaque modalité observée
     obs_data = {v: encode_view(v) for v in obs}
     
-    # On sépare les dictionnaires pour plus de clarté
     obs_latents = {v: obs_data[v][0] for v in obs}
     obs_images  = {v: obs_data[v][1] for v in obs}
 
-    # Assert concatenation dims match the Gaussian layout per level
     for l in range(L):
         D_expected = sum(level_view_slices[l][view_index[v]][1] -
                          level_view_slices[l][view_index[v]][0] for v in obs)
         D_got = sum(obs_latents[v][l].shape[1] for v in obs)
         if D_expected != D_got:
             raise RuntimeError(f"[gauss-impute] Level {l}: observed latent width mismatch; "
-                               f"got {D_got}, expected {D_expected}. Check dims_per_level_per_view and view order.")
+                               f"got {D_got}, expected {D_expected}.")
 
     # ----------------------------- conditioning ------------------------------
     mu_list  = g["mu"]    if mode == "perlevel" else [g["mu"]]
@@ -3695,7 +3573,7 @@ def main_gauss_impute(argv=None):
             mu  = mu_list[l]  if mode == "perlevel" else mu_list[0]
             Sig = Sig_list[l] if mode == "perlevel" else Sig_list[0]
 
-            slices_l = level_view_slices[l]  # dict: header view idx -> (a,b)
+            slices_l = level_view_slices[l]  
             idx_O = []
             for v in obs:
                 a, b = slices_l[view_index[v]]
@@ -3703,28 +3581,23 @@ def main_gauss_impute(argv=None):
             aU, bU = slices_l[t_vidx]
             idx_U = list(range(aU, bU))
 
-            # Build Z_O first (concatenate observed views at this level)
             ZO_parts = [obs_latents[v][l].numpy().astype("float64") for v in views if v in obs]
             ZO = np.concatenate(ZO_parts, axis=1)
 
             N  = ZO.shape[0]
 
-            # Fast dimension guard (informative)
             D_expected = sum(slices_l[view_index[v]][1] - slices_l[view_index[v]][0] for v in obs)
             if ZO.shape[1] != D_expected:
-                raise RuntimeError(f"[gauss-impute] Level {l}: ZO width={ZO.shape[1]} doesn't match "
-                                   f"sum of observed blocks={D_expected}.")
+                raise RuntimeError(f"[gauss-impute] Level {l}: ZO width={ZO.shape[1]} doesn't match sum.")
 
-            # Now safe to form μ-partitions (used for diagnostics)
             mu_O = np.asarray(mu, dtype=np.float64)[idx_O]
             mu_U = np.asarray(mu, dtype=np.float64)[idx_U]
 
-            # Σ vs empirical check (cheap sanity signal; only for full/OAS/LW where Σ is 2-D)
             if not isinstance(Sig, dict):
                 S = np.asarray(Sig, dtype=np.float64) if Sig is not None else None
                 if S is not None and S.ndim == 2:
                     SOO_g   = S[np.ix_(idx_O, idx_O)]
-                    ZOc     = ZO - ZO.mean(axis=0, keepdims=True)  # unbiased sample covariance of Z_O
+                    ZOc     = ZO - ZO.mean(axis=0, keepdims=True) 
                     SOO_emp = (ZOc.T @ ZOc) / max(ZO.shape[0]-1, 1)
                     tr_g    = float(np.trace(SOO_g))
                     tr_emp  = float(np.trace(SOO_emp))
@@ -3739,55 +3612,25 @@ def main_gauss_impute(argv=None):
                 eig    = np.asarray(Sig["eig"], dtype=np.float64)
                 sigma2 = float(Sig.get("sigma2", 0.0))
 
-                zU, lam_used, SOO = _cond_mean_block_lowrank(
+                zU = _cond_mean_block_lowrank(
                     U, eig, sigma2, idx_U, idx_O,
                     (mu_list[l] if mode == "perlevel" else mu_list[0]), ZO,
                     base_ridge=float(g.get("cov_lam", 0.0)), max_tries=10
                 )
                 dev = float(np.mean(np.linalg.norm(zU - mu_U[None, :], axis=1)))
                 tgt_dev = float(np.mean(np.linalg.norm(ZO - mu_O[None, :], axis=1)))
-                print(f"[cond L{l}] lowrank Σ: ||zU-μ||_mean={dev:.4g} (ridge={lam_used:.3e}, target≈{tgt_dev:.3g})")
-
-                if args.strategy == "sample":
-                    U_U = U[idx_U, :]; U_O = U[idx_O, :]
-                    Lam = np.diag(eig)
-                    S_UU = U_U @ Lam @ U_U.T + sigma2*np.eye(len(idx_U))
-                    S_UO = U_U @ Lam @ U_O.T
-                    S_OU = S_UO.T
-                    Y = np.linalg.solve(SOO, S_OU)
-                    Sig_cond = S_UU - S_UO @ Y
-                    Sig_cond = 0.5*(Sig_cond + Sig_cond.T) + 1e-6*np.eye(Sig_cond.shape[0])
-                    Lc = np.linalg.cholesky(Sig_cond + 1e-12*np.eye(Sig_cond.shape[0]))
-                    rng = np.random.default_rng(int(args.seed))
-                    eps = rng.standard_normal(size=(N, zU.shape[1]))
-                    zU = zU + (eps @ Lc.T) * float(args.temperature)
-                    if args.safe_latent == "clamp":
-                        stdU = np.sqrt(np.clip(np.diag(Sig_cond), 1e-12, None))
-                        lower = mu_U - float(args.safe_k)*stdU
-                        upper = mu_U + float(args.safe_k)*stdU
-                        zU = np.clip(zU, lower[None,:], upper[None,:])
+                print(f"[cond L{l}] lowrank Σ: ||zU-μ||_mean={dev:.4g}, target≈{tgt_dev:.3g})")
 
             else:
                 S = np.asarray(Sig, dtype=np.float64)
-                if S.ndim == 1:  # diag Σ
+                if S.ndim == 1:  
                     zU = np.tile(mu_U[None, :], (N, 1))
                     print(f"[cond L{l}] diag Σ: using μ only; ||zU-μ||_mean=0.0")
-                    if args.strategy == "sample":
-                        rng = np.random.default_rng(int(args.seed))
-                        std = np.sqrt(np.clip(S[idx_U], 1e-12, None))
-                        eps = rng.standard_normal(size=(N, zU.shape[1]))
-                        zU = zU + eps * std[None,:] * float(args.temperature)
-                        if args.safe_latent == "clamp":
-                            lower = mu_U - float(args.safe_k)*std
-                            upper = mu_U + float(args.safe_k)*std
-                            zU = np.clip(zU, lower[None,:], upper[None,:])
                 else:
-                    # covariance-space torch Cholesky (matches working evaluator)
                     zU = _torch_conditional_gaussian_impute(
                         z_obs_np=ZO, idx_obs=idx_O, idx_mis=idx_U,
                         mu_np=(mu_list[l] if mode=="perlevel" else mu_list[0]),
-                        Sigma_np=S, jitter=float(g.get("jitter", 1e-4)),
-                        sample=(args.strategy=="sample"), tau=float(args.temperature)
+                        Sigma_np=S, jitter=float(g.get("jitter", 1e-4))
                     )
                     dev = float(np.mean(np.linalg.norm(zU - mu_U[None,:], axis=1)))
                     tgt_dev = float(np.mean(np.linalg.norm(ZO - mu_O[None,:], axis=1)))
@@ -3796,13 +3639,11 @@ def main_gauss_impute(argv=None):
             per_level_U.append(torch.from_numpy(zU).float())
 
         # ----------------------------- decode (z->x) ---------------------------
-        # Build a fresh target model to avoid ActNorm contamination from prior loads
         t_vidx = view_index[tname]
         mdl_t = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc}, device=device)
         mdl_t.eval()
         _prime_if_needed(mdl_t, Hc, Wc, device=device)
 
-        # name-aware loading aligned with gauss-fit
         ok, note = load_weights_into_model(
             mdl_t, blob, view_idx=t_vidx, prefer_ema=True, view_name=tname, cfg_views=cfg_views
         )
@@ -3834,11 +3675,9 @@ def main_gauss_impute(argv=None):
         out_dir.mkdir(parents=True, exist_ok=True)
 
         for i in range(N):
-            # 1. Sauvegarder la cible imputée (ex: FA)
             file_name = f"{i:06d}_{tname}.{args.output_format}" 
             save_grid(xh[i:i+1], out_dir / file_name, nrow=1, target_hw=(Hc, Wc))
 
-            # 2. Sauvegarder les images d'entrée (ex: T1)
             for v_obs in obs:
                 input_name = f"{i:06d}_{v_obs}_input.{args.output_format}"
                 input_path = out_dir / input_name
@@ -3846,7 +3685,7 @@ def main_gauss_impute(argv=None):
                 if not input_path.exists():
                     save_grid(obs_images[v_obs][i:i+1], input_path, nrow=1, target_hw=(Hc, Wc))
 
-        print(f"[gauss-impute] wrote {N} NIfTI images for target={tname} -> {out_dir}")
+        print(f"[gauss-impute] wrote {N} images for target={tname} -> {out_dir}")
 
 def main_export_slices(argv=None):
     ap = argparse.ArgumentParser("LAM-Flow slice exporter (export-slices)")

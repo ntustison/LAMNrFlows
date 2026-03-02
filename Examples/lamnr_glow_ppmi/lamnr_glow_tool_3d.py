@@ -204,20 +204,39 @@ def set_deterministic(seed: int):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def to01(x: torch.Tensor, eps: float = 1e-8, winsorize: bool = True, upper_q: float = 0.999) -> torch.Tensor:
-    if not torch.is_floating_point(x):
-        x = x.float()
-    x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=0.0)
-
+def to01(x: torch.Tensor, eps: float = 1e-8, winsorize: bool = True) -> torch.Tensor:
+    """
+    Normalise les volumes 3D (N, C, D, H, W) ou images 2D (N, C, H, W) entre 0 et 1.
+    """
+    if x.ndim < 4:
+        return x
+    
+    # Pour un volume 3D, spatial_dims sera (2, 3, 4)
+    spatial_dims = tuple(range(2, x.ndim))
+    
     if winsorize:
-        N, C, D, H, W = x.shape
-        flat = x.reshape(N, C, -1)
-        hi = torch.quantile(flat, upper_q, dim=-1, keepdim=True).view(N, C, 1, 1, 1)
-        lo = torch.quantile(flat, 1.0 - upper_q, dim=-1, keepdim=True).view(N, C, 1, 1, 1)
-        x = torch.maximum(torch.minimum(x, hi), lo)
-
-    x_min = x.amin(dim=(2, 3, 4), keepdim=True)
-    x_max = x.amax(dim=(2, 3, 4), keepdim=True)
+        # torch.quantile ne supporte pas le float16, on force le calcul en float32
+        x_calc = x.float()
+        
+        # Aplatit (N, C, D, H, W) en (N, C, D*H*W)
+        x_flat = x_calc.flatten(start_dim=2)
+        
+        # Calcule les percentiles sur l'ensemble des voxels
+        q_low = torch.quantile(x_flat, 0.01, dim=2, keepdim=True).to(x.dtype)
+        q_high = torch.quantile(x_flat, 0.99, dim=2, keepdim=True).to(x.dtype)
+        
+        # Redimensionne en (N, C, 1, 1, 1) pour le broadcasting 3D
+        view_shape = x.shape[:2] + (1,) * len(spatial_dims)
+        x_min = q_low.view(view_shape)
+        x_max = q_high.view(view_shape)
+        
+        # Écrête les voxels aberrants
+        x = torch.clamp(x, min=x_min, max=x_max)
+    else:
+        # Comportement standard pour l'entraînement
+        x_min = x.amin(dim=spatial_dims, keepdim=True)
+        x_max = x.amax(dim=spatial_dims, keepdim=True)
+        
     return (x - x_min) / (x_max - x_min + eps)
 
 def _coerce_5d(x, target_dhw: Tuple[int,int,int]=None):
@@ -923,31 +942,30 @@ def main_recon_template(argv=None):
     print(f"[ok] Saved templates to {out_dir}")
     return 0
 
-def main_recon_winsorize(argv=None):
+def main_recon_temperature(argv=None):
     """
-    Encode un volume 3D, limite (winsorize) les valeurs latentes aberrantes, et reconstruit.
-    Supporte les seuils globaux et les surcharges spécifiques par niveau.
+    Encode an image, scales the latents by a temperature factor (tau), and reconstructs. 
+    Supports global temperatures and per-level overrides.
     """
-    ap = argparse.ArgumentParser("LAM-Flow 3D Recon Winsorize")
+    ap = argparse.ArgumentParser("LAM-Flow Recon Temperature Scaling")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
     ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV")
     ap.add_argument("--views", type=str, required=True, help="Views list (e.g. T1,FA)")
     ap.add_argument("--view-index", type=int, default=0, help="View to process")
-    ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64", help="DxHxW")
-    ap.add_argument("--batch", type=int, default=1, help="Number of subjects to process")
+    ap.add_argument("--slice-axis", type=int, required=True)
+    ap.add_argument("--slice-index", type=int, required=True)
+    ap.add_argument("--batch", type=int, default=1)
     ap.add_argument("--devices", type=str, default="cuda:0")
-    ap.add_argument("--out-dir", type=str, required=True, help="Output directory")
+    ap.add_argument("--out", type=str, required=True, help="Output PNG panel")
     
-    # Options de Winsorization Globales
-    ap.add_argument("--quantile", type=float, default=0.99, 
-                    help="Global quantile threshold (default: 0.99).")
-    ap.add_argument("--hard-threshold", type=float, default=None,
-                    help="Global hard threshold (e.g. 3.0). Overrides quantile if set.")
+    # Option de Température Globale
+    ap.add_argument("--tau", type=float, default=0.99, 
+                    help="Global temperature scaling factor (default: 0.99). Values < 1.0 pull towards the mean.")
     
     # Option par niveau (Granularité)
-    ap.add_argument("--winsorize-level", action="append", type=str,
-                    help="Override threshold for a specific level. Format 'level,value'. "
-                         "Example: '--winsorize-level 0,0.999 --winsorize-level 2,0.95'. "
+    ap.add_argument("--tau-level", action="append", type=str,
+                    help="Override temperature for a specific level. Format 'level,value'. "
+                         "Example: '--tau-level 0,0.95 --tau-level 4,0.8'. "
                          "Can be repeated.")
 
     args = ap.parse_args(argv)
@@ -955,8 +973,8 @@ def main_recon_winsorize(argv=None):
 
     # --- Parsing des overrides par niveau ---
     level_overrides = {}
-    if args.winsorize_level:
-        for item in args.winsorize_level:
+    if args.tau_level:
+        for item in args.tau_level:
             try:
                 parts = item.split(',')
                 if len(parts) != 2: raise ValueError
@@ -964,99 +982,81 @@ def main_recon_winsorize(argv=None):
                 val = float(parts[1])
                 level_overrides[lvl] = val
             except ValueError:
-                raise RuntimeError(f"Invalid format for --winsorize-level: '{item}'. Expected 'level,value'.")
+                raise RuntimeError(f"Invalid format for --tau-level: '{item}'. Expected 'level,value'.")
         print(f"[info] Per-level overrides: {level_overrides}")
 
-    # 1. Chargement Modèle
-    blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
+    # 1. Chargement Modèle & Données
+    ckpt_path = resolve_ckpt_path(Path(args.ckpt))
+    try:
+        blob = torch.load(ckpt_path, map_location=device, weights_only=True)
+    except TypeError:
+        blob = torch.load(ckpt_path, map_location=device)
     cfg = blob.get("config", {})
-    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
-    
-    _prime_if_needed(model, *args.volume_size, device)
+    Hc, Wc = int(cfg.get("H", 128)), int(cfg.get("W", 128))
+    model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc}, device=device)
+    model.eval()
+    _prime_if_needed(model, Hc, Wc, device=device)
+
+    manifest_path = Path(args.manifest)
+    cols = _read_manifest_csv(manifest_path)
+    view_names, per_view_paths = _resolve_views(cols, manifest_path.parent, args.views)
     
     views_list = [v.strip() for v in args.views.split(",")]
     vname = views_list[int(args.view_index)]
     
-    ok, note = load_weights_into_model(model, blob, int(args.view_index))
+    ok, note = load_weights_into_model(model, blob, view_idx=int(args.view_index), prefer_ema=True, view_name=vname, cfg_views=views_list)
     if not ok: raise RuntimeError(f"Weights failed: {note}")
 
-    # 2. Chargement Manifest & Fichiers
-    cols = _read_manifest_csv(Path(args.manifest))
-    _, per_view_paths = _resolve_views(cols, Path(args.manifest).parent, args.views)
     paths = per_view_paths[int(args.view_index)]
-    
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    
-    bs = max(1, int(args.batch))
-    limit = min(bs, len(paths))
-    
-    is_hard_global = (args.hard_threshold is not None)
-    
-    # 3. Boucle de Traitement (Séquentiel pour économiser la RAM 3D)
+    xs = []
+    limit = min(int(args.batch), len(paths))
     for i in range(limit):
-        pth = paths[i]
-        xi = _read_image_3d(pth, target_dhw=args.volume_size).to(device)
+        xi = _read_image_any(paths[i], args.slice_axis, args.slice_index)
+        xi = torch.nn.functional.interpolate(xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear").squeeze(0)
+        xi = to01(xi.unsqueeze(0)).squeeze(0)
+        xs.append(xi)
         
-        with torch.no_grad():
-            # Encodage
-            z_raw, _ = model.inverse_and_log_det(xi)
-            if not isinstance(z_raw, list): z_raw = [z_raw]
-            
-            print(f"\n[info] Winsorizing latents for {pth.name} (Global Mode: {'Hard' if is_hard_global else 'Quantile'})")
-            
-            z_clamped_list = []
-            
-            # 4. Winsorization Granulaire
-            for l, z in enumerate(z_raw):
-                z_flat = z.view(z.shape[0], -1) 
-                
-                # Déterminer la valeur cible pour ce niveau
-                if l in level_overrides:
-                    val_target = level_overrides[l]
-                    # L'override suit le même mode (Quantile ou Hard) que le paramètre global
-                    is_hard_level = is_hard_global 
-                    mode_str = "Override"
-                else:
-                    val_target = args.hard_threshold if is_hard_global else args.quantile
-                    is_hard_level = is_hard_global
-                    mode_str = "Global"
+    # Correction PyTorch : Transfert du tenseur sur le périphérique
+    xb = torch.stack(xs, dim=0).to(device)
+    
+    # 3. Encodage x -> z
+    z_list = _encode_latents(model, xb)
+    
+    # 4. Temperature Scaling Granulaire
+    z_scaled_list = []
+    print(f"[info] Scaling latents with temperature...")
 
-                if is_hard_level:
-                    # Mode Hard Threshold
-                    thresh = float(val_target)
-                    z_clamped = torch.clamp(z, min=-thresh, max=thresh)
-                    pct_clipped = (torch.abs(z) > thresh).float().mean().item() * 100
-                else:
-                    # Mode Quantile
-                    q_val = float(val_target)
-                    abs_z = torch.abs(z_flat)
-                    thresh = torch.quantile(abs_z, q_val).item()
-                    z_clamped = torch.clamp(z, min=-thresh, max=thresh)
-                    pct_clipped = (abs_z > thresh).float().mean().item() * 100
+    for l, z in enumerate(z_list):
+        # Déterminer la valeur cible de la température pour ce niveau
+        if l in level_overrides:
+            tau = float(level_overrides[l])
+            mode_str = "Override"
+        else:
+            tau = float(args.tau)
+            mode_str = "Global"
 
-                print(f"  Level {l} ({mode_str}): target={val_target}, thresh={thresh:.3f}, clipped={pct_clipped:.2f}%")
-                z_clamped_list.append(z_clamped)
+        # Multiplication scalaire (Conserve la distribution Gaussienne)
+        z_scaled = z * tau
+        
+        print(f"  Level {l} ({mode_str}): tau={tau}")
+        z_scaled_list.append(z_scaled)
 
-            # 5. Décodage
-            xh, _ = model.forward_and_log_det(z_clamped_list)
-            xh = to01(_coerce_5d(xh, args.volume_size), winsorize=True)
-            diff = to01(torch.abs(xi - xh), winsorize=True)
+    # 5. Décodage & Sauvegarde
+    xh = _decode_latents(model, z_scaled_list, target_hw=(Hc, Wc))
 
-        # 6. Sauvegardes NIfTI et PNG
-        base_name = Path(pth).name.split('.')[0]
-        prefix = out_dir / f"winsorize_{i:03d}_{base_name}"
-        
-        save_nifti(xi, Path(f"{prefix}_orig.nii.gz"))
-        save_nifti(xh, Path(f"{prefix}_recon.nii.gz"))
-        save_nifti(diff, Path(f"{prefix}_diff.nii.gz"))
-        
-        save_mid_slice_png(xi, Path(f"{prefix}_orig_midslice.png"))
-        save_mid_slice_png(xh, Path(f"{prefix}_recon_midslice.png"))
-        
-        print(f"[ok] Saved {prefix}_recon.nii.gz")
-        
-    return 0
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if os.path.splitext(args.out)[1].lower() in [".png", ".jpg", ".jpeg", ".bmp", ".tiff"]:
+        panel = make_recon_panel(xb, xh)
+        save_grid(panel, Path(args.out), nrow=3, target_hw=(Hc, Wc))
+        print(f"[ok] Saved temperature scaled recon panel to {args.out}")
+    elif os.path.splitext(args.out)[1].lower() in [".nii", ".gz"]:
+        import ants
+        xh = _coerce_nchw_4d(xh, target_hw=(Hc, Wc))
+        ants_img = ants.from_numpy(np.flip(xh.squeeze().cpu().numpy(), axis=(1,0))) 
+        ants.image_write(ants_img, args.out)
+        print(f"[ok] Saved temperature scaled recon to {args.out}")
 
 def main_calc_distance(argv=None):
     """
@@ -1120,11 +1120,36 @@ def main_calc_distance(argv=None):
     paths = per_view_paths[int(args.view_index)]
     total_imgs = len(paths)
 
-    # ---------------------------------------------------------
-    # 4. PRÉPARATION DE LA RÉFÉRENCE (Moyenne ou Target Image)
+# ---------------------------------------------------------
+    # 4. PRÉPARATION DE LA RÉFÉRENCE ET DE LA VARIANCE
     # ---------------------------------------------------------
     reference_latents = [] 
+    variance_latents = [] 
 
+    # A. Extraction systématique de la variance (depuis le modèle Gaussien)
+    print(f"[info] Extracting latent variances for standardized distance...")
+    for l in range(L):
+        s, e = slice_map[l][vname]
+        
+        if f"Sigma_{l}_type" in npz and str(npz[f"Sigma_{l}_type"]) == "lowrank":
+            U_full = npz[f"Sigma_{l}_U"]
+            eig = npz[f"Sigma_{l}_eig"]
+            sigma2 = float(npz[f"Sigma_{l}_sigma2"])
+            
+            U_v = U_full[s:e, :]
+            # Calcul rapide de la diagonale sans instancier la matrice géante
+            var_flat = np.sum((U_v ** 2) * eig, axis=1) + sigma2
+        else:
+            Sig_full = npz[f"Sigma_{l}"]
+            if Sig_full.ndim == 1:
+                var_flat = Sig_full[s:e]
+            else:
+                var_flat = np.diag(Sig_full)[s:e]
+                
+        var_tensor = torch.from_numpy(var_flat).float().to(device).view(1, -1)
+        variance_latents.append(var_tensor)
+
+    # B. Détermination de la référence (Cible ou Moyenne)
     if args.target_image:
         tgt_path = Path(args.target_image)
         if not tgt_path.exists(): raise FileNotFoundError(f"Target image not found: {tgt_path}")
@@ -1137,7 +1162,6 @@ def main_calc_distance(argv=None):
             
         for z in z_tgt_list:
             reference_latents.append(z.view(1, -1).detach()) 
-
     else:
         print(f"[info] Reference: Gaussian Mean (Mu)")
         for l in range(L):
@@ -1154,7 +1178,7 @@ def main_calc_distance(argv=None):
     out_csv = Path(args.out_csv)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"[info] Calculating distances for {total_imgs} volumes...")
+    print(f"[info] Calculating standardized L2 distances for {total_imgs} volumes...")
 
     with open(out_csv, "w", newline="") as f:
         writer = csv.writer(f)
@@ -1190,10 +1214,12 @@ def main_calc_distance(argv=None):
             
             for l, z in enumerate(z_list):
                 ref = reference_latents[l] 
+                var = variance_latents[l] # La variance de la population
                 z_flat = z.view(B, -1)     
                 
-                # Broadcasting automatique: (B, D) - (1, D)
-                dist_sq = torch.sum((z_flat - ref) ** 2, dim=1).cpu().numpy()
+                # Distance Euclidienne Standardisée (Mahalanobis diagonale)
+                # On divise le carré de la différence par la variance avant de faire la somme
+                dist_sq = torch.sum(((z_flat - ref) ** 2) / (var + 1e-6), dim=1).cpu().numpy()
                 dists_per_level[:, l] = np.sqrt(dist_sq)
 
             for b_idx in range(B):
@@ -1205,18 +1231,52 @@ def main_calc_distance(argv=None):
 
     print(f"[ok] Distances written to {out_csv}")
 
+
 def main_recon_interpolate(argv=None):
     """
     Interpole entre une cible (Moyenne Gaussienne ou Image Cible) et un sujet 3D.
+    Utilise l'interpolation sphérique (Slerp) pour éviter les artéfacts hors-distribution.
     Génère une séquence de volumes NIfTI représentant la transition.
     """
+    
+    def _slerp(t: float, v0: torch.Tensor, v1: torch.Tensor, DOT_THRESHOLD: float = 0.9995):
+        """
+        Interpolation linéaire sphérique (Slerp) pour les vecteurs latents (B, D).
+        Interpole la direction sur l'hyper-sphère et la norme linéairement.
+        """
+        v0_norm = torch.norm(v0, dim=1, keepdim=True)
+        v1_norm = torch.norm(v1, dim=1, keepdim=True)
+        
+        v0_norm_safe = torch.clamp(v0_norm, min=1e-8)
+        v1_norm_safe = torch.clamp(v1_norm, min=1e-8)
+        
+        v0_dir = v0 / v0_norm_safe
+        v1_dir = v1 / v1_norm_safe
+        
+        dot = torch.sum(v0_dir * v1_dir, dim=1, keepdim=True)
+        dot = torch.clamp(dot, -1.0, 1.0)
+        
+        omega = torch.acos(dot)
+        sin_omega = torch.sin(omega)
+        
+        lerp_mask = (torch.abs(dot) > DOT_THRESHOLD)
+        
+        mag = (1.0 - t) * v0_norm + t * v1_norm
+        
+        slerp_dir = (torch.sin((1.0 - t) * omega) / sin_omega) * v0_dir + (torch.sin(t * omega) / sin_omega) * v1_dir
+        res = slerp_dir * mag
+        
+        lerp_res = (1.0 - t) * v0 + t * v1
+        
+        return torch.where(lerp_mask, lerp_res, res)
+
     ap = argparse.ArgumentParser("LAM-Flow 3D Latent Interpolation")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
     ap.add_argument("--gauss", type=str, default=None, help="Gaussian model (.npz). Required if no target image is provided.")
     ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV (Source images)")
     ap.add_argument("--views", type=str, required=True, help="Views list (e.g. T1,FA)")
     ap.add_argument("--view-index", type=int, default=0, help="View to process")
-    ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64", help="DxHxW")
+    ap.add_argument("--volume-size", type=str, default="64x64x64", help="DxHxW") # Modifié parse_dhw si non défini, assumed parsed later
     ap.add_argument("--batch", type=int, default=1, help="Number of source subjects to process")
     ap.add_argument("--devices", type=str, default="cuda:0")
     ap.add_argument("--out-dir", type=str, required=True, help="Output directory for NIfTI frames")
@@ -1229,6 +1289,11 @@ def main_recon_interpolate(argv=None):
     args = ap.parse_args(argv)
     
     device = torch.device(args.devices)
+    
+    # Parsing volume_size si nécessaire (adaptation si parse_dhw n'était pas actif dans add_argument)
+    if isinstance(args.volume_size, str):
+        v_parts = args.volume_size.lower().split("x")
+        args.volume_size = (int(v_parts[0]), int(v_parts[1]), int(v_parts[2]))
 
     # 1. Chargement Modèle
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
@@ -1314,12 +1379,33 @@ def main_recon_interpolate(argv=None):
             base_name = Path(pth).name.split('.')[0]
             subj_dir = out_dir / f"interp_{i:03d}_{base_name}"
             subj_dir.mkdir(exist_ok=True)
+
+            is_slerp = args.target_image is not None
+            print(f"[info] Interpolating Latents ({'Slerp' if is_slerp else 'Lerp'})...")
             
             for step_idx, alpha in enumerate(alphas):
                 z_interp_list = []
                 for l, (z_src, z_tgt) in enumerate(zip(z_source_list, z_target_list)):
-                    # Interpolation linéaire : z_new = z_tgt + alpha * (z_src - z_tgt)
-                    z_new = z_tgt + float(alpha) * (z_src - z_tgt)
+                    
+                    B, C, D_dim, H, W = z_src.shape
+                    
+                    # Aplatir en 2D (B, -1) pour le Slerp
+                    z_src_flat = z_src.view(B, -1)
+                    z_tgt_flat = z_tgt.view(B, -1)
+                    
+                    # Application du Slerp
+                    # alpha = 0.0 -> Target (Cible)
+                    # alpha = 1.0 -> Source
+                    if is_slerp:
+                        # Slerp: Rotation sur la sphère (Image vers Image)
+                        z_new_flat = _slerp(alpha, z_tgt_flat, z_src_flat)
+                    else:
+                        # Lerp: Ligne droite vers le centre (Image vers Moyenne)
+                        z_new_flat = z_tgt_flat + alpha * (z_src_flat - z_tgt_flat)
+
+                    # Reshape en 5D (B, C, D, H, W)
+                    z_new = z_new_flat.view(B, C, D_dim, H, W)
+                    
                     z_interp_list.append(z_new)
                 
                 xh, _ = model.forward_and_log_det(z_interp_list)
@@ -1387,7 +1473,7 @@ if __name__ == "__main__":
         "recon": main_recon,
         "gauss-fit": main_gauss_fit,
         "gauss-impute": main_gauss_impute,
-        "recon-winsorize": main_recon_winsorize,
+        "recon-temperature": main_recon_temperature,
         "calc-distance": main_calc_distance,
         "recon-interpolate": main_recon_interpolate,
         "recon-template": main_recon_template
