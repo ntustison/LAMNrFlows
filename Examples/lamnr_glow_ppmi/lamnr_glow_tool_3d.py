@@ -1264,9 +1264,9 @@ def main_calc_distance(argv=None):
     
 def main_recon_interpolate(argv=None):
     """
-    Interpole entre une cible (Moyenne Gaussienne ou Image Cible) et un sujet 3D.
+    Interpole entre une cible (Moyenne Gaussienne ou Image Cible) et un sujet 3D 
+    à un point fixe (t).
     Utilise l'interpolation sphérique (Slerp) centrée sur \mu pour éviter les artéfacts hors-distribution.
-    Génère une séquence de volumes NIfTI représentant la transition.
     """
     
     def _slerp(t: float, v0: torch.Tensor, v1: torch.Tensor, DOT_THRESHOLD: float = 0.9995):
@@ -1304,7 +1304,7 @@ def main_recon_interpolate(argv=None):
     ap.add_argument("--volume-size", type=str, default="64x64x64", help="DxHxW") 
     ap.add_argument("--batch", type=int, default=1, help="Number of source subjects to process")
     ap.add_argument("--devices", type=str, default="cuda:0")
-    ap.add_argument("--out-dir", type=str, required=True, help="Output directory for NIfTI frames")
+    ap.add_argument("--out", type=str, required=True, help="Output NIfTI file path")
     
     # Options Source / Target
     ap.add_argument("--manifest", type=str, default=None, 
@@ -1313,8 +1313,12 @@ def main_recon_interpolate(argv=None):
                     help="Optional single source 3D image. If set, ignores the manifest.")
     ap.add_argument("--target-image", type=str, default=None,
                     help="Optional target image path. If not set, interpolates towards Gaussian mean.")
-    ap.add_argument("--steps", type=int, default=5, 
-                    help="Number of interpolation steps (frames) to generate between Target (t=0) and Source (t=1).")
+                    
+    # Paramètres d'interpolation
+    ap.add_argument("--t", type=float, default=0.5, 
+                    help="Interpolation factor [0.0 = Target/Mean, 1.0 = Source].")
+    ap.add_argument("--interp-level", action="append", type=str,
+                    help="Override t for a specific level. Format 'level,t'.")
     
     args = ap.parse_args(argv)
     
@@ -1323,6 +1327,18 @@ def main_recon_interpolate(argv=None):
         
     device = torch.device(args.devices)
     
+    # Parsing des overrides par niveau
+    level_overrides = {}
+    if args.interp_level:
+        for item in args.interp_level:
+            try:
+                parts = item.split(',')
+                if len(parts) != 2: raise ValueError
+                lvl = int(parts[0]); val = float(parts[1])
+                level_overrides[lvl] = val
+            except ValueError:
+                raise RuntimeError(f"Invalid format for --interp-level: '{item}'. Expected 'level,t'.")
+
     if isinstance(args.volume_size, str):
         v_parts = args.volume_size.lower().split("x")
         args.volume_size = (int(v_parts[0]), int(v_parts[1]), int(v_parts[2]))
@@ -1387,11 +1403,10 @@ def main_recon_interpolate(argv=None):
             z_tgt_raw, _ = model.inverse_and_log_det(xt)
             if not isinstance(z_tgt_raw, list): z_tgt_raw = [z_tgt_raw]
             for z in z_tgt_raw:
-                z_target_list.append(z.clone()) # (1, C, D, H, W)
+                z_target_list.append(z.clone())
         is_slerp = True
     else:
         print(f"[info] Target: Gaussian Mean (Mu) -> Using standard Lerp")
-        # On utilise un encodage factice pour obtenir la forme 5D exacte de la cible
         dummy = torch.zeros(1, 1, args.volume_size[0], args.volume_size[1], args.volume_size[2], device=device)
         with torch.no_grad():
             z_dummy, _ = model.inverse_and_log_det(dummy)
@@ -1403,12 +1418,10 @@ def main_recon_interpolate(argv=None):
             z_target_list.append(mu_t)
 
     # 5. Boucle d'Interpolation (Sujet par Sujet)
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     bs = max(1, int(args.batch))
     limit = min(bs, len(paths))
-
-    alphas = np.linspace(0.0, 1.0, args.steps)
     
     for i in range(limit):
         pth = paths[i]
@@ -1419,41 +1432,44 @@ def main_recon_interpolate(argv=None):
             z_source_list, _ = model.inverse_and_log_det(xs)
             if not isinstance(z_source_list, list): z_source_list = [z_source_list]
             
-            base_name = Path(pth).name.split('.')[0]
-            subj_dir = out_dir / f"interp_{i:03d}_{base_name}"
-            subj_dir.mkdir(exist_ok=True)
+            z_interp_list = []
+            for l, (z_src, z_tgt, mu_t) in enumerate(zip(z_source_list, z_target_list, mu_tensors)):
+                t_level = level_overrides.get(l, float(args.t))
+                
+                B, C, D_dim, H, W = z_src.shape
+                
+                z_src_flat = z_src.view(B, -1)
+                z_tgt_flat = z_tgt.view(B, -1)
+                mu_flat_b = mu_t.view(1, -1)
+                
+                if is_slerp:
+                    z_src_c = z_src_flat - mu_flat_b
+                    z_tgt_c = z_tgt_flat - mu_flat_b
+                    z_new_c = _slerp(t_level, z_tgt_c, z_src_c)
+                    z_new_flat = z_new_c + mu_flat_b
+                else:
+                    z_new_flat = z_tgt_flat + t_level * (z_src_flat - z_tgt_flat)
+                
+                z_new = z_new_flat.view(B, C, D_dim, H, W)
+                print(f"  Level {l}: t={t_level}")
+                z_interp_list.append(z_new)
             
-            for step_idx, alpha in enumerate(alphas):
-                z_interp_list = []
-                for l, (z_src, z_tgt, mu_t) in enumerate(zip(z_source_list, z_target_list, mu_tensors)):
-                    
-                    B, C, D_dim, H, W = z_src.shape
-                    
-                    z_src_flat = z_src.view(B, -1)
-                    z_tgt_flat = z_tgt.view(B, -1)
-                    mu_flat_b = mu_t.view(1, -1)
-                    
-                    if is_slerp:
-                        # Slerp centré sur \mu
-                        z_src_c = z_src_flat - mu_flat_b
-                        z_tgt_c = z_tgt_flat - mu_flat_b
-                        z_new_c = _slerp(float(alpha), z_tgt_c, z_src_c)
-                        z_new_flat = z_new_c + mu_flat_b
-                    else:
-                        # Lerp vers la moyenne
-                        z_new_flat = z_tgt_flat + float(alpha) * (z_src_flat - z_tgt_flat)
-                    
-                    z_new = z_new_flat.view(B, C, D_dim, H, W)
-                    z_interp_list.append(z_new)
+            xh, _ = model.forward_and_log_det(z_interp_list)
+            xh = to01(_coerce_5d(xh, args.volume_size), winsorize=True)
+            
+            # Gestion du nom de fichier si traitement par lots (batch > 1)
+            if limit > 1:
+                base_name = Path(pth).name.split('.')[0]
+                if out_path.name.endswith('.nii.gz'):
+                    out_name = out_path.parent / f"{out_path.name[:-7]}_{i:03d}_{base_name}.nii.gz"
+                else:
+                    out_name = out_path.parent / f"{out_path.stem}_{i:03d}_{base_name}{out_path.suffix}"
+            else:
+                out_name = out_path
+
+            save_nifti(xh, out_name)
                 
-                xh, _ = model.forward_and_log_det(z_interp_list)
-                xh = to01(_coerce_5d(xh, args.volume_size), winsorize=True)
-                
-                out_name = subj_dir / f"frame_{step_idx:02d}_alpha{alpha:.2f}.nii.gz"
-                save_nifti(xh, out_name)
-                save_mid_slice_png(xh, subj_dir / f"frame_{step_idx:02d}_alpha{alpha:.2f}_midslice.png")
-                
-        print(f"[ok] Generated {args.steps} frames in {subj_dir}")
+        print(f"[ok] Generated interpolated 3D volume at {out_name}")
 
     return 0
 
