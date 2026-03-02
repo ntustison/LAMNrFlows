@@ -1060,27 +1060,41 @@ def main_recon_temperature(argv=None):
 
 def main_calc_distance(argv=None):
     """
-    Calcule la distance Euclidienne (L2) entre les latents d'une image 3D et une référence.
+    Calcule la distance Euclidienne (L2) Standardisée entre les latents d'une image 3D et une référence.
     Référence par défaut : Moyenne Gaussienne (Mu) extraite du modèle .npz.
     Référence optionnelle : Une image cible (--target-image).
     """
     ap = argparse.ArgumentParser("LAM-Flow 3D Latent Distance Calculator")
     ap.add_argument("--ckpt", required=True, help="Path to checkpoint")
     ap.add_argument("--gauss", required=True, help="Gaussian model (.npz)")
-    ap.add_argument("--manifest", required=True, help="Input manifest CSV")
     ap.add_argument("--views", required=True, help="Views header (e.g. T1,FA)")
     ap.add_argument("--view-index", type=int, default=0, help="View index to analyze")
-    ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64", help="DxHxW")
+    ap.add_argument("--volume-size", default="64x64x64", help="DxHxW")
     ap.add_argument("--batch", type=int, default=1, help="Batch size (keep low for 3D)")
     ap.add_argument("--devices", default="cuda:0")
     ap.add_argument("--out-csv", required=True, help="Output CSV file path")
     ap.add_argument("--save-levels", action=argparse.BooleanOptionalAction, default=True,
                     help="Include separate columns for distance at each level.")
+    
+    # Options Source / Target
+    ap.add_argument("--manifest", type=str, default=None, 
+                    help="Input manifest CSV (optional if --source-image is provided)")
+    ap.add_argument("--source-image", type=str, default=None,
+                    help="Optional single source 3D image. If set, ignores the manifest.")
     ap.add_argument("--target-image", type=str, default=None,
                     help="Optional target 3D image path. If set, calculates distance to this image instead of the Gaussian mean.")
+    
     args = ap.parse_args(argv)
     
+    if not args.manifest and not args.source_image:
+        raise ValueError("You must provide either --manifest or --source-image.")
+    
     device = torch.device(args.devices)
+    
+    # Parser volume_size si c'est une string
+    if isinstance(args.volume_size, str):
+        v_parts = args.volume_size.lower().split("x")
+        args.volume_size = (int(v_parts[0]), int(v_parts[1]), int(v_parts[2]))
     
     # 1. Chargement du modèle
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
@@ -1114,13 +1128,21 @@ def main_calc_distance(argv=None):
             curr += sz
         slice_map.append(d)
 
-    # 3. Parsing du Manifest
-    cols = _read_manifest_csv(Path(args.manifest))
-    _, per_view_paths = _resolve_views(cols, Path(args.manifest).parent, args.views)
-    paths = per_view_paths[int(args.view_index)]
+    # 3. Parsing Source (Manifest ou Image Unique)
+    paths = []
+    if args.source_image:
+        src_path = Path(args.source_image)
+        if not src_path.exists(): raise FileNotFoundError(f"Source image not found: {src_path}")
+        paths = [src_path]
+        print(f"[info] Using single source image: {src_path.name}")
+    else:
+        cols = _read_manifest_csv(Path(args.manifest))
+        _, per_view_paths = _resolve_views(cols, Path(args.manifest).parent, args.views)
+        paths = per_view_paths[int(args.view_index)]
+    
     total_imgs = len(paths)
 
-# ---------------------------------------------------------
+    # ---------------------------------------------------------
     # 4. PRÉPARATION DE LA RÉFÉRENCE ET DE LA VARIANCE
     # ---------------------------------------------------------
     reference_latents = [] 
@@ -1188,7 +1210,14 @@ def main_calc_distance(argv=None):
             header += [f"dist_L{l}" for l in range(L)]
         writer.writerow(header)
 
-        for i in tqdm(range(0, total_imgs, bs), desc="Distance calc", unit="batch"):
+        # Remplacement de tqdm par une boucle simple si non disponible
+        try:
+            from tqdm import tqdm
+            iterable = tqdm(range(0, total_imgs, bs), desc="Distance calc", unit="batch")
+        except ImportError:
+            iterable = range(0, total_imgs, bs)
+
+        for i in iterable:
             batch_paths = paths[i : i + bs]
             xs = []
             valid_paths = []
@@ -1218,7 +1247,6 @@ def main_calc_distance(argv=None):
                 z_flat = z.view(B, -1)     
                 
                 # Distance Euclidienne Standardisée (Mahalanobis diagonale)
-                # On divise le carré de la différence par la variance avant de faire la somme
                 dist_sq = torch.sum(((z_flat - ref) ** 2) / (var + 1e-6), dim=1).cpu().numpy()
                 dists_per_level[:, l] = np.sqrt(dist_sq)
 
@@ -1228,10 +1256,12 @@ def main_calc_distance(argv=None):
                 if args.save_levels:
                     row.extend([f"{d:.6f}" for d in dists_per_level[b_idx]])
                 writer.writerow(row)
+                
+                if args.source_image:
+                    print(f"\n[Result] Standardized Distance (Source -> Target/Mu): {total_dist:.4f}")
 
     print(f"[ok] Distances written to {out_csv}")
-
-
+    
 def main_recon_interpolate(argv=None):
     """
     Interpole entre une cible (Moyenne Gaussienne ou Image Cible) et un sujet 3D.

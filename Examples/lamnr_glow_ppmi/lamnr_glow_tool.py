@@ -2523,7 +2523,6 @@ def main_calc_distance(argv=None):
     ap = argparse.ArgumentParser("LAM-Flow Latent Distance Calculator")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
     ap.add_argument("--gauss", type=str, required=True, help="Gaussian model (.npz or .pt)")
-    ap.add_argument("--manifest", type=str, required=True, help="Input manifest CSV")
     ap.add_argument("--views", type=str, required=True, help="Views header (e.g. T1,FA)")
     ap.add_argument("--view-index", type=int, default=0, help="View index to analyze")
     ap.add_argument("--slice-axis", type=int, required=True)
@@ -2534,12 +2533,19 @@ def main_calc_distance(argv=None):
     ap.add_argument("--save-levels", action=argparse.BooleanOptionalAction, default=True,
                     help="Include separate columns for distance at each level.")
     
-    # Option Image Cible
+    # Options Source / Target
+    ap.add_argument("--manifest", type=str, default=None, 
+                    help="Input manifest CSV (optional if --source-image is provided)")
+    ap.add_argument("--source-image", type=str, default=None,
+                    help="Optional single source image. If set, ignores the manifest.")
     ap.add_argument("--target-image", type=str, default=None,
                     help="Optional target image path. If set, calculates distance to this image instead of the Gaussian mean.")
 
     args = ap.parse_args(argv)
     device = torch.device(args.devices)
+
+    if not args.manifest and not args.source_image:
+        raise ValueError("You must provide either --manifest or --source-image.")
 
     # 1. Chargement Modèle (Robuste)
     ckpt_path = resolve_ckpt_path(Path(args.ckpt))
@@ -2559,11 +2565,7 @@ def main_calc_distance(argv=None):
     gauss_blob = _load_gaussian_model(Path(args.gauss))
     views_g, dims_tbl, shapes_by_view, L = _validate_gauss_blob(gauss_blob)
 
-    # 3. Parsing Manifest
-    manifest_path = Path(args.manifest)
-    cols = _read_manifest_csv(manifest_path)
     views_list = [v.strip() for v in args.views.split(",")]
-    
     vname = views_list[int(args.view_index)]
     if vname not in views_g: raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
     v_idx_g = views_g.index(vname)
@@ -2571,9 +2573,19 @@ def main_calc_distance(argv=None):
     ok, note = load_weights_into_model(model, blob, view_idx=int(args.view_index), prefer_ema=True, view_name=vname, cfg_views=views_list)
     if not ok: raise RuntimeError(f"Weights failed: {note}")
 
-    # Récupération des chemins (Source)
-    view_names, per_view_paths = _resolve_views(cols, manifest_path.parent, args.views)
-    paths = per_view_paths[int(args.view_index)]
+    # 3. Parsing Source (Manifest ou Image Unique)
+    paths = []
+    if args.source_image:
+        src_path = Path(args.source_image)
+        if not src_path.exists(): raise FileNotFoundError(f"Source image not found: {src_path}")
+        paths = [src_path]
+        print(f"[info] Using single source image: {src_path.name}")
+    else:
+        manifest_path = Path(args.manifest)
+        cols = _read_manifest_csv(manifest_path)
+        view_names, per_view_paths = _resolve_views(cols, manifest_path.parent, args.views)
+        paths = per_view_paths[int(args.view_index)]
+    
     total_imgs = len(paths)
 
     # ---------------------------------------------------------
@@ -2695,7 +2707,7 @@ def main_calc_distance(argv=None):
                 
                 for l, z in enumerate(z_list):
                     ref = reference_latents[l] 
-                    var = variance_latents[l]  # Variance récupérée
+                    var = variance_latents[l]
                     z_flat = z.view(B, -1)     
                     
                     # Formule : somme( (z - ref)^2 / variance )
@@ -2709,6 +2721,9 @@ def main_calc_distance(argv=None):
                     if args.save_levels:
                         row.extend([f"{d:.6f}" for d in dists_per_level[b_idx]])
                     writer.writerow(row)
+                    
+                    if args.source_image:
+                        print(f"\n[Result] Standardized Distance (Source -> Target/Mu): {total_dist:.4f}")
                 
                 pbar.update(len(batch_paths))
 
