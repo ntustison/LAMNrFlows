@@ -164,3 +164,58 @@ histogram warping).  Similar to the tabular case, the amplitude is controlled by
 a scalar schedule \(\alpha(t)\) (linear, cosine, or exponential in training
 time).
 
+__High-Dimensional Geometry and Latent Space Navigation.__ In high-dimensional
+standard normal latent spaces, such as those optimized by our LAMNr flows
+($\mathcal{Z} \sim \mathcal{N}(0, I)$), the geometric properties of the data
+distribution become highly counterintuitive due to the concentration of measure
+phenomenon [@vershynin2018high; @blum2020foundations]. As dimensionality
+increases, the vast majority of the probability mass moves away from the origin
+and concentrates within a narrow spherical shell of radius $\approx \sqrt{d}$.
+Consequently, standard Euclidean operations become suboptimal for downstream
+tasks such as latent interpolation and distance calculation [@white2016sampling;
+@arvanitidis2018latent].
+
+To navigate this geometry faithfully, we replaced standard linear
+interpolation (LERP) with spherical linear interpolation (SLERP) when traversing
+the latent space between two generated samples $z_1$ and $z_2$. LERP computes a
+straight-line trajectory that inevitably passes through the center of the
+distribution—a region of near-zero probability density in high
+dimensions—resulting in interpolated samples that fall out-of-distribution.
+Conversely, SLERP maintains a constant radius. For an interpolation parameter $t
+\in [0, 1]$ and the angle $\theta = \arccos\left(\frac{z_1 \cdot z_2}{\|z_1\|_2
+\|z_2\|_2}\right)$ between the vectors, the SLERP trajectory is defined
+as:
+
+\begin{equation}
+\text{SLERP}(z_1, z_2; t) = \frac{\sin((1-t)\theta)}{\sin(\theta)}z_1 +
+\frac{\sin(t\theta)}{\sin(\theta)}z_2
+\end{equation}
+
+This formulation ensures that the interpolation path strictly follows the
+high-probability manifold.
+
+Similarly, we adapted our distance metrics based on the evaluation context. When
+assessing the semantic similarity between two individual images within the
+latent space, we default to the geodesic (angular) distance rather than the
+Euclidean distance. The geodesic distance effectively isolates the directional
+components of the vectors:
+
+\begin{equation}
+d_{geo}(z_1, z_2) = \arccos\left( \frac{z_1 \cdot z_2}{\|z_1\|_2\|z_2\|_2} \right)
+\end{equation}
+
+This metric captures the core semantic features while discarding magnitude
+variations that primarily represent high-dimensional statistical noise. However,
+for out-of-cohort anomaly detection, where the goal is to measure a subject's
+deviation from the healthy normative population, we utilize the Mahalanobis
+distance relative to the Gaussian mean ($\mu = 0$):
+
+\begin{equation}
+d_M(z) = \sqrt{z^\top\Sigma^{-1} z}
+\end{equation}
+
+
+where $\Sigma$ represents the covariance matrix of the reference
+cohort. In this specific scenario, the radial distance from the origin, which
+the Mahalanobis metric captures, is precisely the signal required to quantify
+the statistical unlikelihood of the abnormal sample.
