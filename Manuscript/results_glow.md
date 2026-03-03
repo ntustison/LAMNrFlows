@@ -297,8 +297,7 @@ limitations[^comp].
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\linewidth]{Figures/interpolation.pdf}
-    \caption{Latent space traversal and the necessity of
-    $\mu$-centered Spherical Linear Interpolation (Slerp). (Top) The generated
+    \caption{Within-cohort interpolation (PPMI). (Top) The generated
     morphological transition between a source image ($t=1.0$) and a
     target image ($t=0.0$). (Bottom) A geometric representation of
     the joint latent space. The empirical distribution of the training cohort is
@@ -310,6 +309,24 @@ limitations[^comp].
     mean $\mu$ (solid green arc) preserves the natural variance of the data,
     ensuring the trajectory remains strictly on the high-probability manifold.}
     \label{fig:interpolation}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{Figures/interpolation_brats_24.pdf}
+    \caption{Out-of-cohort interpolation (BraTS).  Latent space traversal and the necessity of
+    $\mu$-centered Spherical Linear Interpolation (Slerp). (Top) The generated
+    morphological transition between a source image ($t=1.0$) and a
+    target image ($t=0.0$). (Bottom) A geometric representation of
+    the joint latent space. The empirical distribution of the training cohort is
+    centered around $\mu$. Standard linear interpolation (Lerp, dotted red line)
+    cuts through the interior of the latent hypersphere, causing a severe
+    contraction of the vector's norm (variance collapse). This forces the
+    decoding flow to evaluate out-of-distribution coordinates, generating
+    checkerboard artifacts. Conversely, applying Slerp relative to the empirical
+    mean $\mu$ (solid green arc) preserves the natural variance of the data,
+    ensuring the trajectory remains strictly on the high-probability manifold.}
+    \label{fig:interpolation_brats_024}
 \end{figure}
 
 
