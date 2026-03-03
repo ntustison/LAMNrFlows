@@ -122,6 +122,7 @@ import csv
 import sys
 import time
 import hashlib
+import warnings
 
 import torch
 import torch.nn.functional as F
@@ -1071,10 +1072,16 @@ def main_calc_distance(argv=None):
     ap.add_argument("--view-index", type=int, default=0, help="View index to analyze")
     ap.add_argument("--volume-size", default="64x64x64", help="DxHxW")
     ap.add_argument("--batch", type=int, default=1, help="Batch size (keep low for 3D)")
+    ap.add_argument("--workers", type=int, default=4, 
+                    help="Number of parallel I/O workers for loading images.")    
     ap.add_argument("--devices", default="cuda:0")
     ap.add_argument("--out-csv", required=True, help="Output CSV file path")
     ap.add_argument("--save-levels", action=argparse.BooleanOptionalAction, default=True,
                     help="Include separate columns for distance at each level.")
+    ap.add_argument("--distance-metric", type=str, default="geodesic", choices=["euclidean", "mahalanobis", "geodesic"],
+                    help="Which distance metric to use.  If no target image is specified, geodesic shouldn't be used.")
+    ap.add_argument("--variance-epsilon", type=float, default=1e-6, required=False, 
+                    help="Regularization parameter for numerical stability in mahalanobis and geodesic distances.")
     
     # Options Source / Target
     ap.add_argument("--manifest", type=str, default=None, 
@@ -1088,7 +1095,13 @@ def main_calc_distance(argv=None):
     
     if not args.manifest and not args.source_image:
         raise ValueError("You must provide either --manifest or --source-image.")
-    
+
+    if args.distance_metric == "geodesic"and not args.target_image: 
+        warnings.warn(
+           "Geodesic distance requires a target image. Falling back to Mahalanobis distance for Gaussian Mean.", 
+           UserWarning )
+        args.distance_metric = "mahalanobis"
+
     device = torch.device(args.devices)
     
     # Parser volume_size si c'est une string
@@ -1222,13 +1235,27 @@ def main_calc_distance(argv=None):
             xs = []
             valid_paths = []
             
-            for p in batch_paths:
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _load_single(p):
                 try:
                     xi = _read_image_3d(p, target_dhw=args.volume_size)
-                    xs.append(xi.squeeze(0))
-                    valid_paths.append(str(p))
+                    return xi.squeeze(0), str(p)
                 except Exception as e:
                     print(f"[warn] Failed to read {p}: {e}")
+                    return None, None
+
+            xs = []
+            valid_paths = []
+            
+            # Chargement parallèle du batch
+            with ThreadPoolExecutor(max_workers=args.workers) as pool:
+                results = list(pool.map(_load_single, batch_paths))
+                
+            for tensor, path in results:
+                if tensor is not None:
+                    xs.append(tensor)
+                    valid_paths.append(path)
 
             if not xs: continue
 
@@ -1245,10 +1272,26 @@ def main_calc_distance(argv=None):
                 ref = reference_latents[l] 
                 var = variance_latents[l] # La variance de la population
                 z_flat = z.view(B, -1)     
-                
-                # Distance Euclidienne Standardisée (Mahalanobis diagonale)
-                dist_sq = torch.sum(((z_flat - ref) ** 2) / (var + 1e-6), dim=1).cpu().numpy()
-                dists_per_level[:, l] = np.sqrt(dist_sq)
+
+                if args.distance_metric == "mahalanobis":
+                    # Formule : somme( (z - ref)^2 / variance )
+                    var = variance_latents[l] + args.variance_epsilon
+                    dist_sq = torch.sum(((z_flat - ref) ** 2) / var, dim=1)
+                    dists_per_level[:, l] = np.sqrt(dist_sq.cpu().numpy())
+                elif args.distance_metric == "geodesic":
+                    # 1. Calculer la similarité cosinus
+                    cos_sim = F.cosine_similarity(z_flat, ref, dim=1)
+                    
+                    # 2. Clamper les valeurs pour éviter les erreurs NaN avec acos dues aux erreurs d'arrondi
+                    cos_sim = torch.clamp(cos_sim, min=-1.0 + args.variance_epsilon, max=1.0 - args.variance_epsilon)
+                    
+                    # 3. Calculer l'angle (distance géodésique)
+                    geodesic_dist = torch.acos(cos_sim)
+                    dists_per_level[:, l] = geodesic_dist.cpu().numpy()                        
+                else: 
+                    # Euclidienne simple
+                    dist_sq = torch.sum((z_flat - ref) ** 2, dim=1)
+                    dists_per_level[:, l] = np.sqrt(dist_sq.cpu().numpy())
 
             for b_idx in range(B):
                 total_dist = np.sqrt(np.sum(dists_per_level[b_idx] ** 2))
