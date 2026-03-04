@@ -206,16 +206,13 @@ d_{geo}(z_1, z_2) = \arccos\left( \frac{z_1 \cdot z_2}{\|z_1\|_2\|z_2\|_2} \righ
 
 This metric captures the core semantic features while discarding magnitude
 variations that primarily represent high-dimensional statistical noise. However,
-for out-of-cohort anomaly detection, where the goal is to measure a subject's
-deviation from the healthy normative population, we utilize the Mahalanobis
-distance relative to the Gaussian mean ($\mu = 0$):
+for measuring a subject's deviation from the normative population, we utilize
+the Mahalanobis distance relative to the Gaussian mean ($\mu = 0$):
 
-\begin{equation}
-d_M(z) = \sqrt{z^\top\Sigma^{-1} z}
-\end{equation}
+\begin{equation} d_M(z) = \sqrt{z^\top\Sigma^{-1} z} \end{equation}
 
 
-where $\Sigma$ represents the covariance matrix of the reference
-cohort. In this specific scenario, the radial distance from the origin, which
-the Mahalanobis metric captures, is precisely the signal required to quantify
-the statistical unlikelihood of the abnormal sample.
+where $\Sigma$ represents the covariance matrix of the reference cohort. In this
+specific scenario, the radial distance from the origin, which the Mahalanobis
+metric captures, is precisely the signal required to quantify the statistical
+unlikelihood of the abnormal sample.

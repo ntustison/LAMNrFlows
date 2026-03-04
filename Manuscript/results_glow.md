@@ -61,7 +61,7 @@ limitations[^comp].
   accounts for the natural variance of each latent dimension. This yields a rigorous, 
   variance-weighted scalar metric for anomaly detection and out-of-distribution 
   assessment that avoids artificially penalizing healthy, high-variance anatomical 
-  traits. Figure \ref{fig:latent_space_distances}.
+  traits. Figures \ref{fig:latent_space_distances} and \ref{fig:twin_distances}.
 
 * __Cross-modal imputation via Conditional Gaussian modeling.__ Missing
   modalities are synthesized by encoding the available observed images to the
@@ -274,6 +274,21 @@ limitations[^comp].
 \end{figure}
 
 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{Figures/comparaison_rangs_combinee}
+    \caption{Illustration of utilizing latent geodesic distances for determing biological 
+    relatedness.  Using the Queensland Twin Study [@ds004169:1.0.6], we rank each
+    subject closeness to every other subject in terms of the global and per level 
+    latent distances using the 2D LAMNr flows glow PPMI-trained network.  The 
+    results illustrate that latent similarity correlates with biological similarity
+    which, expectedly, is increased with brain extraction even though the original
+    PPMI training data is non-brain-extracted.}
+    \label{fig:twin_distances}
+\end{figure}
+
+
+
 
 \begin{figure}[htbp]
     \centering
@@ -314,8 +329,7 @@ limitations[^comp].
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\linewidth]{Figures/interpolation_brats_24.pdf}
-    \caption{Out-of-cohort interpolation (BraTS).  Latent space traversal and the necessity of
-    $\mu$-centered Spherical Linear Interpolation (Slerp). (Top) The generated
+    \caption{Out-of-cohort interpolation (BraTS).   (Top) The generated
     morphological transition between a source image ($t=1.0$) and a
     target image ($t=0.0$). (Bottom) A geometric representation of
     the joint latent space. The empirical distribution of the training cohort is
@@ -325,7 +339,10 @@ limitations[^comp].
     decoding flow to evaluate out-of-distribution coordinates, generating
     checkerboard artifacts. Conversely, applying Slerp relative to the empirical
     mean $\mu$ (solid green arc) preserves the natural variance of the data,
-    ensuring the trajectory remains strictly on the high-probability manifold.}
+    ensuring the trajectory remains strictly on the high-probability manifold.
+    Note that the skull-stripped and extreme pathology interpolation is coherent
+    even though the training data (PPMI) is non-skull-stripped and without the
+    presence of tumors.  }
     \label{fig:interpolation_brats_024}
 \end{figure}
 
