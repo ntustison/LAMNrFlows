@@ -277,13 +277,17 @@ limitations[^comp].
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\linewidth]{Figures/comparaison_rangs_combinee}
-    \caption{Illustration of utilizing latent geodesic distances for determing biological 
-    relatedness.  Using the Queensland Twin Study [@ds004169:1.0.6], we rank each
-    subject closeness to every other subject in terms of the global and per level 
-    latent distances using the 2D LAMNr flows glow PPMI-trained network.  The 
-    results illustrate that latent similarity correlates with biological similarity
-    which, expectedly, is increased with brain extraction even though the original
-    PPMI training data is non-brain-extracted.}
+    \caption{\textbf{Latent geodesic distance rankings demonstrate structural
+    biological relatedness.} Using a portion of the Queensland Twin Study [@ds004169:1.0.6]
+    ($N=210$ subjects, mean age = $24.7 \pm  1.8$ years),
+    we ranked the latent geodesic closeness of each subject relative to the rest
+    of the cohort. Rankings were computed for both the global latent space and
+    individual multi-scale resolution levels using a 2D LAMNr flows network
+    pre-trained on the PPMI dataset. The results illustrate that latent geodesic
+    similarity strongly correlates with biological kinship. Notably, the
+    detection of this genetic signature is significantly amplified following
+    brain extraction (skull-stripping), despite the network having been trained
+    entirely on non-brain-extracted, significantly older PPMI data.}
     \label{fig:twin_distances}
 \end{figure}
 
