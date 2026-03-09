@@ -168,7 +168,7 @@ __High-Dimensional Geometry and Latent Space Navigation.__ In high-dimensional
 standard normal latent spaces, such as those optimized by our LAMNr flows
 ($\mathcal{Z} \sim \mathcal{N}(0, I)$), the geometric properties of the data
 distribution become highly counterintuitive due to the concentration of measure
-phenomenon [@vershynin2018high; @agustsson2018optimaltransportmapsdistribution
+phenomenon [@white2016samplinggenerativenetworks; @vershynin2018high; 
 ;@blum2020foundations; @arvanitidis2021latentspaceodditycurvature]. As
 dimensionality increases, the vast majority of the probability mass moves away
 from the origin and concentrates within a narrow spherical shell of radius
