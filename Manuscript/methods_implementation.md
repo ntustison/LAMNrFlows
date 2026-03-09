@@ -168,12 +168,13 @@ __High-Dimensional Geometry and Latent Space Navigation.__ In high-dimensional
 standard normal latent spaces, such as those optimized by our LAMNr flows
 ($\mathcal{Z} \sim \mathcal{N}(0, I)$), the geometric properties of the data
 distribution become highly counterintuitive due to the concentration of measure
-phenomenon [@vershynin2018high; @blum2020foundations]. As dimensionality
-increases, the vast majority of the probability mass moves away from the origin
-and concentrates within a narrow spherical shell of radius $\approx \sqrt{d}$.
-Consequently, standard Euclidean operations become suboptimal for downstream
-tasks such as latent interpolation and distance calculation [@white2016sampling;
-@arvanitidis2018latent].
+phenomenon [@vershynin2018high; @agustsson2018optimaltransportmapsdistribution
+;@blum2020foundations; @arvanitidis2021latentspaceodditycurvature]. As
+dimensionality increases, the vast majority of the probability mass moves away
+from the origin and concentrates within a narrow spherical shell of radius
+$\approx \sqrt{d}$. Consequently, standard Euclidean operations become
+suboptimal for downstream tasks such as latent interpolation and distance
+calculation [@white2016sampling; @arvanitidis2018latent].
 
 To navigate this geometry faithfully, we replaced standard linear
 interpolation (LERP) with spherical linear interpolation (SLERP) when traversing
