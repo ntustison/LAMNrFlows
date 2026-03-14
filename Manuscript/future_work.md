@@ -88,7 +88,7 @@ per-level latents (where we already model second-order structure) and to respect
 the receptive field of each coupling network.
 
 After \(\ell\) squeeze operations, each latent cell corresponds to a \(2^\ell
-\times 2^\ell\) (2-D) or \(2^\ell \times 2^\ell \times 2^\ell\) (3-D) block in
+\times 2^\ell\) (2D) or \(2^\ell \times 2^\ell \times 2^\ell\) (3D) block in
 image space. Let \(\Omega_{\mathrm{obs}}\subset\mathbb{Z}^d\) denote observed
 pixels with indicator mask \(M\). We define a safe context band by morphological
 erosion with a radius matched to the coupling network receptive field

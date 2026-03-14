@@ -11,7 +11,7 @@ implemented 3-D variants of the core components (squeeze / unsqueeze, split /
 merge, invertible $1{\times}1{\times}1$ convolutions, and 3-D coupling networks)
 to support volumetric MRI data. These models are exposed through ANTsTorch as
 configurable factories for both image and tabular views: Glow-style flows for
-2-D/3-D images and RealNVP-style flows for IDPs and other tabular blocks. The
+2D/3D images and RealNVP-style flows for IDPs and other tabular blocks. The
 ANTsTorch interface handles dataset-level normalization and imputation, Gaussian
 and Gaussian–PCA whiteners with optional application at train and test time.
 
@@ -44,21 +44,21 @@ Training and validation splits are defined at the subject level, and each
 minibatch contains aligned multiview slices from matched subjects. Image data
 augmentation is performed on-the-fly using the ANTsTorch-based `ImageDataset`
 with affine and diffeomorphic deformations, small intensity perturbations
-(histogram warping and bias field simulation), and additive Gaussian noise
-treated as dequantization rather than biological variability. We control the
-overall augmentation strength by a scalar schedule \(\alpha(t) \in [0,1]\) as a
-function of normalized training time \(t\), and support linear, cosine, and
-exponential decay: for example, a linear schedule reduces augmentation
-proportionally to \(t\), a cosine schedule keeps stronger perturbations early
-and then decays smoothly, and an exponential schedule reduces aggressive warps
-and noise most rapidly at the beginning of training. This allows us to start
-with heavier augmentations to regularize the flows and discourage overfitting to
-discrete templates, then gradually emphasize fidelity to the true data
-distribution as training progresses. For validation, we use the same spatial
-transforms but disable additional noise and histogram warping. This design
-preserves anatomical variability while preventing overfitting to discrete,
-noise-free templates that would otherwise cause flows to collapse onto spiky
-background modes.  
+(histogram warping and bias field simulation [@Tustison:2021aa]), and additive
+Gaussian noise treated as dequantization rather than biological variability. We
+control the overall augmentation strength by a scalar schedule \(\alpha(t) \in
+[0,1]\) as a function of normalized training time \(t\), and support linear,
+cosine, and exponential decay: for example, a linear schedule reduces
+augmentation proportionally to \(t\), a cosine schedule keeps stronger
+perturbations early and then decays smoothly, and an exponential schedule
+reduces aggressive warps and noise most rapidly at the beginning of training.
+This allows us to start with heavier augmentations to regularize the flows and
+discourage overfitting to discrete templates, then gradually emphasize fidelity
+to the true data distribution as training progresses. For validation, we use the
+same spatial transforms but disable additional noise and histogram warping. This
+design preserves anatomical variability while preventing overfitting to
+discrete, noise-free templates that would otherwise cause flows to collapse onto
+spiky background modes.  
 
 ### Tabular-specific implementation details
 
@@ -99,15 +99,13 @@ and optimizer step.  EMA updates and learning-rate schedulers advance once per
 effective batch. ActNorm uses fixed statistics after warm-up, so accumulation
 does not change normalization. For InfoNCE, negatives are limited to the current
 microbatch by default. When larger negative sets are required, we optionally
-maintain a cross-microbatch queue to approximate large-batch behavior. In
-practice, \(A \in \{2,4,8\}\) trades memory for step latency while preserving
-likelihood calibration and alignment strength for 3-D flows.
+maintain a cross-microbatch queue to approximate large-batch behavior. 
 
-The same training loop supports multiple views by instantiating one flow per
-view, computing per-view log-likelihoods and latents for each minibatch,
-flattening the multiscale latents, and applying the projector plus alignment and
-screening logic described above. For IDP/tabular experiments, we replace the
-image Glow backbones with RealNVP/MAF stacks while keeping the multiview
+The same training loop supports single and multiple views by instantiating one
+flow per view, computing per-view log-likelihoods and latents for each
+minibatch, flattening the multiscale latents, and applying the projector plus
+alignment and screening logic described above. For IDP/tabular experiments, we
+replace the image Glow architecture with RealNVP while keeping the multiview
 alignment and conditional Gaussian stages unchanged, which allows LAMNr Flows to
 operate uniformly across image contrasts and multiview IDP blocks within the
 same methodological framework.
@@ -157,63 +155,10 @@ We apply lightweight, label-free augmentations during maximum-likelihood
 training to improve robustness without changing the model’s exact likelihood
 computation (augmentations act on inputs only)
 [@Tustison:2024aa;@Tustison:2025aa] (cf Figure \ref{fig:aug-schedule}). For
-image views (2-D/3-D), we use geometric transforms (linear and non-linear
+image views (2D/3D), we use geometric transforms (linear and non-linear
 transformations) shared across all views of a subject to preserve alignment
 targets, and per-view intensity-based transforms (noise, simulated bias-field,
 histogram warping).  Similar to the tabular case, the amplitude is controlled by
 a scalar schedule \(\alpha(t)\) (linear, cosine, or exponential in training
 time).
 
-__High-Dimensional Geometry and Latent Space Navigation.__ In high-dimensional
-standard normal latent spaces, such as those optimized by our LAMNr flows
-($\mathcal{Z} \sim \mathcal{N}(0, I)$), the geometric properties of the data
-distribution become highly counterintuitive due to the concentration of measure
-phenomenon [@white2016samplinggenerativenetworks; @vershynin2018high; 
-;@blum2020foundations; @arvanitidis2021latentspaceodditycurvature]. As
-dimensionality increases, the vast majority of the probability mass moves away
-from the origin and concentrates within a narrow spherical shell of radius
-$\approx \sqrt{d}$. Consequently, standard Euclidean operations become
-suboptimal for downstream tasks such as latent interpolation and distance
-calculation [@white2016sampling; @arvanitidis2018latent].
-
-To navigate this geometry faithfully, we replaced standard linear
-interpolation (LERP) with spherical linear interpolation (SLERP) when traversing
-the latent space between two generated samples $z_1$ and $z_2$. LERP computes a
-straight-line trajectory that inevitably passes through the center of the
-distribution—a region of near-zero probability density in high
-dimensions—resulting in interpolated samples that fall out-of-distribution.
-Conversely, SLERP maintains a constant radius. For an interpolation parameter $t
-\in [0, 1]$ and the angle $\theta = \arccos\left(\frac{z_1 \cdot z_2}{\|z_1\|_2
-\|z_2\|_2}\right)$ between the vectors, the SLERP trajectory is defined
-as:
-
-\begin{equation}
-\text{SLERP}(z_1, z_2; t) = \frac{\sin((1-t)\theta)}{\sin(\theta)}z_1 +
-\frac{\sin(t\theta)}{\sin(\theta)}z_2
-\end{equation}
-
-This formulation ensures that the interpolation path strictly follows the
-high-probability manifold.
-
-Similarly, we adapted our distance metrics based on the evaluation context. When
-assessing the semantic similarity between two individual images within the
-latent space, we default to the geodesic (angular) distance rather than the
-Euclidean distance. The geodesic distance effectively isolates the directional
-components of the vectors:
-
-\begin{equation}
-d_{geo}(z_1, z_2) = \arccos\left( \frac{z_1 \cdot z_2}{\|z_1\|_2\|z_2\|_2} \right)
-\end{equation}
-
-This metric captures the core semantic features while discarding magnitude
-variations that primarily represent high-dimensional statistical noise. However,
-for measuring a subject's deviation from the normative population, we utilize
-the Mahalanobis distance relative to the Gaussian mean ($\mu = 0$):
-
-\begin{equation} d_M(z) = \sqrt{z^\top\Sigma^{-1} z} \end{equation}
-
-
-where $\Sigma$ represents the covariance matrix of the reference cohort. In this
-specific scenario, the radial distance from the origin, which the Mahalanobis
-metric captures, is precisely the signal required to quantify the statistical
-unlikelihood of the abnormal sample.

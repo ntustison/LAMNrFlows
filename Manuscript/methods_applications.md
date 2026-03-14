@@ -1,9 +1,9 @@
 
 
 
-## Applications
+<!-- ## Applications -->
 
-### Conditional Gaussian modeling over latents
+## Conditional Gaussian modeling over latents
 
 Normalizing flows give us an explicit bijection between data space and a latent
 space with a simple base density (e.g., Gaussian). Once the per-view flows have
@@ -88,6 +88,7 @@ to these posterior latents yields imputations, harmonized representations, and
 latent edits in the original data space, with exact likelihoods available for
 all configurations.
 
+<!--
 ### Latent distance as a Riemannian biomarker
 
 The multi-scale Glow architecture provides a bijective mapping $f_\theta: X \to
@@ -155,4 +156,4 @@ the `recon` and `recon-template` subcommands of our `lamnr_flow_tool.py`
 utility, which load trained checkpoints, apply Gaussian editing in latent space,
 and render the resulting templates or edited reconstructions as images for
 inspection.
-
+-->

@@ -5,24 +5,24 @@
 
 Medical imaging data and their representative latent spaces are fundamental to
 gaining insight into biological structure and function. While deep learning has
-become the standard for navigating these high-dimensional spaces, certain
-aspects of contemporary architectures (e.g., tractable likelihoods, exact
-invertibility, and bijective mappings) limit rigorous statistical analysis.
-These deficiencies can complicate probabilistic calibration, objective
-comparison, and the precise latent manipulations necessary for computational
-anatomy. For instance, Generative Adversarial Networks (GANs) are implicit
-samplers trained with divergence surrogates rather than likelihoods, which
-precludes calibration by exact probabilities [@papamakarios2021nfreview].
-Variational Autoencoders (VAEs) optimize an evidence lower bound rather than the
-exact log likelihood [@kobyzev2020nfsurvey]. Diffusion and score-based models
-rely on denoising or score-matching objectives with likelihoods obtained only
-indirectly [@croitoru2023diffusion_vision_survey]. Finally, while autoregressive
-decoders offer exact likelihoods, they do not yield a one-shot invertible latent
+become the current standard for navigating these high-dimensional spaces,
+certain aspects of contemporary architectures (e.g., intractable likelihoods,
+lack of bijective mappings) limit rigorous statistical analysis. These
+deficiencies can complicate probabilistic calibration, objective comparison, and
+the precise latent manipulations necessary for computational anatomy. For
+instance, Generative Adversarial Networks (GANs) are implicit samplers trained
+with divergence surrogates rather than likelihoods, which precludes calibration
+by exact probabilities [@papamakarios2021nfreview]. Variational Autoencoders
+(VAEs) optimize an evidence lower bound rather than the exact log likelihood
+[@kobyzev2020nfsurvey]. Diffusion and score-based models rely on denoising or
+score-matching objectives with likelihoods obtained only indirectly
+[@croitoru2023diffusion_vision_survey]. Finally, while autoregressive decoders
+offer exact likelihoods, they do not yield a one-shot invertible latent
 representation [@papamakarios2021nfreview]. Such limitations are particularly
 acute in multimodal and multiview settings, where heterogeneous or missing data
 require calibrated cross-view comparisons and coherent anatomical
 reconstructions.
-
+"...LAMNr flows bridge this gap by extending the SiMLR framework into a deep, likelihood-based architecture that topologically unfolds the complex anatomical manifold into a continuous vector space."
 ## Normalizing flows
 
 Normalizing flows model complex data distributions by composing invertible
@@ -45,18 +45,19 @@ models [@croitoru2023diffusion_vision_survey; @zhai2024tarflow;
 @gu2025starflow].
 
 Beyond density estimation, normalizing flows provide a geometric framework for
-linearizing the anatomical manifold sampled by modern medical imaging. By
-mapping complex imaging data to a symmetric Gaussian base distribution, the
-flow-induced metric ensures that latent straight lines approximate geodesic
-paths in the original data domain. While latent diffusion and flow matching
-achieve high sample quality, they optimize denoising or continuous-transport
-objectives rather than exact log likelihoods, requiring multi-step sampling or
-ODE integration [@lipman2022flowmatching; @croitoru2023diffusion_vision_survey;
-@ho2020ddpm]. By contrast, normalizing flows offer an exact, interpretable
-framework with single-pass inversion, exposing multiscale latents for per-level
-alignment and enabling closed-form conditional queries. These advantages point
-to normalzing flows as an attractive framework for likelihood-calibrated
-multiview modeling for computational anatomy.
+topologically unfolding the complex anatomical manifold sampled by modern
+medical imaging. By mapping complex imaging data to a symmetric Gaussian base
+distribution, the flow-induced metric ensures that latent straight lines
+approximate geodesic paths in the original data domain. While latent diffusion
+and flow matching achieve high sample quality, they optimize denoising or
+continuous-transport objectives rather than exact log likelihoods, requiring
+multi-step sampling or ODE integration [@lipman2022flowmatching;
+@croitoru2023diffusion_vision_survey; @ho2020ddpm]. By contrast, normalizing
+flows offer an exact, interpretable framework with single-pass inversion,
+exposing multiscale latents for per-level alignment and enabling closed-form
+conditional queries. These advantages point to normalzing flows as an attractive
+framework for likelihood-calibrated multiview modeling for computational
+anatomy.
 
 
 ## Multiview learning with LAMNr flows
@@ -94,16 +95,17 @@ unknown target domain [@Beizaee2025].
 
 Unlike test-time adaptation strategies that require iterative network updates
 during inference [@beizaee2025harmonizingflows], LAMNr flows bridge this gap by
-extending the SiMLR framework into a deep, likelihood-based architecture that
-linearizes the anatomical manifold. Instead of an explicit linear factorization
-in the observation domain, LAMNr maps each view into a shared multiscale latent
-space using normalizing flows, ensuring exact log-likelihoods and bijective
-mappings. By utilizing latent-alignment objectives (e.g., VICReg, InfoNCE) to
-identify shared coordinates, the framework recovers the interpretability of a
-shared/private decomposition within a nonlinear, invertible space. Crucially, by
-modeling the joint latents with a Gaussian distribution, LAMNr flows enable
-closed-form conditional reconstructions. This allows the shared subspace to
-function as a geometrically-informed coordinate system. 
+analogizing the SiMLR framework into a deep, likelihood-based architecture that
+maps the anatomical manifold into a continuous vector space.  Instead of an
+explicit linear factorization in the observation domain, LAMNr flows map each
+view into a shared multiscale latent space, ensuring exact log-likelihoods and
+bijective mappings. By utilizing latent-alignment objectives (e.g., VICReg,
+InfoNCE) to identify shared coordinates, the framework recovers the
+interpretability of a shared/private decomposition within a nonlinear,
+invertible space. Crucially, by modeling the joint latents with a Gaussian
+distribution, LAMNr flows enable closed-form conditional reconstructions. This
+allows the shared subspace to function as a geometrically-informed coordinate
+system. 
 
 Additionally, the development of LAMNr flows represents a strategic evolution in
 ensuring topological integrity within neural density estimators. Historically,
@@ -127,7 +129,7 @@ convergence on more generalized anatomical representations, stabilizing the
 Jacobian determinant and ensuring that the discrete transitions of the Glow
 architecture maintain the smooth, diffeomorphic properties required.
 
-## Bridging Computational Anatomy and Normalizing Flows
+## Bridging computational anatomy and normalizing flows
 
 \begin{figure}[!htbp]
     \centering
@@ -155,24 +157,23 @@ computationally demanding, non-linear registration frameworks to construct
 templates that preserve anatomical consistency.
 
 Normalizing flows offer a transformative theoretical perspective by effectively
-linearizing these nonlinear manifolds through a bijective mapping to a
-symmetric, centered Gaussian base distribution (Figure
-\ref{fig:single_view_flow}). In this latent space, the mathematical properties
-of the Gaussian prior ensure that the mean, mode, and median coincide precisely
-at the origin ($z=0$). Consequently, the inverse mapping of this origin,
-$f^{-1}(0)$, provides a principled, single-pass approximation of the population
-Fréchet mean in the image domain. By anchoring the cohort to this "latent-mean"
-template, the framework establishes an approximate geodesic linearity where the
-deformation path from any subject to the latent center is represented as a
-straight line.
+organizing these nonlinear manifolds through a bijective mapping to a symmetric,
+centered Gaussian base distribution (Figure \ref{fig:single_view_flow}). In this
+latent space, the mathematical properties of the Gaussian prior ensure that the
+mean, mode, and median coincide precisely at the origin ($z=0$). Consequently,
+the inverse mapping of this origin, $f^{-1}(0)$, provides a principled,
+single-pass approximation of the population Fréchet mean in the image domain. By
+anchoring the cohort to this "latent-mean" template, the framework establishes
+an approximate geodesic linearity where the deformation path from any subject to
+the latent center is represented as a straight line.
 
-Beyond template construction, this linearizing framework provides direct
+Beyond template construction, this continuous latent framework provides direct
 analogues to the fundamental metric operations of traditional computational
 anatomy. In classic diffeomorphic frameworks, the transformation between a
 source and target anatomy is governed by integrating a time-varying velocity
 field over a continuous time domain $t \in [0, 1]$. The length of this optimal,
 continuous deformation path establishes the exact geodesic distance between the
-two biological structures. In the LAMNr framework, this computationally
+two biological structures. In the LAMNr flows framework, this computationally
 intensive temporal integration is bypassed in favor of algebraic interpolation
 within the latent space. Traversing the latent manifold between two encoded
 images, $z_0$ and $z_1$, using a scalar interpolation parameter $\alpha \in [0,
@@ -188,14 +189,11 @@ computational anatomy.
 
 \textcolor{red}{Rework when closer to finishing.}
 
-We introduce Latent-Aligned Multiview Normalizing (LAMNr) flows, a general
+We introduce LAMNr flows, a general
 framework for deep computational anatomy that learns shared and private latent
 structures across multiple views while preserving exact likelihoods and
-invertibility. Within LAMNr, each view is equipped with a dedicated flow that
-maps observations to a structured latent space. By anchoring the population to a
-known base distribution, the framework linearizes the anatomical manifold,
-ensuring that the latent origin serves as a principled approximation of the
-population Fréchet mean.
+invertibility. Within LAMNr flows, each view is equipped with a dedicated flow that
+maps observations to a structured latent space. 
 
 Key contributions of this work include:
 
@@ -233,21 +231,3 @@ Evaluations on multimodal MRI and multiview IDP datasets demonstrate that LAMNr
 flows improve calibrated likelihoods and downstream prediction while providing a
 single, exact framework for likelihood-calibrated multiview analysis.
 
-
-
-
-
-
-
-
-<!--
-## High-Dimensional Geometry and Latent Space Navigation
-
-Under this framework, it is intuitive to assume that the inverse mapping of the latent origin, $\hat{x}_0 = f^{-1}(0)$, yields the "most probable" individual and provides a direct, Euclidean equivalent to the CA template. 
-
-However, this assumption fundamentally conflicts with the statistical and geometric realities of high-dimensional spaces. In high-dimensional latent spaces, probability mass does not concentrate at the origin. Instead, the volume of the space grows exponentially with distance from the center, causing almost all drawn samples to fall on a thin spherical shell—often referred to as the typical set or the "soap bubble" effect. Consequently, the latent origin $z=0$ is a highly atypical point containing near-zero probability mass. The inverse mapping $f^{-1}(0)$ must therefore be understood strictly as a barycentric geometric anchor representing a central axis of symmetry for the learned bijection, rather than a statistically representative anatomical mode.
-
-Furthermore, the assumption that Euclidean operations in the latent space seamlessly translate to valid anatomical transformations in the image space is mathematically flawed. The latent space is not a flat Euclidean manifold; its intrinsic distances are governed by a stochastic Riemannian metric induced by the generator's Jacobian, defined as $M_z = J_z^\top J_z$. Because the network non-linearly expands and compresses the data space to maximize likelihood, Euclidean straight lines in the latent space do not correspond to the shortest paths (geodesics) on the underlying image manifold. 
-
-This geometric distortion has immediate, tangible consequences for cohort alignment and interpolation. Linearly interpolating (LERP) between two latent points located on the typical set creates a trajectory that moves inward toward the latent origin. In high dimensions, this "tent-pole" effect forces the interpolation path through unpopulated latent regions of extremely low probability, causing a severe distribution mismatch. The resulting generated images exhibit blurriness, structural artifacts, and anatomical inconsistencies. To rigorously align deep generative models with the principles of computational anatomy, Euclidean operations must be replaced with distribution-preserving mechanisms. Utilizing operations such as spherical linear interpolation (SLERP) ensures that traversals remain on the typical anatomical manifold, preserving structural integrity.
--->

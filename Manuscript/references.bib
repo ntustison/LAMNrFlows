@@ -1,12 +1,35 @@
 %% This BibTeX bibliography file was created using BibDesk.
 %% https://bibdesk.sourceforge.io/
 
-%% Created for Nick Tustison at 2026-02-26 18:38:54 -0800 
+%% Created for Nick Tustison at 2026-03-14 10:46:44 -0700 
 
 
 %% Saved with string encoding Unicode (UTF-8) 
 
 
+
+@article{Tustison:2021aa,
+	abstract = {PURPOSE: To characterize the differences between histogram-based and image-based algorithms for segmentation of hyperpolarized gas lung images.
+METHODS: Four previously published histogram-based segmentation algorithms (ie, linear binning, hierarchical k-means, fuzzy spatial c-means, and a Gaussian mixture model with a Markov random field prior) and an image-based convolutional neural network were used to segment 2 simulated data sets derived from a public (n = 29 subjects) and a retrospective collection (n = 51 subjects) of hyperpolarized 129Xe gas lung images transformed by common MRI artifacts (noise and nonlinear intensity distortion). The resulting ventilation-based segmentations were used to assess algorithmic performance and characterize optimization domain differences in terms of measurement bias and precision.
+RESULTS: Although facilitating computational processing and providing discriminating clinically relevant measures of interest, histogram-based segmentation methods discard important contextual spatial information and are consequently less robust in terms of measurement precision in the presence of common MRI artifacts relative to the image-based convolutional neural network.
+CONCLUSIONS: Direct optimization within the image domain using convolutional neural networks leverages spatial information, which mitigates problematic issues associated with histogram-based approaches and suggests a preferred future research direction. Further, the entire processing and evaluation framework, including the newly reported deep learning functionality, is available as open source through the well-known Advanced Normalization Tools ecosystem.},
+	author = {Tustison, Nicholas J and Altes, Talissa A and Qing, Kun and He, Mu and Miller, G Wilson and Avants, Brian B and Shim, Yun M and Gee, James C and Mugler, 3rd, John P and Mata, Jaime F},
+	date-added = {2026-03-14 10:02:40 -0700},
+	date-modified = {2026-03-14 10:02:40 -0700},
+	doi = {10.1002/mrm.28908},
+	journal = {Magn Reson Med},
+	journal-full = {Magnetic resonance in medicine},
+	keywords = {Advanced Normalization Tools; convolutional neural network; deep learning; functional lung imaging; segmentation},
+	mesh = {Algorithms; Ecosystem; Humans; Image Processing, Computer-Assisted; Lung; Magnetic Resonance Imaging; Retrospective Studies; Semantics; Xenon Isotopes},
+	month = {Nov},
+	number = {5},
+	pages = {2822-2836},
+	pmid = {34227163},
+	pst = {ppublish},
+	title = {Image- versus histogram-based considerations in semantic segmentation of pulmonary hyperpolarized gas images},
+	volume = {86},
+	year = {2021},
+	bdsk-url-1 = {https://doi.org/10.1002/mrm.28908}}
 
 @article{Wen:2023aa,
 	abstract = {Accelerated magnetic resonance (MR) imaging attempts to reduce acquisition time by collecting data below the Nyquist rate. As an ill-posed inverse problem, many plausible solutions exist, yet the majority of deep learning approaches generate only a single solution. We instead focus on sampling from the posterior distribution, which provides more comprehensive information for downstream inference tasks. To do this, we design a novel conditional normalizing flow (CNF) that infers the signal component in the measurement operator's nullspace, which is later combined with measured data to form complete images. Using fastMRI brain and knee data, we demonstrate fast inference and accuracy that surpasses recent posterior sampling techniques for MRI. Code is available at https://github.com/jwen307/mri_cnf.},
@@ -1263,67 +1286,64 @@
 	year = {2025}}
 
 @book{vershynin2018high,
-  title={High-dimensional probability: An introduction with applications in data science},
-  author={Vershynin, Roman},
-  year={2018},
-  publisher={Cambridge university press}
-}
+	author = {Vershynin, Roman},
+	publisher = {Cambridge university press},
+	title = {High-dimensional probability: An introduction with applications in data science},
+	year = {2018}}
 
 @book{blum2020foundations,
-  title={Foundations of data science},
-  author={Blum, Avrim and Hopcroft, John and Kannan, Ravindran},
-  year={2020},
-  publisher={Cambridge University Press}
-}
+	author = {Blum, Avrim and Hopcroft, John and Kannan, Ravindran},
+	publisher = {Cambridge University Press},
+	title = {Foundations of data science},
+	year = {2020}}
 
 @article{white2016sampling,
-  title={Sampling generative networks},
-  author={White, Tom},
-  journal={arXiv preprint arXiv:1609.04468},
-  year={2016}
-}
+	author = {White, Tom},
+	journal = {arXiv preprint arXiv:1609.04468},
+	title = {Sampling generative networks},
+	year = {2016}}
 
 @inproceedings{arvanitidis2018latent,
-  title={Latent Space Oddity: on the Curvature of Deep Generative Models},
-  author={Arvanitidis, Georgios and Hansen, Lars Kai and Hauberg, S{\o}ren},
-  booktitle={International Conference on Learning Representations},
-  year={2018}
-}
+	author = {Arvanitidis, Georgios and Hansen, Lars Kai and Hauberg, S{\o}ren},
+	booktitle = {International Conference on Learning Representations},
+	title = {Latent Space Oddity: on the Curvature of Deep Generative Models},
+	year = {2018}}
 
-@dataset{ds004169:1.0.6,
-  author = {Strike, Lachlan T. AND Blokland, Gabriella A.M. AND Hansell, Narelle K. AND Martin, Nicholas G. AND Toga, Arthur W. AND Thompson, Paul M. AND de Zubicaray, Greig I. AND McMahon, Katie L. AND Wright, Margaret J.},
-  title = {"Queensland Twin IMaging (QTIM)"},
-  year = {2022},
-  doi = {doi:10.18112/openneuro.ds004169.v1.0.6},
-  publisher = {OpenNeuro}
-}
+@article{queensland,
+	author = {Strike, Lachlan T. AND Blokland, Gabriella A.M. AND Hansell, Narelle K. AND Martin, Nicholas G. AND Toga, Arthur W. AND Thompson, Paul M. AND de Zubicaray, Greig I. AND McMahon, Katie L. AND Wright, Margaret J.},
+	date-modified = {2026-03-14 10:46:44 -0700},
+	doi = {doi:10.18112/openneuro.ds004169.v1.0.6},
+	publisher = {OpenNeuro},
+	title = {"Queensland Twin IMaging (QTIM)"},
+	year = {2022},
+	bdsk-url-1 = {https://doi.org/10.18112/openneuro.ds004169.v1.0.6}}
 
 @misc{arvanitidis2021latentspaceodditycurvature,
-      title={Latent Space Oddity: on the Curvature of Deep Generative Models}, 
-      author={Georgios Arvanitidis and Lars Kai Hansen and Søren Hauberg},
-      year={2021},
-      eprint={1710.11379},
-      archivePrefix={arXiv},
-      primaryClass={stat.ML},
-      url={https://arxiv.org/abs/1710.11379}, 
-}
+	archiveprefix = {arXiv},
+	author = {Georgios Arvanitidis and Lars Kai Hansen and S{\o}ren Hauberg},
+	eprint = {1710.11379},
+	primaryclass = {stat.ML},
+	title = {Latent Space Oddity: on the Curvature of Deep Generative Models},
+	url = {https://arxiv.org/abs/1710.11379},
+	year = {2021},
+	bdsk-url-1 = {https://arxiv.org/abs/1710.11379}}
 
 @misc{agustsson2018optimaltransportmapsdistribution,
-      title={Optimal transport maps for distribution preserving operations on latent spaces of Generative Models}, 
-      author={Eirikur Agustsson and Alexander Sage and Radu Timofte and Luc Van Gool},
-      year={2018},
-      eprint={1711.01970},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/1711.01970}, 
-}
+	archiveprefix = {arXiv},
+	author = {Eirikur Agustsson and Alexander Sage and Radu Timofte and Luc Van Gool},
+	eprint = {1711.01970},
+	primaryclass = {cs.LG},
+	title = {Optimal transport maps for distribution preserving operations on latent spaces of Generative Models},
+	url = {https://arxiv.org/abs/1711.01970},
+	year = {2018},
+	bdsk-url-1 = {https://arxiv.org/abs/1711.01970}}
 
 @misc{white2016samplinggenerativenetworks,
-      title={Sampling Generative Networks}, 
-      author={Tom White},
-      year={2016},
-      eprint={1609.04468},
-      archivePrefix={arXiv},
-      primaryClass={cs.NE},
-      url={https://arxiv.org/abs/1609.04468}, 
-}
+	archiveprefix = {arXiv},
+	author = {Tom White},
+	eprint = {1609.04468},
+	primaryclass = {cs.NE},
+	title = {Sampling Generative Networks},
+	url = {https://arxiv.org/abs/1609.04468},
+	year = {2016},
+	bdsk-url-1 = {https://arxiv.org/abs/1609.04468}}

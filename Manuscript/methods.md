@@ -11,9 +11,9 @@
    \centering
    \includegraphics[width=0.99\textwidth]{Figures/lamnr_flows_illustration.pdf} 
    \caption{LAMNr flows architecture and latent alignment. The model processes
-   three data views independently, illustrated by the panels Single-View 1,
-   Single-View 2, and Single-View 3. For each view, the data distribution in the
-   observation space $\mathcal{X}$ is projected to a simplified base
+   three data views independently, illustrated by the panels View 1,
+   View 2, and View 3. For each view, the data distribution in the
+   observation space $\mathcal{X}$ can be mapped to a simplified base
    distribution in the latent space $\mathcal{Z}\sim\mathcal{N}(0,1)$. This
    mapping is performed by the individual normalizing flows sequential bijections
    ($T_1$, $T_2$, $\dots$, $T_n$). Joint alignment optimization is performed on
@@ -23,15 +23,15 @@
    \label{fig:lamnr_flows_illustration}
 \end{figure}
 
-For a single view \(v\), a normalizing flow with parameters \(\theta^{(v)}\) is
-an invertible mapping
+In the LAMNr flows framework, for a single view \(v\), a normalizing flow with
+parameters \(\theta^{(v)}\) is an invertible mapping
 
 \begin{equation}
 f^{(v)}_{\theta} : \mathcal{X}^{(v)} \to \mathcal{Z}^{(v)}, \quad
 z_n^{(v)} = f^{(v)}_{\theta}(x_n^{(v)}),
 \end{equation}
 
-that sends observed data \(x_n^{(v)}\) to a latent space
+that transforms observed data \(x_n^{(v)}\) to a latent space
 \(\mathcal{Z}^{(v)}\) with a simple base density, typically
 \(p_Z(z) = \mathcal{N}(0, I)\). The induced density on \(\mathcal{X}^{(v)}\)
 follows from the change-of-variables formula:
@@ -59,11 +59,9 @@ maximum-likelihood objective is
 \bigl[- \log p_{\theta}(x_n^{(v)})\bigr],
 \end{equation}
 
-where \(\theta = \{\theta^{(v)}\}_{v=1}^V\) collects all view-specific
+where \(\theta = \{\theta^{(v)}\}_{v=1}^V\) represents all view-specific
 parameters. This term ensures that each per-view flow is an exact-likelihood
-model of its corresponding data distribution. The multiview approach of LAMNr
-flows leverages the exposure of latent space provided by RealNVP and Glow
-architectures. For each view and subject we write
+model of its corresponding data distribution. For each view and subject we write
 
 \begin{equation}
 z_n^{(v)} = \bigl[z^{(v)}_{S,n}, \; z^{(v)}_{P,n}\bigr],
@@ -115,11 +113,11 @@ canonical directions per view. Averaging across all view pairs yields per-view
 projectors \(P^{(v)} \in \mathbb{R}^{D \times r}\) defining the shared subspace.
 For HSIC-based screening, we first prefilter coordinates using Pearson
 correlation, then rank remaining dimensions by an unbiased HSIC estimate with
-RBF kernels averaged over other views, and select the top \(r\) per view.
-Alignment losses are applied only to these projected or masked coordinates, so
-that dependence is enforced where cross-view signal is strongest and private
-dimensions remain free to capture view-specific variation. Screening can be
-performed once after warm-up or periodically refreshed during training.
+RBF kernels averaged over other views, and select the top \(r\) dimensions per
+view. Alignment losses are applied only to these projected or masked
+coordinates, so that dependence is enforced where cross-view signal is strongest
+and private dimensions remain free to capture view-specific variation. Screening
+can be performed once after warm-up or periodically refreshed during training.
 
 For a subject-matched minibatch of size \(N\), the full training objective becomes
 
@@ -131,8 +129,8 @@ For a subject-matched minibatch of size \(N\), the full training objective becom
 \Bigl(\bigl\{\phi^{(v)}_{\psi}(z^{(v)}_{S,n})\bigr\}_{v,n}\Bigr),
 \end{equation}
 
-where \(\mathcal{L}_{\text{align}}\) is chosen from Barlow Twins, VICReg,
-InfoNCE, Pearson correlation, or HSIC, and \(\lambda\) controls the strength of
+where \(\mathcal{L}_{\text{align}}\) is one of the available options: Barlow Twins, VICReg,
+InfoNCE, Pearson correlation, or HSIC. \(\lambda\) controls the strength of
 alignment.[^Kendall-Gal] 
 
 [^Kendall-Gal]: 
@@ -169,8 +167,8 @@ $z \sim \mathcal{N}(\mu, WW^\top + \sigma^2 I_D)$, which acts as a
 learnable, geometrically-informed coordinate system. This unified approach
 ensures exact invertibility and facilitates principled latent alignment across
 heterogeneous views.
-(b) Generalized multiscale Glow architecture for imaging data (2-D illustrated,
-3-D also supported).  An input image $x \in \mathbb{R}^{B \times C_1 \times H_1
+(b) Generalized multiscale Glow architecture for imaging data (2D illustrated,
+3D also supported).  An input image $x \in \mathbb{R}^{B \times C_1 \times H_1
 \times W_1}$ is processed through a sequence of levels $\ell = 1, \dots, N$. At
 each level $\ell < N$, a squeeze operation trades spatial resolution for
 channels, followed by a stack of Glow steps (ActNorm, invertible $1 \times 1$
@@ -203,42 +201,43 @@ multiview “whitener” that maps each tabular view to a standardized latent
 \(\varepsilon\) with approximately independent components. Both the raw flow
 latents \(z^{(v)}\) and the whitened coordinates \(\varepsilon^{(v)}\) can be
 exported for downstream Gaussian modeling and diagnostics. This Gaussian–PCA
-base is particularly useful when tabular views have different numbers of
-features. The per-view PCA yields an orthonormal, variance-ordered latent in
-which we can select a common rank $r$ for alignment, producing matched-
-dimension standardized coordinates \(\varepsilon^{(v)} \in \mathbb{R}^r\)
-without altering the exact invertibility of the flow (truncation is used only
-for the alignment head). 
+base distribution is particularly useful when tabular views have different
+numbers of features. The per-view PCA yields an orthonormal, variance-ordered
+latent in which we can select a common rank $r$ for alignment, producing
+matched-dimension standardized coordinates \(\varepsilon^{(v)} \in
+\mathbb{R}^r\) without altering the exact invertibility of the flow as truncation
+is used only for the alignment head. 
 
 ### Image views via Glow-based multiscale flows
 
 For image views we adopt Glow-style discrete normalizing flows with \(L\) levels
-and \(K\) coupling steps per level (see Figure \ref{fig:lamnr_diagrams}(b)). Each step
-comprises: (i) ActNorm layers with data-dependent initialization, (ii)
-invertible \(1 \times 1 (\times 1)\) convolutions parameterized with LU
-factorization for efficient log-determinant computation, and (iii) affine
-coupling layers whose scale and shift fields are predicted by shallow
-convolutional subnetworks with a configurable number of hidden channels. Squeeze
-and split operations provide a multiscale representation in which shallower
-levels capture coarse structure while deeper levels model fine texture. Our
-implementation follows the standard Glow construction, instantiated via a model
-factory in ANTsTorch, with configurable image size (both 2-D and 3-D), number of
-levels \(L\), steps per level \(K\), and hidden channels.[^starflow] 
+and \(K\) coupling steps per level (see Figure \ref{fig:lamnr_diagrams}(b)) and
+a diagonal Gaussian base distribution. Each coupling step comprises: (i) ActNorm
+layers with data-dependent initialization, (ii) invertible \(1 \times 1 (\times
+1)\) convolutions parameterized with LU factorization for efficient
+log-determinant computation, and (iii) affine coupling layers whose scale and
+shift fields are predicted by shallow convolutional subnetworks with a
+configurable number of hidden channels. Squeeze and split operations provide a
+multiscale representation in which shallower levels capture coarse structure
+while deeper levels model fine texture. Our implementation follows the standard
+Glow construction, instantiated via a model factory in ANTsTorch, with
+configurable image size (both 2D and 3D), number of levels \(L\), steps per
+level \(K\), and hidden channels.[^starflow] 
 
 [^starflow]: Recent transformer autoregressive flows such as STARFlow achieve
 strong high-resolution synthesis by operating as a normalizing flow in the
 latent space of a pretrained autoencoder [@gu2025starflow]. This design does not
 provide an exact, per-sample bijection from pixel space to the flow’s latents or
 multiscale per-level latents for analysis, both of which we require for
-per-level alignment and post-hoc Gaussian conditioning.  We therefore adopt
-Glow-style multiscale flows that offer single-pass, exact encoding/decoding in
-image space with explicit latent access [@kingma2018glow].
+per-level alignment and post-hoc Gaussian conditioning.  This motivates our
+adoption of Glow-style multiscale flows that offer single-pass, exact
+encoding/decoding in image space with explicit latent access [@kingma2018glow].
 
-__Base distribution for image latents (Glow-style channel Gaussian).__ For image
-views we use a channel-wise diagonal Gaussian (“Glow base”) with one mean and
-one log-scale per channel, broadcast across spatial locations. Let \(z \in
-\mathbb{R}^{C\times N_1\times \dots \times N_S}\) with \(S\in\{2,3\}\) spatial
-dimensions and \(d=C\prod_{i=1}^S N_i\). The log density is
+As previously mentioned, for image views we use a channel-wise diagonal Gaussian
+(“Glow base”) with one mean and one log-scale per channel, broadcast across
+spatial locations. Let \(z \in \mathbb{R}^{C\times N_1\times \dots \times N_S}\)
+with \(S\in\{2,3\}\) spatial dimensions and \(d=C\prod_{i=1}^S N_i\). The log
+density is
 
 \begin{equation}
 \log p(z)
@@ -252,32 +251,37 @@ spatial indices \(\mathbf{x}\). Compared to a conventional per-voxel diagonal
 Gaussian, tying parameters within each channel reduces degrees of freedom,
 matches Glow’s multiscale semantics, and avoids per-voxel scale collapse.
 
-## High-Dimensional Geometry and Latent Space Navigation
+## High-dimensional geometry and latent space navigation
 
-In the context of the normalizing flow architectures described above, it is
-intuitive to assume that the inverse mapping of the latent origin, $\hat{x}_0 =
-f^{-1}(0)$, yields the "most probable" individual and provides a direct,
-Euclidean equivalent to the traditional computational anatomy template. However,
-this assumption fundamentally conflicts with the statistical and geometric
-realities of high-dimensional spaces. In high-dimensional latent spaces,
-probability mass does not concentrate at the origin. Instead, the volume of the
-space grows exponentially with distance from the center, causing almost all
-drawn samples to fall on a thin spherical shell, often referred to as the
-typical set or the "soap bubble" effect [@vershynin2018high;
-@blum2020foundations]. Consequently, the latent origin $z=0$ is a highly
-atypical point containing near-zero probability mass. The inverse mapping
-$f^{-1}(0)$ must therefore be understood strictly as a barycentric geometric
-anchor representing a central axis of symmetry for the learned bijection, rather
-than a statistically representative anatomical mode.
+In high-dimensional standard normal latent spaces, such as those optimized by
+LAMNr flows ($\mathcal{Z} \sim \mathcal{N}(0, I)$), the geometric properties of
+the data distribution become highly counterintuitive due to the concentration of
+measure phenomenon [@vershynin2018high; @blum2020foundations;
+@white2016sampling]. As dimensionality increases, probability mass does not
+concentrate at the origin; instead, the volume of the space grows exponentially
+with distance from the center, causing the vast majority of the mass to
+concentrate within a narrow spherical shell of radius $\approx \sqrt{d}$. This
+region is often referred to as the typical set [@vershynin2018high;
+@blum2020foundations] or the "soap bubble"[^blogpost] effect. 
 
-Furthermore, the assumption that Euclidean operations in the latent space
-seamlessly translate to valid anatomical transformations in the image space is
-mathematically flawed. The latent space is not a flat Euclidean manifold; its
-intrinsic distances are governed by a stochastic Riemannian metric induced by
-the generator's Jacobian, defined as $M_z = J_z^\top J_z$
-[@arvanitidis2018latent]. Because the network non-linearly expands and
-compresses the data space to maximize likelihood, Euclidean straight lines in
-the latent space do not correspond to the shortest paths (geodesics) on the
+[^blogpost]: https://www.inference.vc/high-dimensional-gaussian-distributions-are-soap-bubble/
+
+Consequently, the latent origin $z=0$ is a highly atypical
+point containing near-zero probability mass. The inverse mapping $f^{-1}(0)$
+must therefore be understood strictly as a barycentric geometric anchor
+representing a central axis of symmetry for the learned bijection, rather than a
+statistically representative anatomical mode.  
+
+
+Furthermore, while the normalizing flow successfully unfolds the global topology
+of the anatomical data, the assumption that Euclidean operations in the latent
+space seamlessly translate to valid anatomical transformations in the image
+space is mathematically flawed. The latent space is not a flat Euclidean
+manifold.  Rather, its intrinsic distances are governed by a stochastic
+Riemannian metric induced by the generator's Jacobian, defined as $M_z =
+J_z^\top J_z$ [@arvanitidis2018latent]. Because the network non-linearly expands
+and compresses the data space to maximize likelihood, Euclidean straight lines
+in the latent space do not correspond to the shortest paths (geodesics) on the
 underlying image manifold. 
 
 This geometric distortion has immediate, tangible consequences for cohort
@@ -287,9 +291,45 @@ the latent origin. In high dimensions, this effect forces the interpolation path
 through unpopulated latent regions of extremely low probability, causing a
 severe distribution mismatch [@agustsson2018optimaltransportmapsdistribution].
 The resulting generated images exhibit blurriness, structural artifacts, and
-anatomical inconsistencies. To rigorously align deep generative models with the
+anatomical inconsistencies. To better align deep generative models with the
 principles of computational anatomy, Euclidean operations must be replaced with
-distribution-preserving mechanisms. Utilizing operations such as spherical
-linear interpolation (SLERP) ensures that traversals remain on the typical
-anatomical manifold, preserving structural integrity [@white2016sampling;
-@agustsson2018optimaltransportmapsdistribution].
+distribution-preserving mechanisms.
+
+To navigate this geometry appropriately, we replace standard linear
+interpolation (LERP) with spherical linear interpolation (SLERP) when traversing
+the latent space between two generated samples $z_1$ and $z_2$
+[@white2016sampling; @agustsson2018optimaltransportmapsdistribution]. For an
+interpolation parameter $t \in [0, 1]$ and the angle $\theta =
+\arccos\left(\frac{z_1 \cdot z_2}{\|z_1\|_2 \|z_2\|_2}\right)$ between the
+vectors, the SLERP trajectory is defined as:
+
+\begin{equation}\text{SLERP}(z_1,
+z_2; t) = \frac{\sin((1-t)\theta)}{\sin(\theta)}z_1 +
+\frac{\sin(t\theta)}{\sin(\theta)}z_2
+\end{equation}
+
+This formulation ensures that the interpolation path strictly follows the
+high-probability manifold, preserving structural integrity. Similarly, we
+adapted our distance metrics based on the evaluation context. When assessing the
+semantic similarity between two individual images within the latent space, we
+default to the geodesic (angular) distance rather than the Euclidean distance.
+The geodesic distance effectively isolates the directional components of the
+vectors:
+
+\begin{equation}
+d_{geo}(z_1, z_2) = \arccos\left( \frac{z_1 \cdot z_2}{|z_1|_2|z_2|_2} \right)
+\end{equation}
+
+This metric captures core semantic features while discarding magnitude
+variations that primarily represent high-dimensional statistical noise. However,
+for measuring a subject's deviation from the normative population, we utilize
+the Mahalanobis distance relative to the Gaussian mean ($\mu = 0$):
+
+\begin{equation} 
+d_M(z) = \sqrt{z^\top\Sigma^{-1} z} 
+\end{equation}
+
+where $\Sigma$ represents the covariance matrix of the reference cohort. In this
+scenario, the radial distance from the origin, captured by the Mahalanobis
+metric, is precisely the signal required to quantify the statistical
+unlikelihood of an abnormal sample.
