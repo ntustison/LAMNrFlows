@@ -19,13 +19,15 @@ $ $
 
 Nicholas J. Tustison\textsuperscript{1,\textrm{\Letter}},
 Brian B. Avants\textsuperscript{1},
+Philip A. Cook\textsuperscript{2},
 \dots\textsuperscript{?},
-James C. Gee\textsuperscript{2},
-James R. Stone\textsuperscript{1}
+James C. Gee\textsuperscript{2}$^\dagger$,
+James R. Stone\textsuperscript{1}$^\dagger$
 \small
 
 \textsuperscript{1}Department of Radiology and Medical Imaging, University of Virginia, Charlottesville, VA \\
 \textsuperscript{2}Department of Radiology, University of Pennsylvania, Philadelphia, PA \\
+
 
 \end{centering}
 
@@ -34,12 +36,16 @@ James R. Stone\textsuperscript{1}
 \noindent\rule{8cm}{0.4pt}
 
 \scriptsize
+$^\dagger$ J.C.G. and J.R.S. are co-senior authors.
+\vspace{0.2 cm}
+
 \Letter$\,$ Corresponding author: \
 
 Nicholas J. Tustison, DSc \
 Department of Radiology and Medical Imaging \
 University of Virginia \
 ntustison@virginia.edu 
+
 
 \normalsize
 

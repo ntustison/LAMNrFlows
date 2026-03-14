@@ -1,6 +1,8 @@
 
 \clearpage
 
+\clearpage
+
 # Methods
 
 ## Normalizing flows and the LAMNr flows multiview formulation
@@ -20,7 +22,6 @@
    $\mathcal{L}_{align}(\{\phi_{v}^{(v)}(z_{S,n}^{(v)})\}_{v,n})$.}
    \label{fig:lamnr_flows_illustration}
 \end{figure}
-
 
 For a single view \(v\), a normalizing flow with parameters \(\theta^{(v)}\) is
 an invertible mapping
@@ -84,7 +85,7 @@ introduced by invertible mixing and harmonizes dimensions across views. By
 restricting alignment to this matched, low-dimensional subspace $D$, we
 stabilize dependence objectives (i.e., latent alignment constraints), avoid
 forcing private directions to align, and integrate CCA/HSIC screening cleanly by
-aligning only the coordinates deemed shared.  We summarize the main options in
+aligning only the coordinates deemed shared. We summarize the main options in
 Table \ref{tab:alignment}. In all cases, the alignment term acts only on shared
 coordinates, leaving private coordinates free to capture view-specific
 variation.[^align] 
@@ -129,7 +130,6 @@ For a subject-matched minibatch of size \(N\), the full training objective becom
 + \lambda \, \mathcal{L}_{\text{align}}
 \Bigl(\bigl\{\phi^{(v)}_{\psi}(z^{(v)}_{S,n})\bigr\}_{v,n}\Bigr),
 \end{equation}
-
 
 where \(\mathcal{L}_{\text{align}}\) is chosen from Barlow Twins, VICReg,
 InfoNCE, Pearson correlation, or HSIC, and \(\lambda\) controls the strength of
@@ -210,11 +210,6 @@ dimension standardized coordinates \(\varepsilon^{(v)} \in \mathbb{R}^r\)
 without altering the exact invertibility of the flow (truncation is used only
 for the alignment head). 
 
-<!-- Whitening also improves the conditioning of the
-covariance estimates used in the conditional-Gaussian step by reducing
-collinearity and stabilizing \(\Sigma_{OO}^{-1}\).  -->
-
-
 ### Image views via Glow-based multiscale flows
 
 For image views we adopt Glow-style discrete normalizing flows with \(L\) levels
@@ -257,4 +252,44 @@ spatial indices \(\mathbf{x}\). Compared to a conventional per-voxel diagonal
 Gaussian, tying parameters within each channel reduces degrees of freedom,
 matches Glow’s multiscale semantics, and avoids per-voxel scale collapse.
 
+## High-Dimensional Geometry and Latent Space Navigation
 
+In the context of the normalizing flow architectures described above, it is
+intuitive to assume that the inverse mapping of the latent origin, $\hat{x}_0 =
+f^{-1}(0)$, yields the "most probable" individual and provides a direct,
+Euclidean equivalent to the traditional computational anatomy template. However,
+this assumption fundamentally conflicts with the statistical and geometric
+realities of high-dimensional spaces. In high-dimensional latent spaces,
+probability mass does not concentrate at the origin. Instead, the volume of the
+space grows exponentially with distance from the center, causing almost all
+drawn samples to fall on a thin spherical shell, often referred to as the
+typical set or the "soap bubble" effect [@vershynin2018high;
+@blum2020foundations]. Consequently, the latent origin $z=0$ is a highly
+atypical point containing near-zero probability mass. The inverse mapping
+$f^{-1}(0)$ must therefore be understood strictly as a barycentric geometric
+anchor representing a central axis of symmetry for the learned bijection, rather
+than a statistically representative anatomical mode.
+
+Furthermore, the assumption that Euclidean operations in the latent space
+seamlessly translate to valid anatomical transformations in the image space is
+mathematically flawed. The latent space is not a flat Euclidean manifold; its
+intrinsic distances are governed by a stochastic Riemannian metric induced by
+the generator's Jacobian, defined as $M_z = J_z^\top J_z$
+[@arvanitidis2018latent]. Because the network non-linearly expands and
+compresses the data space to maximize likelihood, Euclidean straight lines in
+the latent space do not correspond to the shortest paths (geodesics) on the
+underlying image manifold. 
+
+This geometric distortion has immediate, tangible consequences for cohort
+alignment and interpolation. Linearly interpolating (LERP) between two latent
+points located on the typical set creates a trajectory that moves inward toward
+the latent origin. In high dimensions, this effect forces the interpolation path
+through unpopulated latent regions of extremely low probability, causing a
+severe distribution mismatch [@agustsson2018optimaltransportmapsdistribution].
+The resulting generated images exhibit blurriness, structural artifacts, and
+anatomical inconsistencies. To rigorously align deep generative models with the
+principles of computational anatomy, Euclidean operations must be replaced with
+distribution-preserving mechanisms. Utilizing operations such as spherical
+linear interpolation (SLERP) ensures that traversals remain on the typical
+anatomical manifold, preserving structural integrity [@white2016sampling;
+@agustsson2018optimaltransportmapsdistribution].

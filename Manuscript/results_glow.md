@@ -209,13 +209,19 @@ limitations[^comp].
         \label{fig:template_flow}
     \end{subfigure}
 
-    \caption{Comparison of population Fr\'echet mean approximations. (a) The
-    standard ANTsX template, constructed via traditional iterative diffeomorphic
-    registration, representing the conventional spatial average. (b) The generative
-    mean, $f^{-1}_{\theta}(0)$, obtained by mapping the origin of the learned latent
-    Gaussian prior back to the anatomical image space. This flow-generated template
-    intrinsically captures the central morphological tendency of the dataset in a
-    single forward pass.}
+    \caption{Comparison of population Fréchet mean approximations. (a) The standard
+    ANTsX template, constructed via traditional iterative diffeomorphic
+    registration, representing a geometric spatial average that preserves
+    high-frequency structural details. (b) The generative latent-mean,
+    $f_\theta^{-1}(0)$, obtained in a single forward pass. The visually smoother
+    appearance of the flow-generated template is a direct consequence of
+    high-dimensional probabilistic modeling: as the exact mode of the latent
+    distribution, it averages out idiosyncratic, high-frequency anatomical
+    variations (such as specific cortical folding patterns) that do not strictly
+    persist across the cohort. Instead of producing a single typical sample, it
+    successfully isolates the macroscopic central morphological tendency and shared
+    structural signal of the dataset.}
+
     \label{fig:frechet_mean}
 
 \end{figure}
