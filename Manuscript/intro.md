@@ -9,11 +9,11 @@ become the current standard for navigating these high-dimensional spaces,
 certain aspects of contemporary architectures (e.g., intractable likelihoods,
 lack of bijective mappings) limit rigorous statistical analysis. These
 deficiencies can complicate probabilistic calibration, objective comparison, and
-the precise latent manipulations necessary for computational anatomy. For
-instance, Generative Adversarial Networks (GANs) are implicit samplers trained
-with divergence surrogates rather than likelihoods, which precludes calibration
-by exact probabilities [@papamakarios2021nfreview]. Variational Autoencoders
-(VAEs) optimize an evidence lower bound rather than the exact log likelihood
+the precise latent manipulations necessary for computational anatomy. Generative
+Adversarial Networks (GANs), for instance, are implicit samplers trained with
+divergence surrogates rather than likelihoods, which precludes calibration by
+exact probabilities [@papamakarios2021nfreview]. Variational Autoencoders (VAEs)
+optimize an evidence lower bound rather than the exact log likelihood
 [@kobyzev2020nfsurvey]. Diffusion and score-based models rely on denoising or
 score-matching objectives with likelihoods obtained only indirectly
 [@croitoru2023diffusion_vision_survey]. Finally, while autoregressive decoders
@@ -36,13 +36,12 @@ and flow-based density models [@Gomez2017RevNet; @Jacobsen2018iRevNet;
 @dinh2014nice; @rezende2015variational; @dinh2016realnvp; @kingma2016iaf;
 @papamakarios2017maf]. Glow architectures introduced data-dependent
 normalization, invertible $1 \times 1 (\times 1)$ convolutions, and a multiscale
-structure optimized for high-resolution imaging [@kingma2018glow], with
-subsequent variants improving coupling transforms and stability while preserving
-exact likelihoods [@ho2019flowpp; @durkan2019nsf; @behrmann2019resflow;
-@grathwohl2019ffjord]. Recent work has demonstrated that flows scale to
-resolutions and sample qualities comparable to other state-of-the-art generative
-models [@croitoru2023diffusion_vision_survey; @zhai2024tarflow;
-@gu2025starflow].
+structure optimized for imaging [@kingma2018glow], with subsequent variants
+improving coupling transforms and stability while preserving exact likelihoods
+[@ho2019flowpp; @durkan2019nsf; @behrmann2019resflow; @grathwohl2019ffjord].
+Recent work has demonstrated that flows scale to resolutions and sample
+qualities comparable to other state-of-the-art generative models
+[@croitoru2023diffusion_vision_survey; @zhai2024tarflow; @gu2025starflow].
 
 Beyond density estimation, normalizing flows provide a geometric framework for
 topologically unfolding the complex anatomical manifold sampled by modern
@@ -78,7 +77,7 @@ inherent in modern neuroimaging datasets.
 Similarity-driven multilinear reconstruction (SiMLR) captures this joint
 variation in a linear, low-rank setting by projecting multiview data into a
 shared subspace under subject-level similarity constraints
-[@Avants2021NatCompSci]. However, while SiMLR isolates this shared
+[@Avants2021NatCompSci]. While SiMLR isolates this shared
 representation, it treats the remaining view-specific variation as an
 unstructured residual rather than explicitly modeling a private component. This
 separation supports robust cross-view harmonization and prediction by isolating
@@ -113,21 +112,20 @@ enforced smoothness by integrating time-varying velocity fields via Ordinary
 Differential Equations (ODEs). While this continuous formulation guarantees a
 diffeomorphic mapping, the computational cost of ODE integration is often
 prohibitive for large-scale medical imaging applications. To address this, LAMNr
-transitions from the continuous "geodesic flow" of DDNF to the discrete,
-efficient architectures of RealNVP [@dinh2016realnvp] and Glow [@kingma2018glow].
-By aligning disparate modalities and views into a shared latent representation,
-the LAMNr flows model is steered to prioritizing robust, underlying anatomical
-structures over idiosyncratic signal. This latent-alignment acts in synergy with
-specific numerical safeguards, such as bounding the scale parameters within the
-affine coupling layers, to mitigate gradient blow-ups during training.
-Furthermore, the inclusion of training jitter serves as an additional
-regularizer (i.e., "dequantization" [@ho2019flowpp]). By introducing stochastic
-intensity- and shape-based perturbations during the learning phase, the model is
-discouraged from over-fitting to local voxel intensities. Together, these
-constraints force convergence on more generalized anatomical representations,
-stabilizing the Jacobian determinant and ensuring that the discrete transitions
-of the Glow architecture maintain the smooth, diffeomorphic properties required.
-
+uses the discrete, efficient architectures of RealNVP [@dinh2016realnvp] and
+Glow [@kingma2018glow]. By aligning disparate modalities and views into a shared
+latent representation, the LAMNr flows model is steered to prioritizing robust,
+underlying anatomical structures over idiosyncratic signal. This
+latent-alignment acts in synergy with specific numerical safeguards, such as
+bounding the scale parameters within the affine coupling layers, to mitigate
+gradient blow-ups during training. Furthermore, the inclusion of training jitter
+serves as an additional regularizer (i.e., "dequantization" [@ho2019flowpp]). By
+introducing stochastic intensity- and shape-based perturbations during the
+learning phase, the model is discouraged from over-fitting to local voxel
+intensities. Together, these constraints force convergence on more generalized
+anatomical representations, stabilizing the Jacobian determinant and ensuring
+that the discrete transitions of the Glow architecture maintain the smooth,
+diffeomorphic properties required.
 
 
 ## Bridging computational anatomy and normalizing flows
@@ -148,24 +146,37 @@ of the Glow architecture maintain the smooth, diffeomorphic properties required.
 Computational anatomy (CA) is a comprehensive mathematical discipline that
 formalizes the study of biological shape and its variability through the action
 of diffeomorphic transformation groups on anatomical manifolds
-[@GrenanderMiller1998CA;Miller2002LDDMMOverview]. Within this broader
+[@GrenanderMiller1998CA;@Miller2002LDDMMOverview]. Within this broader
 probabilistic and geometric framework, typical population structure is
 represented by a deformable template [@Avants:2010aa]. This template is formally
 established as the Fréchet mean, i.e., a stationary point on a curved manifold
 that minimizes the sum of squared geodesic distances across a cohort.
 Traditionally, the intrinsic curvature of image spaces causes a divergence
 between the Fréchet mean, the Karcher mean, and the statistical mode
-[@Fletcher2009aa]. This divergence necessitates complex, computationally
-demanding, non-linear registration frameworks to construct templates that
-preserve anatomical consistency.
+[@Fletcher2009aa]. This divergence necessitates non-linear registration
+frameworks to construct templates that preserve anatomical consistency.
 
 Normalizing flows offer a transformative theoretical perspective by effectively
 organizing these nonlinear manifolds through a bijective mapping to a symmetric,
-centered Gaussian base distribution (Figure \ref{fig:single_view_flow}). In this
-latent space, the mathematical properties of the Gaussian prior ensure that the
-mean, mode, and median coincide precisely at the origin ($z=0$). Consequently,
-the inverse mapping of this origin, $f^{-1}(0)$, potentially provides a principled,
-single-pass approximation of the population Fréchet mean in the image domain. 
+centered diagonal Gaussian base distribution (Figure
+\ref{fig:single_view_flow}). In this latent space, the mathematical properties
+of the Gaussian prior ensure that the mean, mode, and median coincide precisely
+at the origin ($z=0$). Consequently, the inverse mapping of this origin,
+$f^{-1}(0)$, potentially provides a principled, single-pass approximation of the
+population Fréchet mean in the image domain. Stochastic sampling from this
+learned prior enables the reconstruction of biological diversity by mapping
+latent vectors drawn from the Gaussian distribution back to high-dimensional
+image space [@white2016sampling]. However, while traditional registration-based
+templates (e.g., via Symmetric Normalization [@Avants:2010aa] or Large
+Deformation Diffeomorphic Metric Mapping [@@Miller2002LDDMMOverview]) typically
+preserve high-frequency details through iterative normalization, spatial
+averaging, and sharpening, the generative "latent-mean" template exhibits a
+visually smoother appearance. This smoothness is a direct consequence of
+high-dimensional probabilistic modeling. As the exact mode of the latent
+distribution, the origin averages out idiosyncratic, high-frequency anatomical
+variations, such as individual cortical folding patterns, that do not strictly
+persist across the cohort, thereby isolating the macroscopic structural
+tendencies common to the entire population.
 
 Beyond template construction, this continuous latent framework provides direct
 analogues to the fundamental metric operations of traditional computational

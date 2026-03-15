@@ -11,7 +11,7 @@
    \centering
    \includegraphics[width=0.99\textwidth]{Figures/lamnr_flows_illustration.pdf} 
    \caption{LAMNr flows architecture and latent alignment. The model processes
-   three data views independently, illustrated by the panels View 1,
+   three data views, illustrated by the panels View 1,
    View 2, and View 3. For each view, the data distribution in the
    observation space $\mathcal{X}$ can be mapped to a simplified base
    distribution in the latent space $\mathcal{Z}\sim\mathcal{N}(0,1)$. This
@@ -43,9 +43,9 @@ follows from the change-of-variables formula:
 \end{equation}
 
 which can be evaluated exactly for the RealNVP [@dinh2016realnvp] and Glow
-[@kingma2018glow] architectures used here. Maximum-likelihood estimation chooses
-\(\theta^{(v)}\) to maximize the sum of log-likelihoods over subjects, or
-equivalently to minimize the average negative log-likelihood
+[@kingma2018glow] architectures used in our work. Maximum-likelihood estimation
+chooses \(\theta^{(v)}\) to maximize the sum of log-likelihoods over subjects,
+or equivalently to minimize the average negative log-likelihood
 [@kobyzev2020nfsurvey].
 
 Each subject \(n\) has measurements \(\{x_n^{(v)}\}_{v=1}^V\) across one or more 
