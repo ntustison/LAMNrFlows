@@ -22,7 +22,7 @@ representation [@papamakarios2021nfreview]. Such limitations are particularly
 acute in multimodal and multiview settings, where heterogeneous or missing data
 require calibrated cross-view comparisons and coherent anatomical
 reconstructions.
-"...LAMNr flows bridge this gap by extending the SiMLR framework into a deep, likelihood-based architecture that topologically unfolds the complex anatomical manifold into a continuous vector space."
+
 ## Normalizing flows
 
 Normalizing flows model complex data distributions by composing invertible
@@ -96,12 +96,12 @@ unknown target domain [@Beizaee2025].
 Unlike test-time adaptation strategies that require iterative network updates
 during inference [@beizaee2025harmonizingflows], LAMNr flows bridge this gap by
 analogizing the SiMLR framework into a deep, likelihood-based architecture that
-maps the anatomical manifold into a continuous vector space.  Instead of an
-explicit linear factorization in the observation domain, LAMNr flows map each
-view into a shared multiscale latent space, ensuring exact log-likelihoods and
-bijective mappings. By utilizing latent-alignment objectives (e.g., VICReg,
-InfoNCE) to identify shared coordinates, the framework recovers the
-interpretability of a shared/private decomposition within a nonlinear,
+topologically unfolds the complex anatomical manifold into a continuous vector
+space. Instead of an explicit linear factorization in the observation domain,
+LAMNr flows map each view into a shared multiscale latent space, ensuring exact
+log-likelihoods and bijective mappings. By utilizing latent-alignment objectives
+(e.g., VICReg, InfoNCE) to identify shared coordinates, the framework recovers
+the interpretability of a shared/private decomposition within a nonlinear,
 invertible space. Crucially, by modeling the joint latents with a Gaussian
 distribution, LAMNr flows enable closed-form conditional reconstructions. This
 allows the shared subspace to function as a geometrically-informed coordinate
@@ -128,6 +128,8 @@ from over-fitting to local voxel intensities. Together, these constraints force
 convergence on more generalized anatomical representations, stabilizing the
 Jacobian determinant and ensuring that the discrete transitions of the Glow
 architecture maintain the smooth, diffeomorphic properties required.
+
+
 
 ## Bridging computational anatomy and normalizing flows
 
