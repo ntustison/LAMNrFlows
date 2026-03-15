@@ -47,8 +47,8 @@ models [@croitoru2023diffusion_vision_survey; @zhai2024tarflow;
 Beyond density estimation, normalizing flows provide a geometric framework for
 topologically unfolding the complex anatomical manifold sampled by modern
 medical imaging. By mapping complex imaging data to a symmetric Gaussian base
-distribution, the flow-induced metric ensures that latent straight lines
-approximate geodesic paths in the original data domain. While latent diffusion
+distribution, the flow-induced metric ensures that latent paths
+approximate geodesics in the original data domain. While latent diffusion
 and flow matching achieve high sample quality, they optimize denoising or
 continuous-transport objectives rather than exact log likelihoods, requiring
 multi-step sampling or ODE integration [@lipman2022flowmatching;
@@ -82,16 +82,15 @@ shared subspace under subject-level similarity constraints
 representation, it treats the remaining view-specific variation as an
 unstructured residual rather than explicitly modeling a private component. This
 separation supports robust cross-view harmonization and prediction by isolating
-stable population effects from idiosyncratic noise
+stable population effects from noise
 [@Stone2020BreachersNeuroimaging; @Stone2024USSOCOM]. While deep learning
 approaches have explored cross-modal translation and disentanglement using
 convolutional neural networks, VAEs, or diffusion models [@havaei2016hemis;
 @Chartsias2019SDNet; @yuan2024remind], they often lack the unique combination of
-exact likelihoods and one-shot invertible mappings required for rigorous
-computational anatomy. Recent works have also explored normalizing flows for
-unsupervised MRI harmonization, but utilize the flow purely as a test-time
-density estimator to iteratively adapt an auxiliary translation network to an
-unknown target domain [@Beizaee2025].
+exact likelihoods and one-shot invertible mappings. Recent works have also
+explored normalizing flows for unsupervised MRI harmonization, but utilize the
+flow purely as a test-time density estimator to iteratively adapt an auxiliary
+translation network to an unknown target domain [@Beizaee2025].
 
 Unlike test-time adaptation strategies that require iterative network updates
 during inference [@beizaee2025harmonizingflows], LAMNr flows bridge this gap by
@@ -107,7 +106,7 @@ distribution, LAMNr flows enable closed-form conditional reconstructions. This
 allows the shared subspace to function as a geometrically-informed coordinate
 system. 
 
-Additionally, the development of LAMNr flows represents a strategic evolution in
+Additionally, the development of LAMNr flows provides a practical strategy in
 ensuring topological integrity within neural density estimators. Historically,
 models like Deep Diffeomorphic Normalizing Flows (DDNF) [@salman2018deep]
 enforced smoothness by integrating time-varying velocity fields via Ordinary
@@ -115,19 +114,19 @@ Differential Equations (ODEs). While this continuous formulation guarantees a
 diffeomorphic mapping, the computational cost of ODE integration is often
 prohibitive for large-scale medical imaging applications. To address this, LAMNr
 transitions from the continuous "geodesic flow" of DDNF to the discrete,
-efficient architecture of Glow [@kingma2018glow]. By aligning disparate
-modalities and views into a shared latent representation, the LAMNr flows model
-is steered to prioritizing robust, underlying anatomical structures over
-idiosyncratic noise. This Latent-Alignment acts in synergy with specific
-numerical safeguards, such as bounding the scale parameters within the affine
-coupling layers, to mitigate gradient blow-ups during training. Furthermore, the
-inclusion of training jitter serves as an additional regularizer (i.e.,
-"dequantization" [@ho2019flowpp]). By introducing stochastic intensity- and
-shape-based perturbations during the learning phase, the model is discouraged
-from over-fitting to local voxel intensities. Together, these constraints force
-convergence on more generalized anatomical representations, stabilizing the
-Jacobian determinant and ensuring that the discrete transitions of the Glow
-architecture maintain the smooth, diffeomorphic properties required.
+efficient architectures of RealNVP [@dinh2016realnvp] and Glow [@kingma2018glow].
+By aligning disparate modalities and views into a shared latent representation,
+the LAMNr flows model is steered to prioritizing robust, underlying anatomical
+structures over idiosyncratic signal. This latent-alignment acts in synergy with
+specific numerical safeguards, such as bounding the scale parameters within the
+affine coupling layers, to mitigate gradient blow-ups during training.
+Furthermore, the inclusion of training jitter serves as an additional
+regularizer (i.e., "dequantization" [@ho2019flowpp]). By introducing stochastic
+intensity- and shape-based perturbations during the learning phase, the model is
+discouraged from over-fitting to local voxel intensities. Together, these
+constraints force convergence on more generalized anatomical representations,
+stabilizing the Jacobian determinant and ensuring that the discrete transitions
+of the Glow architecture maintain the smooth, diffeomorphic properties required.
 
 
 
@@ -148,43 +147,42 @@ architecture maintain the smooth, diffeomorphic properties required.
 
 Computational anatomy (CA) is a comprehensive mathematical discipline that
 formalizes the study of biological shape and its variability through the action
-of diffeomorphic transformation groups on anatomical manifolds. Within this
-broader probabilistic and geometric framework, typical population structure is
-represented by a deformable template. This template is formally established as
-the Fréchet mean—a stationary point on a curved manifold that minimizes the sum
-of squared geodesic distances across a cohort. Traditionally, the intrinsic
-curvature of image spaces causes a divergence between the Fréchet mean, the
-Karcher mean, and the statistical mode. This divergence necessitates complex,
-computationally demanding, non-linear registration frameworks to construct
-templates that preserve anatomical consistency.
+of diffeomorphic transformation groups on anatomical manifolds
+[@GrenanderMiller1998CA;Miller2002LDDMMOverview]. Within this broader
+probabilistic and geometric framework, typical population structure is
+represented by a deformable template [@Avants:2010aa]. This template is formally
+established as the Fréchet mean, i.e., a stationary point on a curved manifold
+that minimizes the sum of squared geodesic distances across a cohort.
+Traditionally, the intrinsic curvature of image spaces causes a divergence
+between the Fréchet mean, the Karcher mean, and the statistical mode
+[@Fletcher2009aa]. This divergence necessitates complex, computationally
+demanding, non-linear registration frameworks to construct templates that
+preserve anatomical consistency.
 
 Normalizing flows offer a transformative theoretical perspective by effectively
 organizing these nonlinear manifolds through a bijective mapping to a symmetric,
 centered Gaussian base distribution (Figure \ref{fig:single_view_flow}). In this
 latent space, the mathematical properties of the Gaussian prior ensure that the
 mean, mode, and median coincide precisely at the origin ($z=0$). Consequently,
-the inverse mapping of this origin, $f^{-1}(0)$, provides a principled,
-single-pass approximation of the population Fréchet mean in the image domain. By
-anchoring the cohort to this "latent-mean" template, the framework establishes
-an approximate geodesic linearity where the deformation path from any subject to
-the latent center is represented as a straight line.
+the inverse mapping of this origin, $f^{-1}(0)$, potentially provides a principled,
+single-pass approximation of the population Fréchet mean in the image domain. 
 
 Beyond template construction, this continuous latent framework provides direct
 analogues to the fundamental metric operations of traditional computational
 anatomy. In classic diffeomorphic frameworks, the transformation between a
 source and target anatomy is governed by integrating a time-varying velocity
-field over a continuous time domain $t \in [0, 1]$. The length of this optimal,
+field over a continuous time domain $t \in [0, 1]$ . The length of this optimal,
 continuous deformation path establishes the exact geodesic distance between the
-two biological structures. In the LAMNr flows framework, this computationally
-intensive temporal integration is bypassed in favor of algebraic interpolation
-within the latent space. Traversing the latent manifold between two encoded
-images, $z_0$ and $z_1$, using a scalar interpolation parameter $\alpha \in [0,
-1]$ generates a continuous trajectory of decoded images that closely
-approximates this diffeomorphic flow. Consequently, the distances computed
-directly in the latent space—when properly evaluated via distribution-preserving
-spherical metrics rather than naive Euclidean norms—serve as highly efficient
-surrogates for the complex, deformation-based geodesic distances of traditional
-computational anatomy.
+two biological structures [@Miller2002LDDMMOverview;@Beg2005LDDMM]. In the LAMNr
+flows framework, this computationally intensive temporal integration is bypassed
+in favor of algebraic interpolation within the latent space. Traversing the
+latent manifold between two encoded images, $z_0$ and $z_1$, using a scalar
+interpolation parameter $\alpha \in [0, 1]$ generates a continuous trajectory of
+decoded images that closely approximates this diffeomorphic flow. Consequently,
+the distances computed directly in the latent space, when properly evaluated via
+distribution-preserving spherical metrics rather than naive Euclidean
+norms, serve as highly efficient surrogates for the complex, deformation-based
+geodesic distances of traditional computational anatomy.
 
 
 ## Contributions 
