@@ -183,9 +183,13 @@ def _check_hw_divisible(H: int, W: int, L: int):
         raise ValueError(f"H and W must be divisible by 2**L={r}. Got H={H}, W={W}, L={L}")
 
 def to01(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    # 1. Élimination pure et simple des NaNs/Infs issus de l'augmentation ANTs
+    x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=0.0)
+    # 2. Normalisation Min-Max
     x_min = x.amin(dim=(2, 3), keepdim=True)
     x_max = x.amax(dim=(2, 3), keepdim=True)
-    norm = (x - x_min) / (x_max - x_min + eps)
+    norm = (x - x_min) / (x_max - x_min + eps)    
+    # 3. Sécurité Logit (empécher le 0.0 et 1.0 absolus)
     return torch.clamp(norm, 1e-5, 1.0 - 1e-5)
 
 def bits_per_dim(logp: torch.Tensor, num_dims: int) -> torch.Tensor:
@@ -1559,8 +1563,8 @@ def main():
                     # ATTENTION : Ne recalculez pas zflat ici !
                     lat_flat.append(torch.nan_to_num(zflat))
 
-            if bad_batch or (not torch.isfinite(L_nll)):
-                tqdm.write(f"[nan] skipping update at iter {it} (bad_batch={bad_batch}, L_nll finite={torch.isfinite(L_nll).item()})")
+            if bad_batch or (not torch.isfinite(L_nll)) or abs(float(L_nll.item())) > 100.0:
+                tqdm.write(f"[anomaly] skipping update at iter {it} (bad_batch={bad_batch}, L_nll={float(L_nll.item()):.2f})")
                 bad_update = True
                 break
 

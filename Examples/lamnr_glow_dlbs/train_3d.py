@@ -200,21 +200,23 @@ def _check_hw_divisible(
 
 
 def to01(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """
-    Normalize over all spatial dims.
-
-    Works for both:
-      - 2D: (N, C, H, W)
-      - 3D: (N, C, D, H, W)
-    """
+    # 1. Élimination pure et simple des NaNs/Infs issus de l'augmentation ANTs
+    x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=0.0)
+    
+    # Sécurité : on ignore les tenseurs qui n'ont pas de dimensions spatiales
     if x.ndim < 4:
         return x
+        
+    # 2. Détection dynamique des axes spatiaux (ex: (2, 3) en 2D, (2, 3, 4) en 3D)
     spatial_dims = tuple(range(2, x.ndim))
+    
+    # 3. Normalisation Min-Max
     x_min = x.amin(dim=spatial_dims, keepdim=True)
     x_max = x.amax(dim=spatial_dims, keepdim=True)
     norm = (x - x_min) / (x_max - x_min + eps)
+    
+    # 4. Sécurité Logit (empêcher le 0.0 et 1.0 absolus)
     return torch.clamp(norm, 1e-5, 1.0 - 1e-5)
-
 
 def bits_per_dim(logp: torch.Tensor, num_dims: int) -> torch.Tensor:
     return -logp / (np.log(2.0) * float(num_dims))  # [B]
