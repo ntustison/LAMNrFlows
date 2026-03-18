@@ -93,7 +93,7 @@ python train_3d.py \
   --spatial-dims 3 \
   --L ${L} --K ${K} --hidden ${HIDDEN} \
   --batch ${BATCH} \
-  --val-frac 0.0 \
+  --val-frac 0.1 \
   --max-iter "${ITERATIONS}" \
   --devices ${DEVICES} --precision ${PRECISION} --amp-dtype bf16 \
   --ema --ema-decay 0.9997 \

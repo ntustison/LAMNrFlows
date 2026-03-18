@@ -185,7 +185,8 @@ def _check_hw_divisible(H: int, W: int, L: int):
 def to01(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     x_min = x.amin(dim=(2, 3), keepdim=True)
     x_max = x.amax(dim=(2, 3), keepdim=True)
-    return (x - x_min) / (x_max - x_min + eps)
+    norm = (x - x_min) / (x_max - x_min + eps)
+    return torch.clamp(norm, 1e-5, 1.0 - 1e-5)
 
 def bits_per_dim(logp: torch.Tensor, num_dims: int) -> torch.Tensor:
     return -logp / (np.log(2.0) * float(num_dims))  # [B]

@@ -63,7 +63,7 @@ PLOT_INTERVAL=1000
 # misc
 TRAIN_SAMPLES=3000
 VAL_SAMPLES=128
-VAL_FRAC=0.0
+VAL_FRAC=0.1
 
 # base distribution / scale config
 SCALE_CAP=2.0
