@@ -212,7 +212,8 @@ def to01(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     spatial_dims = tuple(range(2, x.ndim))
     x_min = x.amin(dim=spatial_dims, keepdim=True)
     x_max = x.amax(dim=spatial_dims, keepdim=True)
-    return (x - x_min) / (x_max - x_min + eps)
+    norm = (x - x_min) / (x_max - x_min + eps)
+    return torch.clamp(norm, 1e-5, 1.0 - 1e-5)
 
 
 def bits_per_dim(logp: torch.Tensor, num_dims: int) -> torch.Tensor:
