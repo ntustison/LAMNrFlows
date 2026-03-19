@@ -23,8 +23,8 @@ WARMUP=2000
 WEIGHT_DECAY=1e-6
 
 # --- CONFIG MULTI-GPU ROBUSTE ---
-BATCH=10             # Plus gros batch possible (ajustez selon VRAM)
-GRAD_ACCUM=12         # 32 * 4 = 128 (Batch effectif)
+BATCH=8             # Plus gros batch possible (ajustez selon VRAM)
+GRAD_ACCUM=16         # 32 * 4 = 128 (Batch effectif)
 NUM_WORKERS=8        # Activé car OMP_NUM_THREADS=1 protège du blocage
 # DEVICES="cuda:0,cuda:1"
 DEVICES="cuda:1"
