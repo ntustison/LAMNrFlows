@@ -1894,8 +1894,7 @@ def main():
             for i, z in enumerate(lat_flat):
                 first = next(m for m in projectors[i].net.modules() if isinstance(m, torch.nn.Linear))
 
-            if bad_batch or (not torch.isfinite(L_nll)) or abs(float(L_nll.item())) > 100.0:
-                tqdm.write(f"[anomaly] skipping update at iter {it} (bad_batch={bad_batch}, L_nll={float(L_nll.item()):.2f})")
+            if bad_batch or (not torch.isfinite(L_nll)):
                 bad_update = True
                 break
 
