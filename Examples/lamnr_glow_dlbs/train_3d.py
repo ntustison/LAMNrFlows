@@ -1223,7 +1223,7 @@ def _manual_prior_sample(
     Fallback prior sampling when model.sample is unavailable or unprimed.
 
     Uses model.input_shape to construct a dummy template with the right spatial
-    dimensions, supporting both 2D (C,H,W) and 3D (C,D,H,W).
+    dimensions, supporting both 2D (C,H,W) and 3D (C,H,W,D).
     """
     p = next(model.parameters())
     dev, dt = p.device, torch.float32
@@ -1236,8 +1236,8 @@ def _manual_prior_sample(
                 C, H, W = inp
                 x_shape = (1, C, H, W)
             elif len(inp) == 4:
-                C, D, H, W = inp
-                x_shape = (1, C, D, H, W)
+                C, H, W, D = inp
+                x_shape = (1, C, H, W, D)
             else:
                 x_shape = (1, 1, 64, 64)
         else:
