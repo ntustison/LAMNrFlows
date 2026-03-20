@@ -18,15 +18,15 @@ EXTRA=0                       # phase 2
 TOTAL=$((ITERATIONS + EXTRA))  # horizon for phase-1 aug schedule
 
 # ---------- 3D arch ----------
-H=48
-W=64
-D=56               # depth for 3D Glow
-L=3
+H=64
+W=80
+D=64               # depth for 3D Glow
+L=4
 K=32
-HIDDEN=48
-BATCH=20             # start conservative in 3D; bump if VRAM allows
-GRAD_ACCUM=2
-NUM_WORKERS=8
+HIDDEN=64
+BATCH=6             # start conservative in 3D; bump if VRAM allows
+GRAD_ACCUM=4
+NUM_WORKERS=2
 
 PLATEAU_FACTOR=0.999999
 PLATEAU_PATIENCE=100000

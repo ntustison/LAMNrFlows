@@ -13,7 +13,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 iterations=100000
 
 # model / data
-H=128; W=192; L=5; K=24; hidden=192  # K=32 comme en 3D ? À vous de voir (K=12 était votre valeur 2D)
+H=96; W=128; L=5; K=12; hidden=192  # K=32 comme en 3D ? À vous de voir (K=12 était votre valeur 2D)
 SLICE_IDX=115
 # Note: K=12 est bien pour la 2D, mais vous pouvez monter si la VRAM le permet.
 
@@ -23,8 +23,8 @@ WARMUP=2000
 WEIGHT_DECAY=1e-6
 
 # --- CONFIG MULTI-GPU ROBUSTE ---
-BATCH=8             # Plus gros batch possible (ajustez selon VRAM)
-GRAD_ACCUM=16         # 32 * 4 = 128 (Batch effectif)
+BATCH=48             # Plus gros batch possible (ajustez selon VRAM)
+GRAD_ACCUM=2         # 32 * 4 = 128 (Batch effectif)
 NUM_WORKERS=8        # Activé car OMP_NUM_THREADS=1 protège du blocage
 # DEVICES="cuda:0,cuda:1"
 DEVICES="cuda:1"
@@ -81,9 +81,9 @@ sd_histogram_warping:cos:0.04->0.008@${iterations}"
 
 DLBS_ROOT="/home/ntustison/Data/ds004856/BIDSAlignedToTemplate/"
 
-mapfile -t T1 < <(ls -1 ${DLBS_ROOT}/sub-*/ses-wave1/anat/*T1w.nii.gz | sort)
-mapfile -t T2 < <(ls -1 ${DLBS_ROOT}/sub-*/ses-wave1/anat/*T2w.nii.gz | sort)
-mapfile -t FA < <(ls -1 ${DLBS_ROOT}/sub-*/ses-wave1/dwi/*fa.nii.gz | sort)
+mapfile -t T1 < <(ls -1 ${DLBS_ROOT}/sub-20*/ses-wave1/anat/*T1w.nii.gz | sort)
+mapfile -t T2 < <(ls -1 ${DLBS_ROOT}/sub-20*/ses-wave1/anat/*T2w.nii.gz | sort)
+mapfile -t FA < <(ls -1 ${DLBS_ROOT}/sub-20*/ses-wave1/dwi/*fa.nii.gz | sort)
 
 echo "T1: ${#T1[@]}  T2: ${#T2[@]}  FA: ${#FA[@]}"
 
