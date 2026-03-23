@@ -21,10 +21,12 @@ SLICE_IDX=115
 LR=5e-5
 WARMUP=2000
 WEIGHT_DECAY=1e-6
+LR_DECAY_GAMMA=0.5
+LR_DECAY_STEPS="80000"
 
 # --- CONFIG MULTI-GPU ROBUSTE ---
-BATCH=48             # Plus gros batch possible (ajustez selon VRAM)
-GRAD_ACCUM=2         # 32 * 4 = 128 (Batch effectif)
+BATCH=32             # Plus gros batch possible (ajustez selon VRAM)
+GRAD_ACCUM=3         # 32 * 4 = 128 (Batch effectif)
 NUM_WORKERS=8        # Activé car OMP_NUM_THREADS=1 protège du blocage
 # DEVICES="cuda:0,cuda:1"
 DEVICES="cuda:1"
@@ -81,9 +83,9 @@ sd_histogram_warping:cos:0.04->0.008@${iterations}"
 
 DLBS_ROOT="/home/ntustison/Data/ds004856/BIDSAlignedToTemplate/"
 
-mapfile -t T1 < <(ls -1 ${DLBS_ROOT}/sub-20*/ses-wave1/anat/*T1w.nii.gz | sort)
-mapfile -t T2 < <(ls -1 ${DLBS_ROOT}/sub-20*/ses-wave1/anat/*T2w.nii.gz | sort)
-mapfile -t FA < <(ls -1 ${DLBS_ROOT}/sub-20*/ses-wave1/dwi/*fa.nii.gz | sort)
+mapfile -t T1 < <(ls -1 ${DLBS_ROOT}/sub-*/ses-wave1/anat/*T1w.nii.gz | sort)
+mapfile -t T2 < <(ls -1 ${DLBS_ROOT}/sub-*/ses-wave1/anat/*T2w.nii.gz | sort)
+mapfile -t FA < <(ls -1 ${DLBS_ROOT}/sub-*/ses-wave1/dwi/*fa.nii.gz | sort)
 
 echo "T1: ${#T1[@]}  T2: ${#T2[@]}  FA: ${#FA[@]}"
 
@@ -101,6 +103,7 @@ python train_2d.py \
   --auto-resume \
   --aug-schedules "${aug_params_phase1}" \
   --lr ${LR} --warmup-iters ${WARMUP} \
+  --lr-decay-gamma ${LR_DECAY_GAMMA} --lr-decay-steps ${LR_DECAY_STEPS} \
   --eval-interval ${EVAL_INTERVAL} --plot-interval ${PLOT_INTERVAL} \
   --grad-clip 0.1 \
   --plateau-factor ${PLATEAU_FACTOR} --plateau-patience ${PLATEAU_PATIENCE} \
