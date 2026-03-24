@@ -1,0 +1,316 @@
+#!/bin/bash
+###############################################################################
+# PIPELINE D'INFÉRENCE ET D'ANALYSE LAM-FLOW (2D)
+# Projet : Modélisation Latente Multimodale (T1 / T2 / FA)
+#
+# Description :
+#   Ce script exécute le flux de travail post-entraînement complet pour les 
+#   modèles Normalizing Flow 2D. Il gère l'estimation de la distribution, 
+#   la traduction entre modalités (imputation), la synthèse de templates, 
+#   et la manipulation avancée de l'espace latent (interpolation, scaling).
+###############################################################################
+
+# =============================================================================
+# CONFIGURATION GLOBALE
+# =============================================================================
+
+# Répertoire racine du projet
+base_dir="/Users/ntustison/Desktop/lamnr_glow_dlbs"
+
+# Image de référence cible (Template ANTs) pour l'alignement et l'interpolation
+ants_template="/Users/ntustison/Data/Public/OpenNeuro/ds004856/Template/nki_x.nii.gz"
+
+# Image d'un sujet spécifique pour les tests d'interpolation vers la cible
+example_image="/Users/ntustison/Data/Public/OpenNeuro/ds004856/BIDSAlignedToTemplate/sub-1022/ses-wave1/anat/sub-1022_ses-wave1_acq-MPRAGE_run-1_T1w.nii.gz"
+
+# Hyperparamètres de l'architecture entraînée
+which_experiment="96x128"  
+runs_dir="${base_dir}/runs2d/dlbs_t1_t2flair_fa_${which_experiment}_K12_L5_HC192/"
+ckpt="${runs_dir}/training_state.pt"
+
+# Répertoires de sortie et manifestes
+out_dir="${base_dir}/output${which_experiment}/"
+manifest_dir="${base_dir}/manifests/"
+manifest="${manifest_dir}/manifest.csv"
+manifest_short="${manifest_dir}/manifest_short.csv"
+manifest_lesions="${manifest_dir}/manifest_brats_short.csv"  
+
+# Paramètres d'exécution
+SLICE_INDEX=115
+WHICH_PYTHON="/Users/ntustison/anaconda3/bin/python3"
+DEVICE="cpu"
+
+# Chemins des modèles dérivés
+gaussian_lr="${out_dir}/t1_t2_fa_lowrank.npz"
+gaussian_lr_summary="${out_dir}/t1_t2_fa_lowrank_summary.json"
+dist_csv="${out_dir}/t1_distance_to_gaussian.csv"
+
+echo "========================================================"
+echo " Démarrage du pipeline LAM-Flow 2D (${which_experiment})"
+echo "========================================================"
+
+###############################################################################
+# 1. AJUSTEMENT DU MODÈLE GAUSSIEN (Gauss-Fit)
+# Objectif : Estimer la moyenne multivariée et la matrice de covariance de 
+# l'espace latent (prior). L'estimateur "lowrank" (SVD) est utilisé pour 
+# approximer la covariance sans saturer la RAM. Indispensable pour l'imputation.
+###############################################################################
+
+if [[ ! -f ${gaussian_lr} ]]; then
+  echo "[1] Ajustement de la distribution Gaussienne (Low-Rank SVD)..."
+  cov_mode="perlevel"
+  cov_estimator="full" 
+
+  ${WHICH_PYTHON} lamnr_glow_tool.py gauss-fit \
+    --ckpt ${ckpt} \
+    --manifest ${manifest} \
+    --views T1,T2,FA \
+    --slice-axis 2 --slice-index ${SLICE_INDEX} \
+    --batch 64 --devices ${DEVICE} \
+    --cov-mode ${cov_mode} \
+    --cov-estimator ${cov_estimator} \
+    --rank 256 \
+    --gauss-out ${gaussian_lr} \
+    --gauss-summary ${gaussian_lr_summary}
+else
+  echo "[1] Modèle Gaussien déjà existant. Étape ignorée."
+fi
+
+###############################################################################
+# 2. EXPORTATION DES COUPES 2D (Slicing)
+# Objectif : Extraire la coupe axiale définie par SLICE_INDEX depuis les volumes 
+# NIfTI 3D. Prépare les tenseurs exacts vus par le modèle pour inspection visuelle.
+###############################################################################
+
+manifest_input_dir="${out_dir}/manifest_input/"
+
+if [[ ! -d ${manifest_input_dir} ]]; then
+  echo "[2] Exportation des coupes 2D depuis les volumes 3D..."
+  mkdir -p "${manifest_input_dir}"
+
+  ${WHICH_PYTHON} lamnr_glow_tool.py export-slices \
+    --manifest ${manifest_short} \
+    --slice-axis 2 --slice-index ${SLICE_INDEX} \
+    --views T1,T2,FA \
+    --image-size ${which_experiment} \
+    --outdir ${manifest_input_dir} \
+    --output-format nii.gz
+else
+  echo "[2] Le répertoire d'exportation existe déjà. Étape ignorée."
+fi 
+
+###############################################################################
+# 3. IMPUTATION GAUSSIENNE (Traduction Cross-Modale)
+# Objectif : Prédire une modalité manquante (ex: T1) à partir de modalités 
+# observées (ex: T2, FA). Le modèle utilise l'identité de Woodbury pour calculer 
+# la moyenne conditionnelle exacte (MMSE) dans l'espace latent.
+###############################################################################
+
+# 3A. T2 -> T1
+impute_out_dir="${out_dir}/impute_T1_from_T2/"
+if [[ -d ${impute_out_dir} && $(ls -A ${impute_out_dir}) ]]; then
+  echo "[3a] Imputation T2 -> T1 existante. Étape ignorée."
+else 
+  echo "[3a] Imputation cross-modale : Prédiction de T1 à partir de T2..."
+  mkdir -p "${impute_out_dir}" 
+  ${WHICH_PYTHON} lamnr_glow_tool.py gauss-impute \
+    --ckpt ${ckpt} --gauss ${gaussian_lr} --manifest ${manifest_short} \
+    --views T1,T2,FA --observed T2 --target T1 \
+    --slice-axis 2 --slice-index ${SLICE_INDEX} \
+    --batch 2 --devices ${DEVICE} --outdir "${impute_out_dir}" --output-format nii.gz
+fi
+
+# 3B. FA -> T1, T2
+impute_out_dir="${out_dir}/impute_T1T2_from_FA/"
+if [[ -d ${impute_out_dir} && $(ls -A ${impute_out_dir}) ]]; then
+  echo "[3b] Imputation FA -> T1,T2 existante. Étape ignorée."
+else 
+  echo "[3b] Imputation cross-modale : Prédiction de T1, T2 à partir de FA..."
+  mkdir -p "${impute_out_dir}" 
+  ${WHICH_PYTHON} lamnr_glow_tool.py gauss-impute \
+    --ckpt ${ckpt} --gauss ${gaussian_lr} --manifest ${manifest_short} \
+    --views T1,T2,FA --observed FA --target T1,T2 \
+    --slice-axis 2 --slice-index ${SLICE_INDEX} \
+    --batch 2 --devices ${DEVICE} --outdir "${impute_out_dir}" --output-format nii.gz
+fi
+
+# 3C. T2, FA -> T1
+impute_out_dir="${out_dir}/impute_T1_from_T2FA/"
+if [[ -d ${impute_out_dir} && $(ls -A ${impute_out_dir}) ]]; then
+  echo "[3c] Imputation T2,FA -> T1 existante. Étape ignorée."
+else 
+  echo "[3c] Imputation cross-modale : Prédiction de T1 à partir de T2 et FA..."
+  mkdir -p "${impute_out_dir}" 
+  ${WHICH_PYTHON} lamnr_glow_tool.py gauss-impute \
+    --ckpt ${ckpt} --gauss ${gaussian_lr} --manifest ${manifest_short} \
+    --views T1,T2,FA --observed T2,FA --target T1 \
+    --slice-axis 2 --slice-index ${SLICE_INDEX} \
+    --batch 2 --devices ${DEVICE} --outdir "${impute_out_dir}" --output-format nii.gz
+fi
+
+###############################################################################
+# 4. VÉRIFICATION DE RECONSTRUCTION (Sanity Check)
+# Objectif : Confirmer l'inversibilité parfaite du flux (x <-> z).
+# Génère une grille comparative : [Original | Reconstruit | Erreur Absolue].
+###############################################################################
+
+recon_panel_out="${out_dir}/recon_panel.png"
+if [[ ! -f ${recon_panel_out} ]]; then
+  echo "[4] Génération du panneau de vérification de reconstruction..."
+  ${WHICH_PYTHON} lamnr_glow_tool.py recon \
+    --ckpt ${ckpt} --manifest ${manifest_short} --views T1,T2,FA --view-index 0 \
+    --slice-axis 2 --slice-index ${SLICE_INDEX} --batch 6 --devices ${DEVICE} \
+    --out ${recon_panel_out} 
+else
+  echo "[4] Le panneau de reconstruction existe déjà. Étape ignorée."
+fi   
+
+###############################################################################
+# 5. ÉCHANTILLONNAGE STOCHASTIQUE (Génération)
+# Objectif : Tirer des vecteurs aléatoires depuis la distribution normale et
+# les décoder. La température (variance) module la netteté et la diversité.
+###############################################################################
+
+grid_size="5x5" 
+
+for which_modality in fa t2 t1; do
+   if [[ "${which_modality}" == "fa" ]]; then view_index=2
+   elif [[ "${which_modality}" == "t2" ]]; then view_index=1
+   elif [[ "${which_modality}" == "t1" ]]; then view_index=0
+   fi
+
+   for temp in 0.01 0.25 0.50 0.75 1.00; do
+     sample_output="${out_dir}/Samples/samples_${which_modality}_temp_${temp}.png" 
+     
+     if [[ -f ${sample_output} ]]; then
+       continue
+     fi
+     
+     mkdir -p $(dirname "${sample_output}")
+     echo "[5] Échantillonnage (${which_modality}) à température = ${temp}..."
+     
+     ${WHICH_PYTHON} lamnr_glow_tool.py sample \
+       --ckpt ${ckpt} --view-index ${view_index} --sample-grid-size ${grid_size} \
+       --image-size ${which_experiment} --temperature ${temp} \
+       --devices ${DEVICE} --sample-grid-out "${sample_output}" --seed $RANDOM
+   done 
+done
+
+###############################################################################
+# 6. RECONSTRUCTION DE TEMPLATE (Atlas de Population)
+# Objectif : Décoder le vecteur latent moyen (mu). L'échantillonnage de 
+# Monte-Carlo (--mc-samples) ajoute une micro-variance moyennée pour obtenir 
+# un atlas extrêmement net et dépourvu de bruit haute fréquence.
+###############################################################################
+
+output_template="${out_dir}/template_T1_mu_sharpened.png"
+if [[ ! -f ${output_template} ]]; then
+  echo "[6] Génération du template de population (Moyenne Latente)..."
+  ${WHICH_PYTHON} lamnr_glow_tool.py recon-template \
+    --ckpt ${ckpt} --gauss ${gaussian_lr} --views T1 --view-index 0 \
+    --mc-samples 10 --mc-temp 0.01 --out "${output_template}" \
+    --sharpen-image --devices ${DEVICE} --seed ${RANDOM}
+else
+  echo "[6] Le template de population existe déjà. Étape ignorée."
+fi  
+
+###############################################################################
+# 7. INTERPOLATION LATENTE (Morphing Géodésique)
+# Objectif : Calculer une trajectoire linéaire dans l'espace latent entre 
+# deux cerveaux, produisant un morphing non-linéaire (anatomiquement continu) 
+# dans l'espace de l'image.
+###############################################################################
+
+# 7A. Trajectoire : Sujet -> Cerveau Moyen
+echo "[7A] Interpolation (Sujet -> Moyenne de Population)..."
+for t_val in 0.00 0.25 0.50 0.75 1.00; do
+  output_interp="${out_dir}/interpolation/interp_mean_t${t_val}.nii.gz"
+  if [[ -f ${output_interp} ]]; then continue; fi
+  
+  mkdir -p $(dirname "${output_interp}") 
+  ${WHICH_PYTHON} lamnr_glow_tool.py recon-interpolate \
+    --ckpt ${ckpt} --gauss ${gaussian_lr} --source-image ${example_image} \
+    --views T1 --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
+    --t ${t_val} --interp-level 0,1.0 --interp-level 1,1.0 --out "${output_interp}"
+done
+
+# 7B. Trajectoire : Sujet -> Template ANTs
+echo "[7B] Interpolation (Sujet -> Image Cible Spécifique)..."
+for t_val in 0.00 0.25 0.50 0.75 1.00; do
+  output_interp="${out_dir}/interpolation/inter_dlbs_example_t${t_val}.nii.gz"
+  if [[ -f ${output_interp} ]]; then continue; fi
+  
+  mkdir -p $(dirname "${output_interp}")
+  ${WHICH_PYTHON} lamnr_glow_tool.py recon-interpolate \
+    --ckpt ${ckpt} --gauss ${gaussian_lr} --source-image ${ants_template} \
+    --target-image ${example_image} --views T1 \
+    --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
+    --t ${t_val} --out "${output_interp}" 
+done
+
+###############################################################################
+# 8. DISTANCES LATENTES (Détection d'Anomalies)
+# Objectif : Calculer la distance géodésique ou euclidienne de chaque sujet par 
+# rapport au centre de la distribution. Isole les sujets atypiques (outliers).
+###############################################################################
+
+if [[ ! -f ${dist_csv} ]]; then
+  echo "[8] Calcul des distances latentes par rapport au modèle Gaussien..."
+  ${WHICH_PYTHON} lamnr_glow_tool.py calc-distance \
+    --ckpt ${ckpt} --gauss ${gaussian_lr} --manifest ${manifest} \
+    --views T1 --slice-axis 2 --slice-index ${SLICE_INDEX} \
+    --out "${dist_csv}" --distance-metric geodesic --devices ${DEVICE} --save-levels 
+else
+  echo "[8] Le fichier CSV de distances existe déjà. Étape ignorée."
+fi
+
+###############################################################################
+# 9. MISE À L'ÉCHELLE PAR TEMPÉRATURE (Temperature Scaling des Lésions)
+# Objectif : Contracter l'espace latent (tau < 1.0) pour forcer une image 
+# pathologique à se rapprocher du manifold sain. L'application par niveau 
+# permet de cibler des bandes de fréquences spécifiques (L0 = micro-structures, 
+# L5 = macro-géométrie globale).
+###############################################################################
+
+# 9A. Scaling L0 (Micro-structures)
+for tau in 0.01 0.25 0.50 0.75 0.95 0.99; do
+  output_temp="${out_dir}/temperature/recon_temperature_L0_tau${tau}.nii.gz"
+  if [[ ! -f ${output_temp} ]]; then
+    echo "[9A] Temperature Scaling (Niveau 0) avec tau=${tau}..."
+    mkdir -p $(dirname "${output_temp}")
+    ${WHICH_PYTHON} lamnr_glow_tool.py recon-temperature \
+      --ckpt ${ckpt} --manifest ${manifest_lesions} --views T1 \
+      --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
+      --out "${output_temp}" --tau-level 0,${tau}
+  fi 
+done
+
+# 9B. Scaling L5 (Macro-structure globale)
+for tau in 0.01 0.25 0.50 0.75 0.95 0.99; do
+  output_temp="${out_dir}/temperature/recon_temperature_L5_tau${tau}.nii.gz"
+  if [[ ! -f ${output_temp} ]]; then
+    echo "[9B] Temperature Scaling (Niveau 5) avec tau=${tau}..."
+    mkdir -p $(dirname "${output_temp}")
+    ${WHICH_PYTHON} lamnr_glow_tool.py recon-temperature \
+      --ckpt ${ckpt} --manifest ${manifest_lesions} --views T1 \
+      --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
+      --out "${output_temp}" --tau-level 5,${tau}
+   fi  
+done
+
+# 9C. Scaling Global (Tous les niveaux)
+for tau in 0.01 0.25 0.50 0.75 0.95 0.99; do
+  output_temp="${out_dir}/temperature/recon_temperature_Global_tau${tau}.nii.gz"
+  if [[ ! -f ${output_temp} ]]; then
+    echo "[9C] Temperature Scaling Global avec tau=${tau}..."
+    mkdir -p $(dirname "${output_temp}")
+    ${WHICH_PYTHON} lamnr_glow_tool.py recon-temperature \
+      --ckpt ${ckpt} --manifest ${manifest_lesions} --views T1 \
+      --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
+      --out "${output_temp}" --tau ${tau}
+  fi
+done
+
+echo "========================================================"
+echo " Pipeline 2D terminé."
+echo "========================================================"
