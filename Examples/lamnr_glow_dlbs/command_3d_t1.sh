@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # --- SOLUTION ANTI-BLOCAGE ---
-export OMP_NUM_THREADS=8
-export MKL_NUM_THREADS=8
-export OPENBLAS_NUM_THREADS=8
-export ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS=8
+export OMP_NUM_THREADS=4
+export MKL_NUM_THREADS=4
+export OPENBLAS_NUM_THREADS=4
+export ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS=4
 # -----------------------------
 
 # --- SOLUTION ANTI-FRAGMENTATION (Ajoutez ceci) ---
@@ -13,20 +13,20 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # --------------------------------------------------
 
 # ---------- total steps ----------
-ITERATIONS=100000              # phase 1
+ITERATIONS=300000              # phase 1
 EXTRA=0                       # phase 2
 TOTAL=$((ITERATIONS + EXTRA))  # horizon for phase-1 aug schedule
 
 # ---------- 3D arch ----------
-H=48
-W=64
-D=56               # depth for 3D Glow
-L=3
+H=64
+W=80
+D=64               # depth for 3D Glow
+L=4
 K=32
-HIDDEN=48
-BATCH=20             # start conservative in 3D; bump if VRAM allows
-GRAD_ACCUM=2
-NUM_WORKERS=8
+HIDDEN=64
+BATCH=8             # start conservative in 3D; bump if VRAM allows
+GRAD_ACCUM=4
+NUM_WORKERS=2
 
 PLATEAU_FACTOR=0.999999
 PLATEAU_PATIENCE=100000
@@ -57,6 +57,13 @@ SAMPLE_TEMP=0.5
 EVAL_INTERVAL=1000
 PLOT_INTERVAL=1000
 
+# base distribution / scale config
+SCALE_CAP=1.0
+GLOWBASE_MIN_LOG=-5.0
+GLOWBASE_MAX_LOG=5.0
+GLOWBASE_LOGSCALE_FACTOR=1.0
+SCALE_MAP="tanh"
+
 # Optimization
 LR=2.5e-5      
 WARMUP=2000 
@@ -65,20 +72,17 @@ PRECISION="float" # "float" required for multiple GPUs
 
 # ---------- augmentation schedules ----------
 
-# Phase 1: original decreasing schedule (strong -> weak)
-AUG_PARAMS_PHASE1="noise_std:cos:0.05->0.004@${TOTAL},\
-sd_affine:cos:0.05->0.00@$((TOTAL)),\
-sd_deformation:linear:12.0->0.6@$((TOTAL)),\
-sd_simulated_bias_field:cos:0.20->0.03@${TOTAL},\
-sd_histogram_warping:cos:0.04->0.008@${TOTAL}"
+# Augmentation schedule - MISE À JOUR : RAMPE VERS UN PALIER BAS, PAS ZÉRO
+# noise_std:cos:0.05->0.01 : Maintient un bruit résiduel (0.01) pour la robustesse
+# sd_deformation:linear:12.0->0.5 : Maintient une déformation légère résiduelle (0.5)
+# sd_simulated_bias_field:cos:0.20->0.05 : Maintient un biais léger résiduel (0.05)
+# sd_histogram_warping:cos:0.04->0.01 : Maintient un warping léger résiduel (0.01)
+aug_params_phase1="noise_std:cos:0.05->0.01@${ITERATIONS},\
+sd_affine:cos:0.05->0.005@${ITERATIONS},\
+sd_deformation:linear:12.0->0.5@${ITERATIONS},\
+sd_simulated_bias_field:cos:0.20->0.05@${ITERATIONS},\
+sd_histogram_warping:cos:0.04->0.01@${ITERATIONS}"
 
-# Phase 2: template-focused fine-tune (no shape; mild intensity jitter)
-AUG_PARAMS_PHASE2="\
-noise_std:cos:0.004->0.004@${EXTRA},\
-sd_affine:cos:0.00->0.00@${EXTRA},\
-sd_deformation:linear:0.0->0.0@${EXTRA},\
-sd_simulated_bias_field:cos:0.00->0.00@${EXTRA},\
-sd_histogram_warping:cos:0.004->0.004@${EXTRA}"
 
 DLBS_ROOT="/home/ntustison/Data/ds004856/BIDSAlignedToTemplate/"
 
@@ -89,43 +93,35 @@ echo "T1: ${#T1[@]}"
 # ---------- Phase 1: strong -> weak aug ----------
 python train_3d.py \
   --view "${T1[@]}" \
-  --H ${H} --W ${W} --D ${D} \
+  --H ${H} --W ${W} --D ${D} --L ${L} --K ${K} --hidden ${HIDDEN} \
   --spatial-dims 3 \
-  --L ${L} --K ${K} --hidden ${HIDDEN} \
   --batch ${BATCH} \
+  --grad-accum ${GRAD_ACCUM} \
   --val-frac 0.1 \
-  --max-iter "${ITERATIONS}" \
+  --max-iter ${ITERATIONS} \
   --devices ${DEVICES} --precision ${PRECISION} --amp-dtype bf16 \
   --ema --ema-decay 0.9997 \
   --auto-resume \
-  --aug-schedules "${AUG_PARAMS_PHASE1}" \
-  --lr ${LR} --warmup-iters ${WARMUP} \
-  --lr-decay-gamma 1.0 \
-  --lr-decay-steps 0 \
+  --aug-schedules "${aug_params_phase1}" \
+  --lr 2.5e-5 --warmup-iters 5000 \
   --eval-interval ${EVAL_INTERVAL} --plot-interval ${PLOT_INTERVAL} \
-  --grad-clip 1.0 \
+  --grad-clip 0.1 \
   --plateau-factor ${PLATEAU_FACTOR} --plateau-patience ${PLATEAU_PATIENCE} \
   --plateau-threshold ${PLATEAU_THRESHOLD} --plateau-cooldown ${PLATEAU_COOLDOWN} \
-  --grad-accum ${GRAD_ACCUM} \
-  --train-samples 3000 --val-samples 128 \
   --smooth-alpha 0.05 \
-  --sample-mode model \
-  --sample-temp ${SAMPLE_TEMP} \
-  --weighting fixed \
-  --align "${ALIGN}" \
-  --align-weight "${ALIGN_WEIGHT}" \
-  --align-warmup "${ALIGN_WARMUP}" \
+  --sample-mode model --sample-temp ${SAMPLE_TEMP} \
+  --align "${ALIGN}" --align-weight "${ALIGN_WEIGHT}" \
+  --align-warmup 1000 \
   --vicreg-inv "${ALIGN_VICREG_INV}" \
   --vicreg-var "${ALIGN_VICREG_VAR}" \
   --vicreg-cov "${ALIGN_VICREG_COV}" \
   --vicreg-gamma "${ALIGN_VICREG_GAMMA}" \
-  --proj-hidden 320 --proj-dim 256 \
-  --screen "${SCREEN_METHOD}" \
-  --screen-warmup "${SCREEN_WARMUP}" \
-  --screen-refresh "${SCREEN_REFRESH}" \
-  --screen-frac "${SCREEN_FRAC}" \
-  --cca-ridge "${CCA_RIDGE}" \
-  --prefilter-frac "${PREFILTER_FRAC}" \
+  --scale-cap ${SCALE_CAP} \
+  --glowbase-max-log ${GLOWBASE_MAX_LOG} \
+  --glowbase-min-log ${GLOWBASE_MIN_LOG} \
+  --out-dir ${OUTDIR} \
   --num-workers ${NUM_WORKERS} \
-  --out-dir "${OUTDIR}"
+  --scale-map ${SCALE_MAP} \
+  --lr-decay-gamma 0.5 \
+  --lr-decay-steps 200000
 

@@ -13,7 +13,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 iterations=100000
 
 # model / data
-H=128; W=192; L=5; K=24; hidden=192  # K=32 comme en 3D ? À vous de voir (K=12 était votre valeur 2D)
+H=96; W=128; L=5; K=12; hidden=192  # K=32 comme en 3D ? À vous de voir (K=12 était votre valeur 2D)
 SLICE_IDX=115
 # Note: K=12 est bien pour la 2D, mais vous pouvez monter si la VRAM le permet.
 
@@ -21,10 +21,12 @@ SLICE_IDX=115
 LR=5e-5
 WARMUP=2000
 WEIGHT_DECAY=1e-6
+LR_DECAY_GAMMA=0.5
+LR_DECAY_STEPS="80000"
 
 # --- CONFIG MULTI-GPU ROBUSTE ---
-BATCH=8             # Plus gros batch possible (ajustez selon VRAM)
-GRAD_ACCUM=16         # 32 * 4 = 128 (Batch effectif)
+BATCH=32             # Plus gros batch possible (ajustez selon VRAM)
+GRAD_ACCUM=3         # 32 * 4 = 128 (Batch effectif)
 NUM_WORKERS=8        # Activé car OMP_NUM_THREADS=1 protège du blocage
 # DEVICES="cuda:0,cuda:1"
 DEVICES="cuda:1"
@@ -101,6 +103,7 @@ python train_2d.py \
   --auto-resume \
   --aug-schedules "${aug_params_phase1}" \
   --lr ${LR} --warmup-iters ${WARMUP} \
+  --lr-decay-gamma ${LR_DECAY_GAMMA} --lr-decay-steps ${LR_DECAY_STEPS} \
   --eval-interval ${EVAL_INTERVAL} --plot-interval ${PLOT_INTERVAL} \
   --grad-clip 0.1 \
   --plateau-factor ${PLATEAU_FACTOR} --plateau-patience ${PLATEAU_PATIENCE} \
