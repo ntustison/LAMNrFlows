@@ -25,7 +25,7 @@ reconstructions.
 ## Normalizing flows
 
 Normalizing flows model complex data distributions by composing invertible
-transformations that map input data to their corresponding latents. his
+transformations that map input data to their corresponding latents. This
 bijective design simultaneously yields exact likelihoods via the
 change-of-variables formula, single-pass inversion, and direct access to latent
 variables that can be manipulated and decoded without approximation
@@ -47,8 +47,8 @@ medical imaging. By mapping complex imaging data to a symmetric Gaussian base
 distribution, the flow-induced metric ensures that latent paths
 approximate geodesics in the original data domain. 
 
-The bijective nature of these models also enables the synthesis of biological
-diversity through stochastic sampling, where latent vectors drawn from the
+The bijective aspect of these models also enables the synthesis of biological
+variation through stochastic sampling, where latent vectors drawn from the
 Gaussian prior are mapped back to the high-dimensional image space. While latent
 diffusion and flow matching achieve high sample quality, they optimize denoising
 or continuous-transport objectives rather than exact log likelihoods, requiring
@@ -67,13 +67,12 @@ distinct acquisition or feature space ("view") contributes unique, view-specific
 information, and second, that shared information across views can be distilled
 into lower-dimensional projections to improve calibration and cross-cohort
 comparability. Traditionally, these shared projections have been estimated using
-classical correlation-based methods such as Canonical Correlation Analysis (CCA)
+classical correlation-based methods, such as Canonical Correlation Analysis (CCA)
 [@Hotelling1936CCA; @Hardoon2004CCAOverview]. More recently, kernel-based
 measures like the Hilbert–Schmidt Independence Criterion (HSIC)
-[@gretton2005hsic] and learned alignment objectives,including Barlow Twins,
+[@gretton2005hsic] and learned alignment objectives, including Barlow Twins,
 VICReg, and InfoNCE [@zbontar2021barlow; @bardes2021vicreg; @oord2018cpc], have
-expanded these capabilities to accommodate more complex, linear and non-linear 
-patterns.
+expanded these capabilities to accommodate more complex patterns.
 
 Similarity-driven multilinear reconstruction (SiMLR) captures this joint
 variation in a linear, low-rank setting by projecting multiview data into a
@@ -120,13 +119,13 @@ underlying anatomical structures over idiosyncratic signal. This
 latent-alignment acts in synergy with specific numerical safeguards, such as
 bounding the scale parameters within the affine coupling layers, to mitigate
 gradient blow-ups during training. Furthermore, the inclusion of training jitter
-serves as an additional regularizer (i.e., "dequantization" [@ho2019flowpp]). By
-introducing stochastic intensity- and shape-based perturbations during the
-learning phase, the model is discouraged from over-fitting to local voxel
-intensities. Together, these constraints force convergence on more generalized
-anatomical representations, stabilizing the Jacobian determinant and ensuring
-that the discrete transitions of the Glow architecture maintain the smooth,
-diffeomorphic properties required.
+serves as an additional regularizer (i.e., "dequantization" [@ho2019flowpp]). In
+the imaging context (i.e., Glow-based models), by introducing stochastic
+intensity- and shape-based perturbations during the learning phase, the model is
+discouraged from over-fitting to local voxel intensities. Together, these
+constraints force convergence on more generalized anatomical representations,
+stabilizing the Jacobian determinant and ensuring that the discrete transitions
+of the Glow architecture maintain the smooth, diffeomorphic properties required.
 
 
 ## Bridging computational anatomy and normalizing flows
@@ -181,27 +180,28 @@ defined as the empirical average of the latent representations across a cohort,
 which is then decoded back to the image domain. In the small-variance or locally
 linear regime, these constructions coincide up to second-order terms, linking
 both latent-space definitions to Fréchet means in the induced image metric
-[@Pennec2006; @arvanitidis2018latent]. Such template definitions typically
-exhibit increased anatomical details similar to their registration-based analogs.
+[@Pennec2006; @arvanitidis2018latent]. This latter template definition typically
+exhibits increased anatomical details similar to the registration-based analogs.
 
 Beyond template construction, this continuous latent framework provides direct
 analogues to the fundamental metric operations of traditional computational
-anatomy. For example, in classic diffeomorphic frameworks, the transformation between a
-source and target anatomy is governed by integrating a time-varying velocity
-field over a continuous time domain $t \in [0, 1]$ . The length of this optimal,
-continuous deformation path establishes the exact geodesic distance between the
-two biological structures [@Miller2002LDDMMOverview;@Beg2005LDDMM]. In the LAMNr
-flows framework, this computationally intensive temporal integration is bypassed
-in favor of algebraic interpolation within the latent space. Traversing the
-latent manifold between two encoded images, $z_0$ and $z_1$, using a scalar
-interpolation parameter $\alpha \in [0, 1]$ generates a continuous trajectory of
-decoded images that closely approximates this diffeomorphic flow. Consequently,
-the distances computed directly in the latent space, when properly evaluated via
-distribution-preserving spherical metrics rather than naive Euclidean
-norms, serve as highly efficient surrogates for the complex, deformation-based
-geodesic distances of traditional computational anatomy.  This conceptualization, 
-along with other illustrative results, are discussed and provided below in the
-context of our proposed LAMNr flows framework.  
+anatomy. For example, in classic diffeomorphic frameworks, the transformation
+between a source and target anatomy is governed by integrating a time-varying
+velocity field over a continuous time domain $t \in [0, 1]$ . The length of this
+optimal, continuous deformation path establishes the exact geodesic distance
+between the two biological structures [@Miller2002LDDMMOverview;@Beg2005LDDMM].
+In the LAMNr flows framework, this computationally intensive temporal
+integration is replaced with an algebraic interpolation within the latent space.
+Traversing the latent manifold between two encoded images, $z_0$ and $z_1$,
+using a scalar interpolation parameter $\alpha \in [0, 1]$ generates a
+continuous trajectory of decoded images that closely approximates this
+diffeomorphic flow. Consequently, the distances computed directly in the latent
+space, when properly evaluated via distribution-preserving spherical metrics
+rather than naive Euclidean norms, serve as highly efficient surrogates for the
+complex, deformation-based geodesic distances of traditional computational
+anatomy.  This conceptualization, along with other illustrative results, are
+discussed and provided below in the context of our proposed LAMNr flows
+framework.  
 
 
 ## Contributions 

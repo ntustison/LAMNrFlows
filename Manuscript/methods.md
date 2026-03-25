@@ -134,17 +134,17 @@ InfoNCE, Pearson correlation, or HSIC. \(\lambda\) controls the strength of
 alignment.[^Kendall-Gal] 
 
 [^Kendall-Gal]: 
-In some experiments we replaced the fixed weighting, \(\lambda\), by learned task weights
-following the homoscedastic aleatoric uncertainty scheme of Kendall and Gal
-[@kendall2018mtl]. In this formulation, each loss term \(L_i\) is scaled
-as \(e^{-s_i} L_i + s_i\), where \(s_i = \log \sigma_i^2\) represents
+In some early experiments we replaced the fixed weighting, \(\lambda\), by
+learned task weights following the homoscedastic aleatoric uncertainty scheme of
+Kendall and Gal [@kendall2018mtl]. In this formulation, each loss term \(L_i\)
+is scaled as \(e^{-s_i} L_i + s_i\), where \(s_i = \log \sigma_i^2\) represents
 task-dependent aleatoric (data) uncertainty, as opposed to epistemic (model)
 uncertainty [@Hullermeier2021UncertaintyReview]. While this can automatically
 balance losses with different units, in our multiview setting it tended to
 inflate the alignment variance and drive the effective alignment weight
-\(e^{-s_{\text{align}}}\) toward zero, effectively suppressing latent
-alignment. For clarity and robustness we therefore report results using a fixed
-\(\lambda\) schedule in the main experiments.
+\(e^{-s_{\text{align}}}\) toward zero, effectively suppressing latent alignment.
+Therefore, we report results using a fixed \(\lambda\) schedule in the main
+experiments.
 
 
 ## View-specific flow architectures
@@ -183,7 +183,7 @@ image dimensionality.
 
 ### Tabular/IDP views via RealNVP
 
-For imaging-derived phenotypes (IDPs) and other tabular blocks, we use
+For imaging-derived phenotypes (IDPs) and other tabular data, we use
 single-scale flows based on RealNVP and masked autoregressive flows (MAF) with
 affine couplings and masked multilayer perceptrons. Continuous variables are
 preprocessed per view using dataset-owned normalization and imputation:
@@ -233,11 +233,10 @@ per-level alignment and post-hoc Gaussian conditioning.  This motivates our
 adoption of Glow-style multiscale flows that offer single-pass, exact
 encoding/decoding in image space with explicit latent access [@kingma2018glow].
 
-As previously mentioned, for image views we use a channel-wise diagonal Gaussian
-(“Glow base”) with one mean and one log-scale per channel, broadcast across
-spatial locations. Let \(z \in \mathbb{R}^{C\times N_1\times \dots \times N_S}\)
-with \(S\in\{2,3\}\) spatial dimensions and \(d=C\prod_{i=1}^S N_i\). The log
-density is
+For image views we use a channel-wise diagonal Gaussian (“Glow base”) with one
+mean and one log-scale per channel, broadcast across spatial locations. Let \(z
+\in \mathbb{R}^{C\times N_1\times \dots \times N_S}\) with \(S\in\{2,3\}\)
+spatial dimensions and \(d=C\prod_{i=1}^S N_i\). The log density is
 
 \begin{equation}
 \log p(z)
@@ -250,6 +249,8 @@ where \(\mu_c\) and \(s_c\) are per-channel parameters broadcast over all
 spatial indices \(\mathbf{x}\). Compared to a conventional per-voxel diagonal
 Gaussian, tying parameters within each channel reduces degrees of freedom,
 matches Glow’s multiscale semantics, and avoids per-voxel scale collapse.
+However, in the medical imaging context discussed here, only single channel
+data is employed.
 
 ## High-dimensional geometry and latent space navigation
 
@@ -263,15 +264,13 @@ with distance from the center, causing the vast majority of the mass to
 concentrate within a narrow spherical shell of radius $\approx \sqrt{d}$. This
 region is often referred to as the typical set [@vershynin2018high;
 @blum2020foundations] or the "soap bubble"[^blogpost] effect. 
-
-[^blogpost]: https://www.inference.vc/high-dimensional-gaussian-distributions-are-soap-bubble/
-
 Consequently, the latent origin $z=0$ is a highly atypical
 point containing near-zero probability mass. The inverse mapping $f^{-1}(0)$
 must therefore be understood strictly as a barycentric geometric anchor
 representing a central axis of symmetry for the learned bijection, rather than a
 statistically representative anatomical mode.  
 
+[^blogpost]: https://www.inference.vc/high-dimensional-gaussian-distributions-are-soap-bubble/
 
 Furthermore, while the normalizing flow successfully unfolds the global topology
 of the anatomical data, the assumption that Euclidean operations in the latent

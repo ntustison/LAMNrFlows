@@ -3,8 +3,9 @@
 ## Implementation and training details
 
 Our implementation builds on the \texttt{normflows} PyTorch package for
-normalizing flows [@stimper2023normflows], which we adapt and extend for the
-LAMNr setting. At the architectural level, we reconfigured the layer ordering to
+normalizing flows [@stimper2023normflows], which we have extensively 
+modfiied for improvements in training normalizing flows and to accommodate the
+LAMNr flows framework. At the architectural level, we reconfigured the layer ordering to
 match Glow-style multiscale flows (ActNorm $\rightarrow$ invertible
 $1{\times}1(\times1)$ convolution $\rightarrow$ affine coupling).  We also
 implemented 3-D variants of the core components (squeeze / unsqueeze, split /
@@ -45,11 +46,11 @@ minibatch contains aligned multiview slices from matched subjects. Image data
 augmentation is performed on-the-fly using the ANTsTorch-based `ImageDataset`
 with affine and diffeomorphic deformations, small intensity perturbations
 (histogram warping and bias field simulation [@Tustison:2021aa]), and additive
-Gaussian noise treated as dequantization rather than biological variability. We
-control the overall augmentation strength by a scalar schedule \(\alpha(t) \in
-[0,1]\) as a function of normalized training time \(t\), and support linear,
-cosine, and exponential decay: for example, a linear schedule reduces
-augmentation proportionally to \(t\), a cosine schedule keeps stronger
+Gaussian noise treated as dequantization [@ho2019flowpp] rather than biological
+variability. We control the overall augmentation strength by a scalar schedule
+\(\alpha(t) \in [0,1]\) as a function of normalized training time \(t\), and
+support linear, cosine, and exponential decay.  For example, a linear schedule
+reduces augmentation proportionally to \(t\), a cosine schedule keeps stronger
 perturbations early and then decays smoothly, and an exponential schedule
 reduces aggressive warps and noise most rapidly at the beginning of training.
 This allows us to start with heavier augmentations to regularize the flows and
@@ -58,22 +59,21 @@ to the true data distribution as training progresses. For validation, we use the
 same spatial transforms but disable additional noise and histogram warping. This
 design preserves anatomical variability while preventing overfitting to
 discrete, noise-free templates that would otherwise cause flows to collapse onto
-spiky background modes.  
+certain background modes.  
 
 ### Tabular-specific implementation details
 
 For tabular flows we apply a small additive “jitter” noise to the features,
-treated as dequantization rather than biological variation. The amplitude is
-controlled by a scalar schedule \(\alpha(t)\) (linear, cosine, or exponential in
-training time). In
-addition, certain views can undergo a per-feature marginal transform prior to
-normalization, such as an elementwise \(\operatorname{asinh}(x)\) for
-heavy-tailed continuous variables or rank-based Gaussianization that maps the
-empirical CDF of each feature to a standard normal. These monotone transforms
-preserve rank information while making marginals more Gaussian and reducing
-extreme tails. Together, marginal transforms and jitter regularize the tabular
-flows and prevent them from overfitting to discrete patterns or exact repeated
-rows in large cohorts.
+treated as dequantization [@ho2019flowpp] rather than biological variation. The amplitude is
+also controlled by a scalar schedule \(\alpha(t)\) (linear, cosine, or
+exponential in training time). In addition, certain views can undergo a
+per-feature marginal transform prior to normalization, such as an elementwise
+\(\operatorname{asinh}(x)\) for heavy-tailed continuous variables or rank-based
+Gaussianization that maps the empirical CDF of each feature to a standard
+normal. These monotone transforms preserve rank information while making
+marginals more Gaussian and reducing extreme tails. Together, marginal
+transforms and jitter regularize the tabular flows and prevent them from
+overfitting to discrete patterns or exact repeated rows in large cohorts.
 
 ### Glow-specific implementation details
 
@@ -85,7 +85,7 @@ schedule with a plateau-based reducer. We monitor exact negative log-likelihood
 in bits-per-dimension, view-wise breakdowns, and alignment loss values, and
 periodically log reconstructions and samples for visual inspection.
 
-To accommodate 3-D volumes under constrained VRAM, we enable gradient
+To accommodate training scenarios under constrained VRAM, we enable gradient
 accumulation (microbatching). With an accumulation factor \(A\) and microbatch
 size \(B_{\mu}\), the effective batch is \(B_{\mathrm{eff}} = A \cdot B_{\mu}\).
 We compute per-sample losses on each microbatch, accumulate their gradients, and
@@ -148,6 +148,7 @@ same methodological framework.
   \label{fig:aug-schedule}
 \end{figure*}
 
+<!-- 
 To ensure stable density estimation and prevent degenerate likelihoods due to
 data quantization, we also employ uniform dequantization (jittering) during training,
 following the variational framework established in Flow++ [@ho2019flowpp].
@@ -161,4 +162,4 @@ targets, and per-view intensity-based transforms (noise, simulated bias-field,
 histogram warping).  Similar to the tabular case, the amplitude is controlled by
 a scalar schedule \(\alpha(t)\) (linear, cosine, or exponential in training
 time).
-
+-->

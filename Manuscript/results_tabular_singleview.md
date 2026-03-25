@@ -8,8 +8,8 @@ IDPs, comprising T1-weighted MRI (T1-w), diffusion tensor imaging (DTI), and
 resting-stage fMRI (rsfMRI), were generated using ANTsPyMM[^antspymm], an
 ANTsX-based utility for generating tabular IDP data from neuroimaging cohorts.
 For NNHEmbed, the resulting views comprised 51 T1-w IDPs, 77 DTI IDPs, and 484
-rsfMRI IDPs. The UKBB-based projection matrices map the multimodal (i.e., three
-view) input features of 1) the Normative Neurological Library (NNL)
+rsfMRI IDPs. The UKBB-based projection matrices map the multimodal 
+(i.e., three-view) input features of 1) the Normative Neurological Library (NNL)
 [@Gage:2024aa] and 2) the Parkinson Progression Marker Initiative (PPMI)
 [@PPMI:2011aa] cohorts into shared $k=31$ dimensional bases, which then serve
 as the input for generating our LAMNr flows models.
@@ -35,11 +35,11 @@ remains a compact description of the distribution.
 
 Our hyperparameter sweep across the individual NNL and PPMI cohort views
 confirmed the robustness of this architectural window. For the NNL cohort ($N =
-346$), a depth of $K=4$ was consistently optimal across T1, DTI, and rsfMRI
-modalities, effectively minimizing the validation (in terms of model training)
-negative log-likelihood. In the PPMI cohort ($N = 1769$), while increasing
-capacity to $K=5$ yielded slightly lower likelihoods, the improvement was
-negligible ($\Delta \text{BPD} < 0.001$ for DTI) and did not justify the
+346$), a depth of $K=4$ was consistently optimal across individual T1, DTI, and
+rsfMRI modalities, effectively minimizing the validation (in terms of model
+training) negative log-likelihood. In the PPMI cohort ($N = 1769$), while
+increasing capacity to $K=5$ yielded slightly lower likelihoods, the improvement
+was negligible ($\Delta \text{BPD} < 0.001$ for DTI) and did not justify the
 additional model complexity. Prioritizing model parsimony and methodological
 consistency between datasets, we fixed the configuration at $K=4$ and $HC=80$
 for all subsequent multiview experiments. This stable parametric baseline

@@ -6,19 +6,18 @@
 \begin{figure*}[!htbp]
     \centering
     \includegraphics[width=\textwidth]{Figures/clinical_comparison_multipanel.png}
-    \caption{\textbf{LAMNr Clinical Predictive Power.} The forest plot illustrates 
-    the correlation uplift ($\Delta r$) across two levels of comparison: 
-    (1) the gain from non-linear manifold mapping, represented by the difference 
-    between LAMNr and the linear SiMLR baseline (\textbf{red intervals}), and 
-    (2) the gain from latent alignment, represented by the difference between 
-    the aligned LAMNr model and an unconstrained multi-view baseline ($\lambda = 0$, 
-    \textbf{blue intervals}). Error bars represent the 95\% confidence intervals 
-    derived from 1000 bootstrap resamples. \textbf{Top panel} displays results for 
-    the NNL cohort, showing significant non-linear gains in memory and executive 
-    function. \textbf{Bottom panel} displays results for the PPMI cohort, where 
-    linear models remain highly competitive. Significant improvements 
-    ($q < 0.05$, FDR corrected) are indicated by intervals that do not cross the 
-    zero-reference line.}
+    \caption{The forest plot illustrates the correlation uplift ($\Delta
+    r$) across two levels of comparison: (1) the gain from non-linear manifold
+    mapping, represented by the difference between LAMNr and the linear SiMLR
+    baseline (i.e., red intervals), and (2) the gain from latent alignment,
+    represented by the difference between the aligned LAMNr model and an
+    unconstrained multi-view baseline ($\lambda = 0$, i.e., blue intervals).
+    Error bars represent the 95\% confidence intervals derived from 1000
+    bootstrap resamples. Top panel displays results for the NNL cohort, showing
+    significant non-linear gains in memory and executive function. Bottom panel
+    displays results for the PPMI cohort, where linear models remain highly
+    competitive. Significant improvements ($q < 0.05$, FDR corrected) are
+    indicated by intervals that do not cross the zero-reference line.}
     \label{fig:clinical_comparison}
 \end{figure*}
 
@@ -61,9 +60,9 @@ alignment remains beneficial for overall model stability. Interestingly, the
 performance profiles differ across populations. While the NNL cohort exhibits
 clear benefits from nonlinear alignment, the linear SiMLR models remain highly
 competitive in the PPMI cohort. This divergence likely reflects the different
-variance structures of the two datasets: the NNL cohort captures a broad
-spectrum of healthy variation where subtle nonlinear couplings are prevalent,
-whereas the PPMI cohort is dominated by the strong, relatively linear
+variance structures of the two datasets.  Specifically, the NNL cohort captures
+a broad spectrum of healthy variation where subtle nonlinear couplings are
+prevalent, whereas the PPMI cohort is dominated by the strong, relatively linear
 pathological signal of Parkinson’s disease progression.
 
 

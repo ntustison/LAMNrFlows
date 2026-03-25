@@ -47,7 +47,7 @@ z = \bigl[z^{(1)}_1, \dots, z^{(1)}_L, \dots, z^{(V)}_1, \dots, z^{(V)}_L\bigr].
 We model this joint latent as Gaussian, \(z \sim \mathcal{N}(\mu, \Sigma)\).
 However, directly computing and operating on the full covariance matrix
 \(\Sigma\) poses a severe computational bottleneck due to the "curse of
-dimensionality." While feasible for 2D images, a single 3D medical volume (e.g.,
+dimensionality." While feasible for 2D images, a small 3D medical volume (e.g.,
 \(64 \times 64 \times 64\)) yields a latent dimension \(D \approx 2.6 \times
 10^5\). Storing the dense \(D \times D\) covariance matrix requires over 500 GB
 of memory, making direct Cholesky inversion \(\mathcal{O}(D^3)\) computationally

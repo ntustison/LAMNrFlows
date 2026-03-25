@@ -23,5 +23,5 @@ representatives that distill core anatomical structure, significantly
 facilitating traditional image analysis scenarios such as diffeomorphic image
 registration. To complement our work, we provide a robust and comprehensive, 2D-
 and 3D-capable open-source implementation in PyTorch, natively integrated with
-the ANTsX ecosystem for streamlined data handling and computational anatomy
-utilities.
+the ANTsX ecosystem for efficient training and subsequent data transformation,
+manipulation, and analysis.
