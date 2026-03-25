@@ -197,7 +197,7 @@ for which_modality in fa t2 t1; do
 done
 
 ###############################################################################
-# 6. RECONSTRUCTION DE TEMPLATE (Atlas de Population)
+# 6a. RECONSTRUCTION DE TEMPLATE (Atlas de Population)
 # Objectif : Décoder le vecteur latent moyen (mu). L'échantillonnage de 
 # Monte-Carlo (--mc-samples) ajoute une micro-variance moyennée pour obtenir 
 # un atlas extrêmement net et dépourvu de bruit haute fréquence.
@@ -205,14 +205,41 @@ done
 
 output_template="${out_dir}/template_T1_mu_sharpened.png"
 if [[ ! -f ${output_template} ]]; then
-  echo "[6] Génération du template de population (Moyenne Latente)..."
+  echo "[6a] Génération du template de population (Moyenne Latente)..."
   ${WHICH_PYTHON} lamnr_glow_tool.py recon-template \
     --ckpt ${ckpt} --gauss ${gaussian_lr} --views T1 --view-index 0 \
     --mc-samples 10 --mc-temp 0.01 --out "${output_template}" \
     --sharpen-image --devices ${DEVICE} --seed ${RANDOM}
 else
-  echo "[6] Le template de population existe déjà. Étape ignorée."
+  echo "[6a] Le template de population existe déjà. Étape ignorée."
 fi  
+
+###############################################################################
+# 6b. RECONSTRUCTION DE TEMPLATE COHORTE (Atlas de Sous-Population)
+# Objectif : Générer un template représentatif d'un sous-groupe clinique 
+# spécifique (défini par le fichier manifest). Calcule la moyenne euclidienne 
+# (barycentre) des vecteurs latents de cette cohorte exacte, puis la décode. 
+# Ne nécessite pas de modèle Gaussien global.
+###############################################################################
+
+output_template_cohort="${out_dir}/template_T1_cohort.png"
+
+if [[ ! -f ${output_template_cohort} ]]; then
+  echo "[6b] Génération du template de cohorte (Moyenne Empirique)..."
+  ${WHICH_PYTHON} lamnr_glow_tool.py recon-cohort-template \
+    --ckpt ${ckpt} \
+    --manifest ${manifest_short} \
+    --views T1 \
+    --view-index 0 \
+    --image-size ${which_experiment} \
+    --slice-axis 2 \
+    --slice-index ${SLICE_INDEX} \
+    --out "${output_template_cohort}" \
+    --sharpen-image \
+    --devices ${DEVICE}
+else
+  echo "[6b] Le template de cohorte existe déjà. Étape ignorée."
+fi
 
 ###############################################################################
 # 7. INTERPOLATION LATENTE (Morphing Géodésique)

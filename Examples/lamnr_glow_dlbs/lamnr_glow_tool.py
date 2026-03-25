@@ -97,13 +97,22 @@ import time
 import hashlib
 import warnings
 
+import ants
 import torch
+import numpy as np
+from pathlib import Path
+from PIL import Image
+from typing import Optional, Tuple
 import torch.nn.functional as F
 import torchvision as tv
 from PIL import Image
 import numpy as np
 
-import ants
+try:
+    from tqdm import tqdm
+except ImportError:
+    print("[info] tqdm not found. Install with `pip install tqdm` for progress bars.")
+    tqdm = lambda x, **kwargs: x
 
 # Ensure headless save works
 import matplotlib
@@ -2191,6 +2200,89 @@ def main_recon_template(argv=None):
     save_grid(panel, outp, nrow=nrow, target_hw=(Hc, Wc))
     print(f"[recon-template] wrote {outp}")
 
+def main_recon_cohort_template(argv=None):
+    """
+    Génère un template 2D spécifique à une cohorte (Cohort Average).
+    Lit un manifest, encode toutes les images dans l'espace latent, 
+    calcule le barycentre (moyenne arithmétique euclidienne) et le décode.
+    """
+    ap = argparse.ArgumentParser("LAM-Flow Cohort Template (recon-cohort-template)")
+    ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
+    ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV with cohort images")
+    ap.add_argument("--views", type=str, required=True, help="Comma list of views (e.g. T1,FA)")
+    ap.add_argument("--view-index", type=int, default=0, help="Which view to use")
+    ap.add_argument("--image-size", type=str, default="128x128", help="Target spatial dims")
+    ap.add_argument("--slice-axis", type=int, default=2, help="Axis to slice")
+    ap.add_argument("--slice-index", type=int, default=115, help="Index of slice")
+    ap.add_argument("--devices", type=str, default="cuda:0")
+    ap.add_argument("--out", type=str, required=True, help="Output PNG filename")
+    ap.add_argument("--sharpen-image", action="store_true", help="Apply Laplacian sharpening before saving")
+    args = ap.parse_args(argv)
+
+    device = torch.device(args.devices)
+    H, W = parse_hw(args.image_size)
+
+    # 1. Chargement Modèle
+    ckpt_path = resolve_ckpt_path(Path(args.ckpt))
+    blob = torch.load(ckpt_path, map_location=device, weights_only=False)
+    cfg = blob.get("config", {})
+    model = build_model_from_config(cfg, device)
+    model.eval()
+
+    # 2. Chargement Manifeste
+    cols = _read_manifest_csv(Path(args.manifest))
+    views_list = [v.strip() for v in args.views.split(",")]
+    vname = views_list[args.view_index]
+    _, per_view_paths = _resolve_views(cols, Path(args.manifest).parent, vname)
+
+    global_idx = views_list.index(vname) if vname in views_list else args.view_index
+    ok, note = load_weights_into_model(model, blob, view_idx=global_idx)
+    if not ok: raise RuntimeError(f"Weights failed for {vname}: {note}")
+    _prime_if_needed(model, H, W, device)
+
+    paths = per_view_paths[0]
+    N = len(paths)
+    if N == 0: raise RuntimeError("Aucune image trouvée dans le manifest.")
+    print(f"[info] Calcul de la moyenne latente pour {N} sujets (Vue: {vname})...")
+
+    # 3. Encodage et Accumulation Latente
+    z_accum = None
+    for p in tqdm(paths, desc="Encoding Cohort"):
+        xi = _read_image_any(p, args.slice_axis, args.slice_index)
+        x_tensor = _coerce_nchw_4d(xi, target_hw=(H, W)).to(device)
+
+        with torch.no_grad():
+            z_list, _ = model.inverse_and_log_det(x_tensor)
+            if not isinstance(z_list, list): z_list = list(z_list)
+
+        if z_accum is None:
+            z_accum = [torch.zeros_like(z) for z in z_list]
+
+        for l in range(len(z_list)):
+            z_accum[l] += z_list[l]
+
+    # 4. Calcul de la Moyenne et Décodage
+    z_mean = [z / float(N) for z in z_accum]
+
+    with torch.no_grad():
+        x_recon, _ = model.forward_and_log_det(z_mean)
+        x_recon = to01(_coerce_nchw_4d(x_recon, target_hw=(H, W)))
+
+    # 5. Post-traitement optionnel
+    if args.sharpen_image:
+        import ants
+        if x_recon.is_cuda: x_recon = x_recon.cpu()
+        ants_img = ants.from_numpy(x_recon.squeeze().numpy())
+        img_smooth = ants.smooth_image(ants_img, 1.0)
+        img_sharp = ants.iMath_sharpen(img_smooth)
+        x_recon = torch.from_numpy(img_sharp.numpy()).view(1, 1, H, W).to(device)
+
+    # 6. Sauvegarde
+    outp = Path(args.out)
+    outp.parent.mkdir(parents=True, exist_ok=True)
+    save_grid(x_recon, outp, nrow=1, target_hw=(H, W))
+    print(f"[ok] Template de cohorte 2D sauvegardé : {outp}")
+
 def main_recon_temperature(argv=None):
     """
     Encode an image, scales the latents by a temperature factor (tau), and reconstructs. 
@@ -2774,12 +2866,6 @@ def main_calc_distance(argv=None):
     
     Génère un CSV : [path, total_dist, (optionnel: dist_L0, dist_L1, ...)]
     """
-    # Import local
-    try:
-        from tqdm import tqdm
-    except ImportError:
-        print("[info] tqdm not found. Install with `pip install tqdm` for progress bars.")
-        tqdm = lambda x, **kwargs: x
 
     ap = argparse.ArgumentParser("LAM-Flow Latent Distance Calculator")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
