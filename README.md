@@ -65,23 +65,12 @@ Latent-aligned multiview normalizing (LAMNr) flows leverage exact-likelihood, bi
 </details>
 
 <details>
-<summary>Single view, ANTsX/FreeSurfer/FSL UKBB IDPs</summary>
+<summary>Multi-view NNHEmbed</summary>
   
-[Data from *ANTsX neuroimaging-derived structural phenotypes of UK Biobank*](https://www.nature.com/articles/s41598-024-59440-6)
+[Data from *Joint representations from multi-view MRI-based learning support cognitive and functional performance domains*]([https://www.nature.com/articles/s41598-024-59440-6](https://www.medrxiv.org/content/10.1101/2025.09.27.25336706v2)
 
 <p align="center">
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Age.png" alt="Age" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Alcohol.png" alt="Input" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_BMI.png" alt="BMI" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_FluidIntelligenceScore.png" alt="FIS" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_GeneticSex.png" alt="GeneticSex" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Hearing.png" alt="Hearning" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_NeuroticismScore.png" alt="NeuroticismScore" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_NumericMemory.png" alt="NumericMemory" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_RiskTaking.png" alt="RiskTaking" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_SameSexIntercourse.png" alt="SSI" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_TownsendDeprivationIndex.png" alt="TDI" width="75%"><br>
-</p>
+  <img src="Manuscript/Figures/clinical_comparison_multipanel.png" alt="Age" width="75%"><br
 
 </details>
 
