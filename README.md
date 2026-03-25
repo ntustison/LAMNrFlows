@@ -56,9 +56,9 @@ Latent-aligned multiview normalizing (LAMNr) flows leverage exact-likelihood, bi
 <summary>Single view, uniform --> diagonal Gaussian (toy example)</summary>
 
 <p align="center">
-  <img src="Examples/lamnr_realnvp/Test_SimpleUniform/UniformSimulatedData/uniform_10000x4.png" alt="Input" width="75%"><br>
+  <img src="Examples/lamnr_tabular/Test_SimpleUniform/UniformSimulatedData/uniform_10000x4.png" alt="Input" width="75%"><br>
   Input<br>        
-  <img src="Examples/lamnr_realnvp/Test_SimpleUniform/uniform_z_view0.png" alt="Output" width="75%"><br>
+  <img src="Examples/lamnr_tabular/Test_SimpleUniform/uniform_z_view0.png" alt="Output" width="75%"><br>
   Output
 </p>
 
