@@ -5,32 +5,7 @@
 
 ----
 
-Normalizing flows induce exact-likelihood, bijective mappings between data and
-latents, providing the necessary framework for Latent-Aligned
-Multiview Normalizing (LAMNr) flows. LAMNr flows learn shared latent subspaces
-across multimodal views and, in the context of medical imaging, linearize the
-sampled anatomical manifold, thus establishing a rigorous, deep learning
-foundation for Computational Anatomy. By anchoring the population to a
-centered Gaussian base distribution, the latent origin ($z=0$) serves as a
-principled approximation of the population Fréchet mean. This construction
-enables an approximate geodesic linearity where shared-latent reconstructions
-act as contrast-robust population representatives. Using subject-matched
-batches, we apply alignment objectives (e.g., Pearson, Barlow Twins, VICReg,
-InfoNCE, HSIC) to isolate shared anatomical features from view-specific
-variation. After maximum-likelihood training, closed-form conditional modeling
-supports multiview queries, principled cross-view imputation, and
-identity-preserving latent edits.  In imaging contexts, these shared-latent
-images effectively suppress idiosyncratic variations, significantly reducing
-diffeomorphic registration effort. This provides a direct connection between
-probabilistic modeling and classical template construction. The same machinery
-applies to tabular imaging-derived phenotypes (IDPs), enabling a unified
-treatment of multimodal datasets. We provide an open-source implementation built
-on PyTorch, integrating with the ANTsX ecosystem for data handling and
-registration utilities. Evaluations on multimodal MRI and multiview IDP datasets
-show improvements in calibrated likelihoods, dependence structure, and
-downstream prediction. Our framework facilitates likelihood-calibrated,
-interpretable multiview reasoning within a single, exact model that bridges deep
-learning with foundational principles of computational anatomy.
+Latent-aligned multiview normalizing (LAMNr) flows leverage exact-likelihood, bijective mappings to learn shared latent subspaces across heterogeneous, multimodal datasets. By applying formal latent-alignment constraints, the framework topologically unfolds anatomical manifolds into continuous vector spaces, enabling principled interpretations of computational anatomy concepts, such as population templates and geodesic interpolation. Evaluated on tabular IDPs and multimodal MRI, LAMNr flows improve calibrated likelihoods and downstream predictions compared to linear baselines. 
 
 
 ***
@@ -81,33 +56,22 @@ learning with foundational principles of computational anatomy.
 <summary>Single view, uniform --> diagonal Gaussian (toy example)</summary>
 
 <p align="center">
-  <img src="Examples/lamnr_realnvp/Test_SimpleUniform/UniformSimulatedData/uniform_10000x4.png" alt="Input" width="75%"><br>
+  <img src="Examples/lamnr_tabular/Test_SimpleUniform/UniformSimulatedData/uniform_10000x4.png" alt="Input" width="75%"><br>
   Input<br>        
-  <img src="Examples/lamnr_realnvp/Test_SimpleUniform/uniform_z_view0.png" alt="Output" width="75%"><br>
+  <img src="Examples/lamnr_tabular/Test_SimpleUniform/uniform_z_view0.png" alt="Output" width="75%"><br>
   Output
 </p>
 
 </details>
 
 <details>
-<summary>Single view, ANTsX/FreeSurfer/FSL UKBB IDPs</summary>
+<summary>Multi-view NNHEmbed</summary>
   
-[Data from *ANTsX neuroimaging-derived structural phenotypes of UK Biobank*](https://www.nature.com/articles/s41598-024-59440-6)
+[Data from *Joint representations from multi-view MRI-based learning support cognitive and functional performance domains*]([https://www.nature.com/articles/s41598-024-59440-6](https://www.medrxiv.org/content/10.1101/2025.09.27.25336706v2)
 
 <p align="center">
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Age.png" alt="Age" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Alcohol.png" alt="Input" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_BMI.png" alt="BMI" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_FluidIntelligenceScore.png" alt="FIS" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_GeneticSex.png" alt="GeneticSex" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_Hearing.png" alt="Hearning" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_NeuroticismScore.png" alt="NeuroticismScore" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_NumericMemory.png" alt="NumericMemory" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_RiskTaking.png" alt="RiskTaking" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_SameSexIntercourse.png" alt="SSI" width="75%"><br>
-  <img src="Examples/lamnr_realnvp/ukbb_single_view/analysis/bar_uplift_byK_TownsendDeprivationIndex.png" alt="TDI" width="75%"><br>
+  <img src="Manuscript/Figures/clinical_comparison_multipanel.png" alt="Age" width="75%">
 </p>
-
 </details>
 
 ***
