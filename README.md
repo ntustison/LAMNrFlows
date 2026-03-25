@@ -10,7 +10,7 @@ Latent-aligned multiview normalizing (LAMNr) flows leverage exact-likelihood, bi
 
 ***
 
-### RealNVP (tabular data)
+### RealNVP-based LAMNr flows 
 
 <details>
 <summary>Network architecture</summary>
@@ -76,7 +76,7 @@ Latent-aligned multiview normalizing (LAMNr) flows leverage exact-likelihood, bi
 
 ***
 
-### Glow-based 2-D HCP example
+### Glow-based LAMNr flows
 
 <details>
 <summary>Network architecture/configuration</summary>
