@@ -256,8 +256,8 @@ matches Glow’s multiscale semantics, and avoids per-voxel scale collapse.
 In high-dimensional standard normal latent spaces, such as those optimized by
 LAMNr flows ($\mathcal{Z} \sim \mathcal{N}(0, I)$), the geometric properties of
 the data distribution become highly counterintuitive due to the concentration of
-measure phenomenon [@vershynin2018high; @blum2020foundations;
-@white2016sampling]. As dimensionality increases, probability mass does not
+measure phenomenon [@white2016sampling; @vershynin2018high;
+@blum2020foundations]. As dimensionality increases, probability mass does not
 concentrate at the origin; instead, the volume of the space grows exponentially
 with distance from the center, causing the vast majority of the mass to
 concentrate within a narrow spherical shell of radius $\approx \sqrt{d}$. This

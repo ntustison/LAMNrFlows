@@ -197,16 +197,22 @@ limitations[^comp].
     \centering
 
     % --- Baseline Row ---
-    \begin{subfigure}{0.45\textwidth}
+    \begin{subfigure}{0.30\textwidth}
         \includegraphics[width=\linewidth]{Figures/PPMI_template0_256x256x256_slice138.png}
         \caption{ANTsX Template}
         \label{fig:template_antsx}
     \end{subfigure}
-    \hspace{0.05\textwidth} % Space to center the two images
-    \begin{subfigure}{0.45\textwidth}
+    \hspace{0.05\textwidth} % Space to center the three images
+    \begin{subfigure}{0.30\textwidth}
         \includegraphics[width=\linewidth]{Figures/template_T1_mu_sharpened_256x256.png}
         \caption{T1: $f^{-1}_{\theta}(0)$}
         \label{fig:template_flow}
+    \end{subfigure}
+    \hspace{0.05\textwidth} % Space to center the two images
+    \begin{subfigure}{0.30\textwidth}
+        \includegraphics[width=\linewidth]{Figures/template_T1_mu_sharpened_256x256.png}
+        \caption{Need an image of the cohort-based template !}
+        \label{fig:template_cohort_flow}
     \end{subfigure}
 
     \caption{Comparison of population Fréchet mean approximations. (a) The standard
