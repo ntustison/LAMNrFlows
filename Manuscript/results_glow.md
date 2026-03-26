@@ -52,16 +52,35 @@ limitations[^comp].
   central morphometric tendency of the cohort without the computational overhead
   of iterative diffeomorphic averaging [@Avants:2010aa].  Figure \ref{fig:frechet_mean}.
 
-* __Latent distances.__ The bijective nature of normalizing flows allows
-  complex, non-linear anatomical deviations in the high-dimensional data space
-  to be quantified via straightforward distance metrics in the learned latent
-  space. Computing the standardized Euclidean distance (a diagonal Mahalanobis 
-  distance) between a subject's latent representation and the normative 
-  population's Gaussian mean, $d = \sqrt{ \sum_i \frac{(z_i - \mu_i)^2}{\sigma_i^2} }$, 
-  accounts for the natural variance of each latent dimension. This yields a rigorous, 
-  variance-weighted scalar metric for anomaly detection and out-of-distribution 
-  assessment that avoids artificially penalizing healthy, high-variance anatomical 
-  traits. Figures \ref{fig:latent_space_distances} and \ref{fig:twin_distances}.
+* __Cohort template.__ Beyond simple point estimation, the generative nature of
+  LAMNr flows allows for the construction of a high-fidelity cohort template
+  that functions as an alternative to the Fréchet mean approximation. By
+  calculating the arithmetic centroid of the subject-specific latent vectors and
+  mapping this central point back to the physical domain, we generate a
+  synthetic image that represents the cohort-specific anatomical
+  characterization. Unlike the Fréchet mean approximation, this manifold-based
+  synthesis preserves sharp morphological boundaries by operating within the
+  linearized geometry of the "unfolded" anatomical distribution. Figure
+  \ref{fig:cohort_template}.
+
+* __Latent distances.__ The bijective nature of normalizing flows allows complex
+  anatomical deviations to be quantified through a flexible suite of distance
+  metrics in the learned latent space, depending on the analytical
+  objective.Euclidean distance provides a straightforward measure of separation
+  for basic similarity assessments. To account for the natural variance of each
+  latent dimension, we implement a standardized Euclidean (diagonal Mahalanobis)
+  distance, $d = \sqrt{ \sum_i \frac{(z_i - \mu_i)^2}{\sigma_i^2 + \epsilon} }$,
+  which benchmarks a subject against the normative Gaussian mean ($\mu$) without
+  artificially penalizing high-variance anatomical traits.  For point-to-point
+  comparisons between the latents $z_j$ and $z_k$ of specific images, we utilize 
+  geodesic distance derived from
+  cosine similarity, $d = \arccos(\text{clamp}(\text{sim}(z_j, z_k)))$. By
+  measuring the angular displacement on the hypersphere, this metric respects
+  the spherical geometry of the isotropic Gaussian prior, ensuring that
+  anatomical transitions are evaluated along the high-density manifold. These
+  combined metrics yield a rigorous, variance-weighted framework for anomaly
+  detection and longitudinal assessment. 
+  Figures \ref{fig:latent_space_distances} and \ref{fig:twin_distances}.
 
 * __Cross-modal imputation via Conditional Gaussian modeling.__ Missing
   modalities are synthesized by encoding the available observed images to the
