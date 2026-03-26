@@ -12,25 +12,23 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # total steps
 iterations=100000
 
-# model / data
-H=96; W=128; L=5; K=12; hidden=192  # K=32 comme en 3D ? À vous de voir (K=12 était votre valeur 2D)
+# model / data (OPTIMISÉ POUR ANISOTROPIE)
+H=96; W=128; L=5; K=12; hidden=192  
 SLICE_IDX=115
-# Note: K=12 est bien pour la 2D, mais vous pouvez monter si la VRAM le permet.
 
 # optimization
-LR=5e-5
+LR=2.5e-5
 WARMUP=2000
 WEIGHT_DECAY=1e-6
 LR_DECAY_GAMMA=0.5
 LR_DECAY_STEPS="80000"
 
 # --- CONFIG MULTI-GPU ROBUSTE ---
-BATCH=32             # Plus gros batch possible (ajustez selon VRAM)
-GRAD_ACCUM=3         # 32 * 4 = 128 (Batch effectif)
-NUM_WORKERS=8        # Activé car OMP_NUM_THREADS=1 protège du blocage
-# DEVICES="cuda:0,cuda:1"
+BATCH=32             
+GRAD_ACCUM=4         # Batch effectif = 128
+NUM_WORKERS=4        
 DEVICES="cuda:1"
-PRECISION="float"    # FP32 pour éviter les NaNs
+PRECISION="float"    
 # --------------------------------
 
 OUTDIR="runs2d/dlbs_t1_t2flair_fa_${H}x${W}_K${K}_L${L}_HC${hidden}"
@@ -40,7 +38,7 @@ PLATEAU_PATIENCE=100000
 PLATEAU_THRESHOLD=1e-3
 PLATEAU_COOLDOWN=5
 
-# alignment + screening
+# alignment + screening (AJUSTÉ POUR 3 MODALITÉS)
 ALIGN="vicreg"
 ALIGN_WEIGHT=0.01
 ALIGN_VICREG_INV=25.0
@@ -51,11 +49,11 @@ ALIGN_VICREG_COV=1.0
 ALIGN_WARMUP=500
 
 SCREEN_METHOD="cca"
-SCREEN_FRAC=0.5
+SCREEN_FRAC=0.2       # Réduit pour 3 vues (anciennement 0.5)
 SCREEN_WARMUP=1000
 SCREEN_REFRESH=5000
 CCA_RIDGE=1e-3
-PREFILTER_FRAC=0.5
+PREFILTER_FRAC=0.3    # Réduit pour 3 vues (anciennement 0.5)
 
 # sampling / eval
 SAMPLE_TEMP=1.0
