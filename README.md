@@ -10,7 +10,7 @@ Latent-aligned multiview normalizing (LAMNr) flows leverage exact-likelihood, bi
 
 ***
 
-### RealNVP (tabular data)
+### RealNVP-based LAMNr flows 
 
 <details>
 <summary>Network architecture</summary>
@@ -70,55 +70,16 @@ Latent-aligned multiview normalizing (LAMNr) flows leverage exact-likelihood, bi
 [Data from *Joint representations from multi-view MRI-based learning support cognitive and functional performance domains*]([https://www.nature.com/articles/s41598-024-59440-6](https://www.medrxiv.org/content/10.1101/2025.09.27.25336706v2)
 
 <p align="center">
-  <img src="Manuscript/Figures/clinical_comparison_multipanel.pdf" alt="NNHEmbed" width="75%">
+  <img src="Manuscript/Figures/clinical_comparison_multipanel2.png" alt="NNHEmbed" width="75%">
 </p>
 </details>
 
 ***
 
-### Glow-based 2-D HCP example
+### Glow-based LAMNr flows
 
 <details>
 <summary>Network architecture/configuration</summary>
-
-```bash
-[run] 2025-12-02 09:17:02 | Py 3.11.9 | torch 2.4.1+cu121 | cuda=true (n=2)
-[note] post-dataset build
-                 out_dir: runs/hcp_t1_t2_fa_128x128_vicreg_K12_H192_vicreg_screen_phase1
-                   views: 3
-                     H×W: 128×128
-          L / K / hidden: 5 / 12 / 192
-                   align: vicreg
-               weighting: fixed
-                   batch: 64
-                max_iter: 120000
-             extra_iters: 0
-             lr / warmup: 0.0001 / 1000
-             ema / decay: true / 0.9997
-               precision: mixed
-                 devices: cuda:0
-               slice_idx: 116
-                val_frac: 0.0
-train_samples / val_samples: 3000 / 128
-             num_workers: 4
-                    seed: 0
-            smooth_alpha: 0.05
-      sample_mode / temp: model / 1.0
-      disable_aug_anneal: false
-           aug_schedules: noise_std:cos:0.05->0.004@160000,sd_affine:cos:0.05->0.00@96000,sd_deformation:linear:12.0->0.6@112000,sd_simulated_bias_field:cos:0.20->0.03@160000,sd_histogram_warping:cos:0.04->0.008@160000
-                  screen: cca
-             screen_frac: 0.5
- screen_warmup / refresh: 1000 / 0
-               cca_ridge: 0.001
-          prefilter_frac: 0.5
-------------------------------------------------------------
-          subjects_total: n/a
-   train_images_list_len: 3
-     val_images_list_len: 1
- effective_train_samples: 3000
-   effective_val_samples: 128
-              batch_size: 64
-```
 
 __Single view normalizing flow__
 
