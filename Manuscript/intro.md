@@ -22,7 +22,7 @@ acute in multimodal and multiview settings, where heterogeneous or missing data
 often require calibrated cross-view comparisons and coherent anatomical
 reconstructions.
 
-## Normalizing flows
+## Normalizing Flows
 
 Normalizing flows model complex data distributions by composing invertible
 transformations that map input data to their corresponding latents. This
@@ -60,7 +60,7 @@ conditional queries. These advantages point to normalzing flows as an attractive
 framework for likelihood-calibrated multiview modeling.
 
 
-## Multiview learning with LAMNr flows
+## Multiview Learning with LAMNr Flows
 
 Multiview learning operates on two complementary principles: first, that each
 distinct acquisition or feature space ("view") contributes unique, view-specific
@@ -128,7 +128,7 @@ stabilizing the Jacobian determinant and ensuring that the discrete transitions
 of the Glow architecture maintain the smooth, diffeomorphic properties required.
 
 
-## Bridging computational anatomy and normalizing flows
+## Computational Anatomy and Normalizing Flows
 
 \begin{figure}[!htbp]
     \centering

@@ -3,7 +3,7 @@
 
 <!-- ## Applications -->
 
-## Conditional Gaussian modeling over latents
+## Conditional Gaussian Modeling Over Latents
 
 Normalizing flows give us an explicit bijection between data space and a latent
 space with a simple base density (e.g., Gaussian). Once the per-view flows have
@@ -17,7 +17,7 @@ that inference and conditioning can be carried out where the geometry is
 simpler.
 
 LAMNr flows exploit this by choosing a multivariate Gaussian model on the
-concatenated latents. This choice is deliberately simple: flows absorb the
+concatenated latents. This choice is deliberately simple as the flows absorb the
 complex, non-Gaussian aspects of each view into the invertible mappings
 \(f^{(v)}\), so that the residual cross-view structure can be captured by a
 Gaussian dependence model in \(z\). Under this construction, the joint density

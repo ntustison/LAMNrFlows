@@ -5,7 +5,7 @@
 
 # Methods
 
-## Normalizing flows and the LAMNr flows multiview formulation
+## Normalizing Flows and the LAMNr Flows Multiview Formulation
 
 \begin{figure}
    \centering
@@ -147,7 +147,7 @@ Therefore, we report results using a fixed \(\lambda\) schedule in the main
 experiments.
 
 
-## View-specific flow architectures
+## View-specific Flow Architectures
 
 \begin{figure}
 \centering
@@ -181,7 +181,7 @@ image dimensionality.
 \label{fig:lamnr_diagrams}
 \end{figure}
 
-### Tabular/IDP views via RealNVP
+### Tabular/IDP Views via RealNVP
 
 For imaging-derived phenotypes (IDPs) and other tabular data, we use
 single-scale flows based on RealNVP and masked autoregressive flows (MAF) with
@@ -208,7 +208,7 @@ matched-dimension standardized coordinates \(\varepsilon^{(v)} \in
 \mathbb{R}^r\) without altering the exact invertibility of the flow as truncation
 is used only for the alignment head. 
 
-### Image views via Glow-based multiscale flows
+### Image Views via Glow-based Multiscale Flows
 
 For image views we adopt Glow-style discrete normalizing flows with \(L\) levels
 and \(K\) coupling steps per level (see Figure \ref{fig:lamnr_diagrams}(b)) and
@@ -252,7 +252,7 @@ matches Glow’s multiscale semantics, and avoids per-voxel scale collapse.
 However, in the medical imaging context discussed here, only single channel
 data is employed.
 
-## High-dimensional geometry and latent space navigation
+## High-dimensional Geometry and Latent Space Navigation
 
 In high-dimensional standard normal latent spaces, such as those optimized by
 LAMNr flows ($\mathcal{Z} \sim \mathcal{N}(0, I)$), the geometric properties of

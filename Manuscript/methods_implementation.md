@@ -1,6 +1,6 @@
 
 
-## Implementation and training details
+## Implementation and Training Details
 
 Our implementation builds on the \texttt{normflows} PyTorch package for
 normalizing flows [@stimper2023normflows], which we have extensively 
@@ -61,7 +61,7 @@ design preserves anatomical variability while preventing overfitting to
 discrete, noise-free templates that would otherwise cause flows to collapse onto
 certain background modes.  
 
-### Tabular-specific implementation details
+### Tabular-specific Implementation Details
 
 For tabular flows we apply a small additive “jitter” noise to the features,
 treated as dequantization [@ho2019flowpp] rather than biological variation. The amplitude is
@@ -75,7 +75,7 @@ marginals more Gaussian and reducing extreme tails. Together, marginal
 transforms and jitter regularize the tabular flows and prevent them from
 overfitting to discrete patterns or exact repeated rows in large cohorts.
 
-### Glow-specific implementation details
+### Glow-specific Implementation Details
 
 Glow models are initialized with data-dependent ActNorm, and we perform a
 one-time warm-up pass with real images before starting training to stabilize

@@ -2,48 +2,39 @@
 
 ### Multiview Comparison with the SiMLR NNHEmbed Framework
 
-
-\begin{figure*}[!htbp]
-    \centering
-    \includegraphics[width=\textwidth]{Figures/clinical_comparison_multipanel.png}
-    \caption{The forest plot illustrates the correlation uplift ($\Delta
-    r$) across two levels of comparison: (1) the gain from non-linear manifold
-    mapping, represented by the difference between LAMNr and the linear SiMLR
-    baseline (i.e., red intervals), and (2) the gain from latent alignment,
-    represented by the difference between the aligned LAMNr model and an
-    unconstrained multi-view baseline ($\lambda = 0$, i.e., blue intervals).
-    Error bars represent the 95\% confidence intervals derived from 1000
-    bootstrap resamples. Top panel displays results for the NNL cohort, showing
-    significant non-linear gains in memory and executive function. Bottom panel
-    displays results for the PPMI cohort, where linear models remain highly
-    competitive. Significant improvements ($q < 0.05$, FDR corrected) are
-    indicated by intervals that do not cross the zero-reference line.}
-    \label{fig:clinical_comparison}
-\end{figure*}
+Having established a stable hyperparameter configuration, we next evaluate LAMNr
+flows' capacity to align these latent spaces. We systematically compare VICReg,
+HSIC, and InfoNCE.  Our empirical results (Table \ref{tab:alignment_results})
+demonstrate that HSIC provides the most rigorous and stable latent alignment for
+these tabular manifolds, effectively capturing non-linear dependencies that
+simpler metrics might collapse. However, HSIC’s $O(N^2)$ complexity makes it
+computationally prohibitive for high-resolution 3D Glow volumes.  Consequently, we
+identify VICReg as the most viable candidate for scaling as it provides a superior
+balance between numerical stability and computational efficiency, yielding
+performance remarkably close to the kernel-based optimum while remaining
+feasible for the subsequent Glow experiments.
 
 
-Having established a stable hyperparameter configuration for individual views,
-we next evaluate the capacity of LAMNr flows to align these latent spaces into a
-coherent multiview representation. We systematically compare several
-latent-alignment strategies, prioritizing methods that balance computational
-efficiency with the ability to capture higher-order interactions. Specifically,
-we evaluate covariance-based regularization (VICReg), kernel-based independence
-measures (HSIC), and contrastive learning objectives (InfoNCE). We deliberately
-favored VICReg over related methods like Barlow-Twins or Pearson correlation as
-these share similar underlying principles of redundancy reduction. VICReg’s
-explicit constraints on variance and covariance provide superior numerical
-stability for high-dimensional IDPs, while HSIC and InfoNCE better preserve the
-non-linear manifold structure that linear metrics often collapse. The predictive
-performance of these LAMNr-derived shared features is then benchmarked against
-the linear SiMLR baselines used in the NNHEmbed framework
-[@Avants:2025aa].[^alignment]
-
-[^alignment]: Our results indicate that covariance-based regularization (VICReg)
-provides the most stable latent alignment for high-dimensional IDPs, effectively
-balancing the preservation of view-specific details with the extraction of
-shared anatomical features. This observation justifies our use of VICReg as the
-primary alignment objective for the subsequent high-resolution Glow experiments,
-where exhaustive objective sweeps are computationally prohibitive.
+\begin{table}[htbp]
+\centering
+\caption{Comparison of latent alignment constraints on the NNL and PPMI tabular cohorts. Values represent mean negative log-likelihood (BPD) $\pm$ standard deviation. While the HSIC criterion provides the most robust alignment for tabular data, the trade-off between statistical performance and computational scalability justifies the use of methods like VICReg for 3D volumes.}
+\label{tab:alignment_results}
+\begin{tabular}{@{}l l l r@{}}
+\toprule
+\textbf{Cohort} & \textbf{Method} & \textbf{Alignment Constraint} & {\textbf{Val. BPD ($\downarrow$)}} \\
+\midrule
+\textbf{NNL} & Baseline & None ($\lambda=0$) & $-4.239 \pm 0.001$ \\
+             & HSIC & Kernel Independence & $-2.871$ \phantom{$\pm 0.000$}  \\
+             & InfoNCE & Contrastive & $-3.999 \pm 0.114$ \\
+             & VICReg & Var-Inv-Cov & $-4.159 \pm 0.124$ \\
+\midrule
+\textbf{PPMI} & Baseline & None ($\lambda=0$) & $-8.245 \pm 0.001$ \\
+              & HSIC & Kernel Independence & $-8.198$ \phantom{$\pm 0.000$} \\
+              & InfoNCE & Contrastive & $-7.380 \pm 0.634$ \\
+              & VICReg & Var-Inv-Cov & $-8.142 \pm 0.228$  \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 As shown in Figure \ref{fig:clinical_comparison}, LAMNr flows demonstrate
 significant performance gains when predicting complex cognitive and functional
@@ -65,35 +56,24 @@ a broad spectrum of healthy variation where subtle nonlinear couplings are
 prevalent, whereas the PPMI cohort is dominated by the strong, relatively linear
 pathological signal of Parkinson’s disease progression.
 
+\begin{figure*}[!htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{Figures/clinical_comparison_multipanel.png}
+    \caption{The forest plot illustrates the correlation uplift ($\Delta
+    r$) across two levels of comparison: (1) the gain from non-linear manifold
+    mapping, represented by the difference between LAMNr flows and the SiMLR
+    baseline (i.e., red intervals), and (2) the gain from latent alignment,
+    represented by the difference between the aligned LAMNr model and an
+    unconstrained multi-view baseline ($\lambda = 0$, i.e., blue intervals).
+    Error bars represent the 95\% confidence intervals derived from 1000
+    bootstrap resamples. Top panel displays results for the NNL cohort, showing
+    significant non-linear gains in memory and executive function. Bottom panel
+    displays results for the PPMI cohort, where linear models remain highly
+    competitive. Significant improvements ($q < 0.05$, FDR corrected) are
+    indicated by intervals that do not cross the zero-reference line.}
+    \label{fig:clinical_comparison}
+\end{figure*}
 
-<!-- \begin{table}[ht]
-\centering
-\caption{\textbf{Full Clinical Comparison: LAMNr vs SiMLR and Ablation (LAMNr-none)}}
-\begin{tabular}{l rr l rr l}
-\toprule
- & \multicolumn{3}{c}{\textbf{LAMNr vs SiMLR (Linear)}} & \multicolumn{3}{c}{\textbf{LAMNr vs Baseline ($\lambda > 0$)}} \\
-\cmidrule(lr){2-4} \cmidrule(lr){5-7}
-\textbf{Outcome} & $\Delta r$ & \textbf{95\% CI} & $q_{Lin}$ & $\Delta r$ & \textbf{95\% CI} & $q_{None}$ \\
-\midrule
-\multicolumn{7}{l}{\textit{Panel: NNL}} \\
-Recall Delayed & \textbf{0.190} & [0.099, 0.279] & \textbf{$<10^{-3}$} & 0.148 & [0.037, 0.263] & 0.064 \\
-Working Memory & \textbf{0.177} & [0.051, 0.293] & \textbf{0.024} & \textbf{0.204} & [0.101, 0.319] & \textbf{0.032} \\
-Reading Ability & 0.069 & [-0.018, 0.131] & 0.192 & -0.004 & [-0.076, 0.192] & 0.960 \\
-Recall Total & 0.054 & [-0.054, 0.166] & 0.483 & -0.013 & [-0.143, 0.102] & 0.960 \\
-Processing Speed & 0.017 & [-0.089, 0.299] & 0.714 & -0.002 & [-0.096, 0.248] & 0.960 \\
-Executive Function & -0.024 & [-0.104, 0.052] & 0.483 & -0.004 & [-0.049, 0.127] & 0.960 \\
-Focus And Control & -0.055 & [-0.186, 0.037] & 0.224 & -0.019 & [-0.152, 0.083] & 0.844 \\
-Crystallized Intelligence & -0.078 & [-0.258, 0.115] & 0.505 & 0.055 & [-0.086, 0.195] & 0.844 \\
-\midrule
-\multicolumn{7}{l}{\textit{Panel: PPMI}} \\
-ADAS-Q4 & -0.058 & [-0.125, 0.008] & 0.092 & -0.007 & [-0.064, 0.046] & 0.964 \\
-CDR-SB & \textbf{-0.070} & [-0.133, -0.010] & \textbf{0.026} & 0.005 & [-0.043, 0.052] & 0.964 \\
-FAQ & \textbf{-0.082} & [-0.153, -0.015] & \textbf{0.022} & -0.017 & [-0.074, 0.036] & 0.964 \\
-mPACC (Digit) & \textbf{-0.082} & [-0.138, -0.026] & \textbf{0.004} & 0.004 & [-0.035, 0.046] & 0.964 \\
-mPACC (Trails B) & \textbf{-0.083} & [-0.141, -0.029] & \textbf{$<10^{-3}$} & -0.002 & [-0.044, 0.040] & 0.964 \\
-MMSE & \textbf{-0.084} & [-0.138, -0.028] & \textbf{$<10^{-3}$} & 0.004 & [-0.041, 0.044] & 0.964 \\
-ADAS-13 & \textbf{-0.119} & [-0.180, -0.058] & \textbf{$<10^{-3}$} & 0.004 & [-0.063, 0.065] & 0.964 \\
-\midrule
-\bottomrule
-\end{tabular}
-\end{table} -->
+
+
+

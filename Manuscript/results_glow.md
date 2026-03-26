@@ -5,7 +5,7 @@
 ## Glow-based LAMNr Flows
 
 Prior to our registration-based evaluation of 3D LAMNr Flows, we first 
-provide visualizations of the various possibilities of the proposed computional
+provide visualizations of the various possibilities of the proposed computational
 anatomy framework restricted to 2D architectures due to modern hardware 
 limitations[^comp]. 
 
