@@ -32,17 +32,21 @@ limitations[^comp].
     requirements for $128^3$ or $256^3$ resolutions far exceed the 48 GB threshold,
     even with a batch size of 1. Future work concerns leveraging the existing 3D
     capabilities of our framework and the acquisition of high-capacity computational
-    resources for image volumes $> 48^3$ voxels.
+    resources for image volumes $> 64^3$ voxels.
 
-* __Generative sampling.__ Sampling in Normalizing/LAMNr Flows is achieved by drawing a
-  latent vector $z$ from the isotropic Gaussian base distribution, 
-  $z \sim \mathcal{N}(0, \tau^2 I)$, and passing it through the inverse of the learned bijective
-  mapping, $x = f^{-1}_\theta(z)$, to reconstruct the high-dimensional image.
-  Scaling the standard deviation of this prior with a temperature parameter
-  ($\tau$) allows for explicit control over the fundamental trade-off between
-  generating high-fidelity, canonical anatomies near the mean and exploring
-  diverse, lower-probability structural variations in the tails.  Figures \ref{fig:t1_samples}
-  and \ref{fig:fa_samples}.
+* __Generative sampling.__ Sampling in LAMNr flows is performed by drawing a
+  latent vector $z$ from the isotropic Gaussian base distribution, $z \sim
+  \mathcal{N}(0, \tau^2 I)$, and mapping it back to the image domain via the
+  inverse flow, $x = f^{-1}_\theta(z)$. In high-dimensional latent spaces,
+  however, the probability mass concentrates within a thin "typical set" located
+  on a spherical shell of radius $\sqrt{d}\tau$, rather than near the mode at
+  the origin. Adjusting the temperature parameter $\tau$ allows for explicit
+  control over this sampling radius: lower temperatures ($\tau < 1$) contract
+  the sampling toward the high-density (but low-volume) region near the mean to
+  generate high-fidelity, canonical anatomies, while $\tau \approx 1$ ensures
+  that samples are drawn from the typical set, capturing the diverse structural
+  variations characteristic of the true empirical distribution. Figures
+  \ref{fig:t1_samples} and \ref{fig:fa_samples}.
 
 * __Fréchet mean approximation.__ In the context of the learned data manifold,
   the Fréchet mean of the anatomical distribution can be efficiently
