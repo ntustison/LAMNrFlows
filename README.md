@@ -242,6 +242,12 @@ Data from [*The Dallas Lifespan Brain Study: A Comprehensive Adult Lifespan Data
   
 </details>
 
+<details>
+<summary>Output:  Temperature scaling.</summary>
+
+  
+</details>
+
 
 ***
 
