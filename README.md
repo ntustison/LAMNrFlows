@@ -194,28 +194,60 @@ __Latent-aligned multiview__
 </details>
 
 <details>
+<summary>Multimodal brain lifespan data with augmentation</summary>
 
-<summary>Input:  HCP templates (T1, T2, & FA/Young Adult, Adult, Inter) with augmentation</summary>
+Data from [*The Dallas Lifespan Brain Study: A Comprehensive Adult Lifespan Data Set of Brain and Cognitive Aging*](https://www.nature.com/articles/s41597-025-04847-7)
 
-<p align="center">
+<!-- <p align="center">
   <img src="Manuscript/Figures/input_data_view0.png" alt="T1" width="30%">
   <img src="Manuscript/Figures/input_data_view1.png" alt="T2" width="30%">
   <img src="Manuscript/Figures/input_data_view2.png" alt="FA" width="30%">
-</p>
+</p> -->
   
 </details>
 
 <details>
+<summary>Output:  Generative sampling</summary>
 
-<summary>Output:  Generative samples at 120k iterations</summary>
-
-<p align="center">
-  <img src="Manuscript/Figures/samples_view0_it120000.png" alt="T1" width="30%">
-  <img src="Manuscript/Figures/samples_view1_it120000.png" alt="T2" width="30%">
-  <img src="Manuscript/Figures/samples_view2_it120000.png" alt="FA" width="30%">
-</p>
   
 </details>
+
+<details>
+<summary>Output:  Fréchet mean approximation</summary>
+
+  
+</details>
+
+<details>
+<summary>Output:  Cohort template</summary>
+
+  
+</details>
+
+<details>
+<summary>Output:  Latent distances for biological assesment</summary>
+
+  
+</details>
+
+<details>
+<summary>Output:  Cross-modal imputation via Conditional Gaussian modeling.</summary>
+
+  
+</details>
+
+<details>
+<summary>Output:  Pairwise image interpolation.</summary>
+
+  
+</details>
+
+<details>
+<summary>Output:  Temperature scaling.</summary>
+
+  
+</details>
+
 
 ***
 
