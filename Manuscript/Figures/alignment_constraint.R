@@ -3,7 +3,10 @@ library(MASS)
 library(tikzDevice)
 
 # 1. Configuration LaTeX
-latex_path <- Sys.which("pdflatex")
+# options(tikzDefaultEngine = "xetex")
+# options(tikzPdflatex = "/usr/local/bin/xelatex")
+
+latex_path <- Sys.which("xelatex")
 if(latex_path != "") options(tikzLatex = latex_path)
 
 options(tikzLatexPackages = c(
@@ -40,9 +43,9 @@ df2_unaligned <- data.frame(mvrnorm(n, mu2, sigma2), View = "View 2", State = "B
 df3_unaligned <- data.frame(mvrnorm(n, mu3, sigma3), View = "View 3", State = "Before")
 
 # Après alignement
-eigen1 <- eigen(sigma1)$values
-eigen2 <- eigen(sigma2)$values
-eigen3 <- eigen(sigma3)$values
+eigen1 <- c(1, 1) + 0.1 * eigen(sigma1)$values
+eigen2 <- c(1, 1) + 0.2 * eigen(sigma2)$values
+eigen3 <- c(1, 1) + 0.3 * eigen(sigma3)$values
 
 angles_jitter <- rnorm(3, mean = 0, sd = 0.15) 
 
