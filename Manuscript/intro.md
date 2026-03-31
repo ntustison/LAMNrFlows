@@ -7,20 +7,19 @@ Medical imaging data and their representative latent spaces are fundamental to
 gaining insight into biological structure and function. While deep learning has
 become the current standard for navigating these high-dimensional spaces,
 certain aspects of contemporary architectures (e.g., intractable likelihoods,
-lack of bijective mappings) limit rigorous statistical analysis and other
-potential applications through latent space manipulations.  Generative
-Adversarial Networks (GANs), for instance, are implicit samplers trained with
-divergence surrogates rather than likelihoods, which precludes calibration by
-exact probabilities [@papamakarios2021nfreview]. Variational Autoencoders (VAEs)
-optimize an evidence lower bound rather than the exact log likelihood
-[@kobyzev2020nfsurvey]. Diffusion and score-based models rely on denoising or
-score-matching objectives with likelihoods obtained only indirectly
+lack of bijective mappings) limit exploration, quantitative analysis, and other
+potential applications through latent space evaluations and manipulations.
+Generative Adversarial Networks (GANs), for instance, are implicit samplers
+trained with divergence surrogates rather than likelihoods, which precludes
+calibration by exact probabilities [@papamakarios2021nfreview]. Variational
+Autoencoders (VAEs) optimize an evidence lower bound rather than the exact log
+likelihood [@kobyzev2020nfsurvey]. Diffusion and score-based models rely on
+denoising or score-matching objectives with likelihoods obtained only indirectly
 [@croitoru2023diffusion_vision_survey]. Finally, while autoregressive decoders
 offer exact likelihoods, they do not yield a one-shot invertible latent
-representation [@papamakarios2021nfreview]. Such limitations can be particularly
-acute in multimodal and multiview settings, where heterogeneous or missing data
-often require calibrated cross-view comparisons and coherent anatomical
-reconstructions.
+representation [@papamakarios2021nfreview]. Such limitations extend to
+multimodal and multiview settings, where heterogeneous or missing data often
+require cross-view comparisons and coherent anatomical reconstructions.
 
 ## Normalizing Flows
 
@@ -64,46 +63,45 @@ framework for likelihood-calibrated multiview modeling.
 
 Multiview learning operates on two complementary principles: first, that each
 distinct acquisition or feature space ("view") contributes unique, view-specific
-information, and second, that shared information across views can be distilled
-into lower-dimensional projections to improve calibration and cross-cohort
-comparability. Traditionally, these shared projections have been estimated using
-classical correlation-based methods, such as Canonical Correlation Analysis (CCA)
-[@Hotelling1936CCA; @Hardoon2004CCAOverview]. More recently, kernel-based
-measures like the Hilbert–Schmidt Independence Criterion (HSIC)
-[@gretton2005hsic] and learned alignment objectives, including Barlow Twins,
-VICReg, and InfoNCE [@zbontar2021barlow; @bardes2021vicreg; @oord2018cpc], have
-expanded these capabilities to accommodate more complex patterns.
+information, and second, that shared information across views can be transformed
+via projections (often to lower-dimensional space) to improve calibration and
+cross-cohort comparability. Traditionally, these shared projections have been
+estimated using classical correlation-based methods, such as Canonical
+Correlation Analysis (CCA) [@Hotelling1936CCA; @Hardoon2004CCAOverview]. More
+recently, kernel-based measures like the Hilbert–Schmidt Independence Criterion
+(HSIC) [@gretton2005hsic] and learned alignment objectives, including Barlow
+Twins [@zbontar2021barlow], VICReg [@bardes2021vicreg], and InfoNCE
+[@oord2018cpc], have expanded these capabilities to accommodate more complex
+patterns.
 
 Similarity-driven multilinear reconstruction (SiMLR) captures this joint
 variation in a linear, low-rank setting by projecting multiview data into a
 shared subspace under subject-level similarity constraints
-[@Avants2021NatCompSci]. While SiMLR isolates this shared
-representation, it treats the remaining view-specific variation as an
-unstructured residual rather than explicitly modeling a private component. This
-separation supports robust cross-view harmonization and prediction by isolating
-stable population effects from noise
-[@Stone2020BreachersNeuroimaging; @Stone2024USSOCOM]. While deep learning
-approaches have explored cross-modal translation and disentanglement using
-convolutional neural networks, VAEs, or diffusion models [@havaei2016hemis;
-@Chartsias2019SDNet; @yuan2024remind], they often lack the unique combination of
-exact likelihoods and one-shot invertible mappings. Recent works have also
-explored normalizing flows for unsupervised MRI harmonization, but utilize the
-flow purely as a test-time density estimator to iteratively adapt an auxiliary
-translation network to an unknown target domain [@Beizaee2025].
+[@Avants2021NatCompSci]. While SiMLR isolates this shared representation, it
+treats the remaining view-specific variation as an unstructured residual rather
+than explicitly modeling a private component. This separation supports robust
+cross-view harmonization and prediction by isolating stable population effects
+from noise [@Stone2020BreachersNeuroimaging; @Stone2024USSOCOM]. While deep
+learning approaches have explored cross-modal translation and disentanglement
+using convolutional neural networks, VAEs, or diffusion models
+[@havaei2016hemis; @Chartsias2019SDNet; @yuan2024remind], they often lack the
+unique combination of exact likelihoods and one-shot invertible mappings. Recent
+works have also explored normalizing flows for unsupervised MRI harmonization,
+but utilize the flow purely as a test-time density estimator to iteratively
+adapt an auxiliary translation network to an unknown target domain
+[@beizaee2025harmonizingflows].
 
-Unlike test-time adaptation strategies that require iterative network updates
-during inference [@beizaee2025harmonizingflows], LAMNr flows bridge this gap by
-analogizing the SiMLR framework into a deep, likelihood-based architecture that
-topologically unfolds the complex anatomical manifold into a continuous vector
-space. Instead of an explicit linear factorization in the observation domain,
-LAMNr flows map each view into a shared multiscale latent space, ensuring exact
-log-likelihoods and bijective mappings. By utilizing latent-alignment objectives
-(e.g., VICReg, InfoNCE) to identify shared coordinates, the framework recovers
-the interpretability of a shared/private decomposition within a nonlinear,
-invertible space. Crucially, by modeling the joint latents with a Gaussian
-distribution, LAMNr flows enable closed-form conditional reconstructions. This
-allows the shared subspace to function as a geometrically-informed coordinate
-system. 
+In contrast, LAMNr flows analogize the SiMLR framework into a deep,
+likelihood-based architecture that topologically unfolds the potentially complex
+manifold into a continuous vector space. Instead of an explicit linear
+factorization in the observation domain, LAMNr flows map each view into a shared
+latent space, ensuring exact log-likelihoods and bijective mappings. By
+utilizing latent-alignment objectives (e.g., VICReg, InfoNCE) to identify shared
+coordinates, the framework recovers the interpretability of a shared/private
+decomposition within a nonlinear, invertible space. Crucially, by modeling the
+joint latents with a Gaussian distribution, LAMNr flows enable closed-form
+conditional reconstructions. This allows the shared subspace to function as a
+geometrically-informed coordinate system. 
 
 Additionally, the development of LAMNr flows provides a practical strategy in
 ensuring topological integrity within neural density estimators. Historically,
@@ -111,21 +109,23 @@ models like Deep Diffeomorphic Normalizing Flows (DDNF) [@salman2018deep]
 enforced smoothness by integrating time-varying velocity fields via Ordinary
 Differential Equations (ODEs). While this continuous formulation guarantees a
 diffeomorphic mapping, the computational cost of ODE integration is often
-prohibitive for large-scale medical imaging applications. To address this, LAMNr
-uses the discrete, efficient architectures of RealNVP [@dinh2016realnvp] and
-Glow [@kingma2018glow]. By aligning disparate modalities and views into a shared
-latent representation, the LAMNr flows model is steered to prioritizing robust,
-underlying anatomical structures over idiosyncratic signal. This
-latent-alignment acts in synergy with specific numerical safeguards, such as
-bounding the scale parameters within the affine coupling layers, to mitigate
-gradient blow-ups during training. Furthermore, the inclusion of training jitter
-serves as an additional regularizer (i.e., "dequantization" [@ho2019flowpp]). In
-the imaging context (i.e., Glow-based models), by introducing stochastic
-intensity- and shape-based perturbations during the learning phase, the model is
-discouraged from over-fitting to local voxel intensities. Together, these
-constraints force convergence on more generalized anatomical representations,
-stabilizing the Jacobian determinant and ensuring that the discrete transitions
-of the Glow architecture maintain the smooth, diffeomorphic properties required.
+prohibitive for large-scale applications (e.g., medical imaging). To address
+this, LAMNr flows use the discrete, efficient architectures of RealNVP
+[@dinh2016realnvp] and Glow [@kingma2018glow]. By aligning disparate modalities
+and views into a shared latent representation, the LAMNr flows model is steered
+towards prioritizing robust, underlying anatomical structures over idiosyncratic
+signal. Additionally, this latent-alignment employs specific numerical
+safeguards, such as bounding the scale parameters within the affine coupling
+layers, to mitigate gradient blow-ups during training. Furthermore, the
+inclusion of training jitter serves as an additional regularizer (i.e.,
+"dequantization" [@ho2019flowpp]). In the imaging context (i.e., Glow-based
+models), by introducing stochastic intensity- and shape-based perturbations
+during the learning phase, the model is discouraged from over-fitting to local
+voxel intensities. Together, these constraints force convergence on more
+generalized anatomical representations, stabilizing the Jacobian determinant and
+ensuring that the discrete transitions of the Glow architecture maintain the
+smooth, diffeomorphic properties required.  Analogous network architectural
+features are also leveraged for IDP-based scenarios using RealNVP.  
 
 
 ## Computational Anatomy and Normalizing Flows
@@ -164,24 +164,23 @@ precisely at the origin.   While registration-based templates (e.g., via
 Symmetric Normalization [@Avants:2010aa] or Large Deformation Diffeomorphic
 Metric Mapping [@Miller2002LDDMMOverview]) typically preserve high-frequency
 details through iterative normalization, spatial averaging, and sharpening; the
-generative latent templates exhibits a visually smoother appearance. This
-smoothness is a direct consequence of high-dimensional probabilistic modeling.
-As the exact mode of the latent distribution, the origin averages out
-idiosyncratic, high-frequency anatomical variations, such as individual cortical
-folding patterns, that do not strictly persist across the cohort. By isolating
-the macroscopic structural tendencies common to the entire population, the
-framework accounts for the concentration of measure phenomenon in high
-dimensions, where probability mass concentrates within a thin spherical shell
-rather than at the origin [@white2016sampling; @vershynin2018high;
-@blum2020foundations].
-
-Alternatively, a latent-based template within the LAMNr flows framework can be
-defined as the empirical average of the latent representations across a cohort,
-which is then decoded back to the image domain. In the small-variance or locally
-linear regime, these constructions coincide up to second-order terms, linking
-both latent-space definitions to Fréchet means in the induced image metric
-[@Pennec2006; @arvanitidis2018latent]. This latter template definition typically
-exhibits increased anatomical details similar to the registration-based analogs.
+generative latent origin-based templates exhibits a visually smoother
+appearance. This smoothness is a direct consequence of high-dimensional
+probabilistic modeling. As the exact mode of the latent distribution, the origin
+averages out idiosyncratic, high-frequency anatomical variations, such as
+individual cortical folding patterns, that do not strictly persist across the
+cohort. By isolating the macroscopic structural tendencies common to the entire
+population, the framework accounts for the concentration of measure phenomenon
+in high dimensions, where probability mass concentrates within a thin spherical
+shell rather than at the origin [@white2016sampling; @vershynin2018high;
+@blum2020foundations].  Alternatively, a latent-based template within the LAMNr
+flows framework can be defined as the numerical average of the latent
+representations across a cohort, which is then decoded back to the image domain.
+In the small-variance or locally linear regime, these constructions coincide up
+to second-order terms, linking both latent-space definitions to Fréchet means in
+the induced image metric [@Pennec2006; @arvanitidis2018latent]. This latter
+template definition typically exhibits increased anatomical details similar to
+the registration-based analogs.
 
 Beyond template construction, this continuous latent framework provides direct
 analogues to the fundamental metric operations of traditional computational
@@ -191,15 +190,15 @@ velocity field over a continuous time domain $t \in [0, 1]$ . The length of this
 optimal, continuous deformation path establishes the exact geodesic distance
 between the two biological structures [@Miller2002LDDMMOverview;@Beg2005LDDMM].
 In the LAMNr flows framework, this computationally intensive temporal
-integration is replaced with an algebraic interpolation within the latent space.
-Traversing the latent manifold between two encoded images, $z_0$ and $z_1$,
-using a scalar interpolation parameter $\alpha \in [0, 1]$ generates a
+integration can be substituted with an algebraic interpolation within the latent
+space. Traversing the latent manifold between two encoded images, $z_0$ and
+$z_1$, using a scalar interpolation parameter $\alpha \in [0, 1]$ generates a
 continuous trajectory of decoded images that closely approximates this
 diffeomorphic flow. Consequently, the distances computed directly in the latent
 space, when properly evaluated via distribution-preserving spherical metrics
 rather than naive Euclidean norms, serve as highly efficient surrogates for the
 complex, deformation-based geodesic distances of traditional computational
-anatomy.  This conceptualization, along with other illustrative results, are
+anatomy.  These conceptualizations, along with other illustrative results, are
 discussed and provided below in the context of our proposed LAMNr flows
 framework.  
 
@@ -241,7 +240,7 @@ Key contributions of this work include:
 
 5. **Open-source, 3D-capable Implementation:** Unlike many contemporary
    flow-based tools limited to 2D slice-wise processing
-   [@Beizaee2025;@Wen:2023aa], we provide a comprehensive, open-source, 2D and
+   [@beizaee2025harmonizingflows;@Wen:2023aa], we provide a comprehensive, open-source, 2D and
    3D PyTorch implementation, based on the `normflows` library
    [@stimper2023normflows], which is integrated with the ANTsX ecosystem (via
    ANTsTorch) for robust data handling and auxiliary functionality.
