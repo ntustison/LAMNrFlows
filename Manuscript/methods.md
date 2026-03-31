@@ -23,7 +23,8 @@
    \label{fig:lamnr_flows_illustration}
 \end{figure}
 
-In the LAMNr flows framework, for a single view \(v\), a normalizing flow with
+Given subject \(n\) with measurements \(\{x_n^{(v)}\}_{v=1}^V\) across one or
+more views \(v = 1,\dots,V\), for a single view \(v\), a normalizing flow with
 parameters \(\theta^{(v)}\) is an invertible mapping
 
 \begin{equation}
@@ -32,7 +33,7 @@ z_n^{(v)} = f^{(v)}_{\theta}(x_n^{(v)}),
 \end{equation}
 
 that transforms observed data \(x_n^{(v)}\) to a latent space
-\(\mathcal{Z}^{(v)}\) with a simple base density, typically
+\(\mathcal{Z}^{(v)}\) with a chosen base density, typically
 \(p_Z(z) = \mathcal{N}(0, I)\). The induced density on \(\mathcal{X}^{(v)}\)
 follows from the change-of-variables formula:
 
@@ -43,15 +44,14 @@ follows from the change-of-variables formula:
 \end{equation}
 
 which can be evaluated exactly for the RealNVP [@dinh2016realnvp] and Glow
-[@kingma2018glow] architectures used in our work. Maximum-likelihood estimation
-chooses \(\theta^{(v)}\) to maximize the sum of log-likelihoods over subjects,
-or equivalently to minimize the average negative log-likelihood
+[@kingma2018glow] architectures used this proposed framework. The maximum-likelihood
+estimation chooses \(\theta^{(v)}\) to maximize the sum of log-likelihoods over
+subjects, or equivalently to minimize the average negative log-likelihood
 [@kobyzev2020nfsurvey].
 
-Each subject \(n\) has measurements \(\{x_n^{(v)}\}_{v=1}^V\) across one or more 
-views \(v = 1,\dots,V\). We instantiate one flow per view and train them jointly on
-subject-matched minibatches. If we consider only the flow likelihoods, the pure
-maximum-likelihood objective is
+For multiple views in the LAMNr flows framework, we instantiate one flow per
+view and train them jointly on subject-matched minibatches. If we consider only
+the flow likelihoods, the pure maximum-likelihood objective is
 
 \begin{equation}
 \mathcal{L}_{\text{like}}(\theta)

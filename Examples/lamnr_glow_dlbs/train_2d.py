@@ -1016,86 +1016,155 @@ def _manual_prior_sample(model, n: int, temp: float = 1.0, x_template: torch.Ten
 
 def main():
     ap = argparse.ArgumentParser("Glow 2D (builder) trainer")
+    
+    # --- Input Data & Geometry ---
     ap.add_argument("--view", action="append", nargs="+", required=True,
-                help="Repeat per view. Each view takes one or more glob patterns (full paths). Files are paired across views by subject folder.")
-    ap.add_argument("--H", type=int, default=128)
-    ap.add_argument("--W", type=int, default=128)
-    ap.add_argument("--L", type=int, default=4)
-    ap.add_argument("--K", type=int, default=3)
-    ap.add_argument("--hidden", type=int, default=96)
+                help="Path patterns for each imaging modality (e.g., T1, FA). Use one --view per modality. Files are paired across views by subject folder.")
+    ap.add_argument("--H", type=int, default=128, 
+                    help="Target image height (pixels) for resizing 2D inputs.")
+    ap.add_argument("--W", type=int, default=128, 
+                    help="Target image width (pixels) for resizing 2D inputs.")
+    
+    # --- Glow Architecture ---
+    ap.add_argument("--L", type=int, default=4, 
+                    help="Number of resolution levels in the multi-scale architecture.")
+    ap.add_argument("--K", type=int, default=3, 
+                    help="Number of flow steps (ActNorm -> 1x1 Conv -> Coupling) per resolution level.")
+    ap.add_argument("--hidden", type=int, default=96, 
+                    help="Number of hidden channels in the affine coupling subnetworks.")
+    ap.add_argument("--base", type=str, default="glow", choices=["glow","diag"], 
+                    help="Base distribution type for the latent space (Standard Gaussian vs. Learned Diagonal).")
+    ap.add_argument("--glowbase-logscale-factor", type=float, default=3.0, 
+                    help="Scaling factor applied to the log-scale output of the base distribution.")
+    ap.add_argument("--glowbase-min-log", type=float, default=-5.0, 
+                    help="Minimum clamp value for log-scale parameters (prevents numerical underflow).")
+    ap.add_argument("--glowbase-max-log", type=float, default=5.0, 
+                    help="Maximum clamp value for log-scale parameters (prevents numerical explosion).")
+    ap.add_argument("--scale-map", type=str, default="tanh", choices=["tanh","exp","sigmoid","sigmoid_inv"], 
+                    help="Activation function applied to the scale parameters (s) in the affine coupling layers.")
+    ap.add_argument("--scale-cap", type=float, default=2.0, 
+                    help="Hard limit on the scaling factor when using exp or tanh mapping to ensure stability.")
+    ap.add_argument("--net-actnorm", action="store_true", 
+                    help="If set, inserts ActNorm layers inside the coupling subnetworks.")
 
-    ap.add_argument("--base", type=str, default="glow", choices=["glow","diag"])
-    ap.add_argument("--glowbase-logscale-factor", type=float, default=3.0)
-    ap.add_argument("--glowbase-min-log", type=float, default=-5.0)
-    ap.add_argument("--glowbase-max-log", type=float, default=5.0)
-    ap.add_argument("--scale-map", type=str, default="tanh", choices=["tanh","exp","sigmoid","sigmoid_inv"])
-    ap.add_argument("--scale-cap", type=float, default=2.0)
-    ap.add_argument("--net-actnorm", action="store_true", help="ActNorm in coupling subnets")
+    # --- Training Loop & Logistics ---
+    ap.add_argument("--batch", type=int, default=32, 
+                    help="Per-GPU batch size. Reduce this if encountering CUDA Out Of Memory errors.")
+    ap.add_argument("--train-samples", type=int, default=6000, 
+                    help="Number of samples (or iterations) constituting one logical training epoch.")
+    ap.add_argument("--val-samples", type=int, default=256, 
+                    help="Number of samples used during the validation/evaluation phase.")
+    ap.add_argument("--max-iter", type=int, default=30000, 
+                    help="Absolute total number of training iterations before the script terminates.")
+    ap.add_argument("--extra-iters", type=int, default=0, 
+                    help="If >0, overrides --max-iter to train for exactly this many iterations past the resumed checkpoint.")
+    ap.add_argument("--eval-interval", type=int, default=1000, 
+                    help="Frequency (in iterations) to run validation, calculate NLL, and update the LR scheduler.")
+    ap.add_argument("--plot-interval", type=int, default=1000, 
+                    help="Frequency (in iterations) to generate and save sample/reconstruction preview grids.")
+    ap.add_argument("--num-workers", type=int, default=4, 
+                    help="Number of CPU subprocesses used for dataloading and ANTs augmentation.")
 
-    ap.add_argument("--batch", type=int, default=32)
-    ap.add_argument("--train-samples", type=int, default=6000)
-    ap.add_argument("--val-samples", type=int, default=256)
-    ap.add_argument("--max-iter", type=int, default=30000, help="Target total iterations for this run")
-    ap.add_argument("--extra-iters", type=int, default=0, help="If >0, ignore --max-iter and run this many more iterations from the resume point")
-    ap.add_argument("--eval-interval", type=int, default=1000)
-    ap.add_argument("--plot-interval", type=int, default=1000)
-    ap.add_argument("--num-workers", type=int, default=4)
+    # --- Hardware & Precision ---
+    ap.add_argument("--devices", type=str, default="cuda:0", 
+                    help="PyTorch device string (e.g., 'cuda:0', 'cpu', 'mps').")
+    ap.add_argument("--precision", type=str, default="mixed", choices=["double","float","mixed"], 
+                    help="Floating point precision. 'mixed' uses AMP for faster training.")
+    ap.add_argument("--amp-dtype", type=str, default="bf16", choices=["bf16","fp16"], 
+                    help="Data type for Automatic Mixed Precision. bf16 is recommended for Ampere+ GPUs.")
+    ap.add_argument("--seed", type=int, default=0, 
+                    help="Global random seed for PyTorch, NumPy, and dataloading determinism.")
 
-    ap.add_argument("--devices", type=str, default="cuda:0")
-    ap.add_argument("--precision", type=str, default="mixed", choices=["double","float","mixed"])
-    ap.add_argument("--amp-dtype", type=str, default="bf16", choices=["bf16","fp16"])
-    ap.add_argument("--seed", type=int, default=0)
+    # --- Optimizer & Scheduler ---
+    ap.add_argument("--lr", type=float, default=1e-4, 
+                    help="Initial learning rate for the AdamW optimizer.")
+    ap.add_argument("--weight-decay", type=float, default=1e-5, 
+                    help="L2 regularization penalty applied to network weights (excluding ActNorm parameters).")
+    ap.add_argument("--warmup-iters", type=int, default=800, 
+                    help="Number of iterations over which the learning rate linearly scales from 0 to --lr.")
+    ap.add_argument("--lr-decay-gamma", type=float, default=1.0, 
+                    help="Multiplicative factor for StepLR decay. 1.0 disables step decay.")
+    ap.add_argument("--lr-decay-steps", type=int, default=0, 
+                    help="Number of iterations before applying the lr-decay-gamma reduction. 0 disables step decay.")
+    ap.add_argument("--plateau-factor", type=float, default=0.5, 
+                    help="Factor by which the learning rate is reduced when validation NLL plateaus.")
+    ap.add_argument("--plateau-patience", type=int, default=4, 
+                    help="Number of eval-intervals with no NLL improvement before the learning rate drops.")
+    ap.add_argument("--plateau-threshold", type=float, default=1e-4, 
+                    help="Minimum change in NLL to qualify as an improvement for the plateau scheduler.")
+    ap.add_argument("--plateau-cooldown", type=int, default=0, 
+                    help="Number of eval-intervals to wait after an LR reduction before resuming normal plateau monitoring.")
+    ap.add_argument("--min-lr", type=float, default=1e-6, 
+                    help="Absolute minimum learning rate floor for the plateau scheduler.")
 
-    ap.add_argument("--lr", type=float, default=1e-4)
-    ap.add_argument("--weight-decay", type=float, default=1e-5)
-    ap.add_argument("--warmup-iters", type=int, default=800)
-    ap.add_argument("--lr-decay-gamma", type=float, default=1.0)
-    ap.add_argument("--lr-decay-steps", type=int, default=0)
-    ap.add_argument("--plateau-factor", type=float, default=0.5)
-    ap.add_argument("--plateau-patience", type=int, default=4)
-    ap.add_argument("--plateau-threshold", type=float, default=1e-4)
-    ap.add_argument("--plateau-cooldown", type=int, default=0)
-    ap.add_argument("--min-lr", type=float, default=1e-6)
-
-    ap.add_argument("--grad-clip", type=float, default=2.0)
+    # --- Gradients & EMA ---
+    ap.add_argument("--grad-clip", type=float, default=2.0, 
+                    help="Maximum L2 norm for gradient clipping. Crucial for stability in Normalizing Flows.")
     ap.add_argument("--grad-accum", type=int, default=1,
                      help="Accumulate gradients over N micro-batches before optimizer.step(). Effective batch = batch * grad_accum.")
-    ap.add_argument("--ema", action="store_true")
-    ap.add_argument("--ema-decay", type=float, default=0.9995)
+    ap.add_argument("--ema", action="store_true", 
+                    help="Maintain an Exponential Moving Average of model weights for stabler sampling/evaluation.")
+    ap.add_argument("--ema-decay", type=float, default=0.9995, 
+                    help="Decay rate for the EMA weights. Higher values mean slower updates but more stability.")
 
-    ap.add_argument("--resume", type=str, default="", help="Path to checkpoint .pt to resume from")
-    ap.add_argument("--auto-resume", action="store_true", help="If set, try <out-dir>/training_state.pt when --resume is not provided")
-    ap.add_argument("--out-dir", type=str, default="runs_glow2d_builder")
+    # --- Checkpointing & I/O ---
+    ap.add_argument("--resume", type=str, default="", 
+                    help="Explicit path to a checkpoint .pt file to resume training from.")
+    ap.add_argument("--auto-resume", action="store_true", 
+                    help="If set, automatically tries to load <out-dir>/training_state.pt when --resume is not provided.")
+    ap.add_argument("--out-dir", type=str, default="runs_glow2d_builder", 
+                    help="Directory where checkpoints, logs, and preview images will be saved.")
 
-    # NEW cohort options
-    ap.add_argument("--slice-idx", type=int, default=120, help="Z slice index to extract across cohort/template")
-    ap.add_argument("--val-frac", type=float, default=0.10, help="Fraction of subjects held out for validation in cohort mode")
-    ap.add_argument("--subject-limit", type=int, default=0, help="(Debug) limit number of subjects; 0 means all")
+    # --- Dataset & Cohort Options ---
+    ap.add_argument("--slice-idx", type=int, default=120, 
+                    help="Z-axis slice index to extract consistently across the cohort/template.")
+    ap.add_argument("--val-frac", type=float, default=0.10, 
+                    help="Fraction of subjects held out for validation in cohort mode (e.g., 0.10 = 10%).")
+    ap.add_argument("--subject-limit", type=int, default=0, 
+                    help="(Debug) limit the number of subjects loaded; 0 means use all available subjects.")
+    ap.add_argument("--smooth-alpha", type=float, default=0.1, 
+                    help="EMA smoothing factor in (0,1] for metric logging; higher = faster adaptation to new values.")
 
-    ap.add_argument("--smooth-alpha", type=float, default=0.1, help="EMA smoothing factor in (0,1]; higher = faster")
-
-    # Alignment & weighting
-    ap.add_argument("--align", choices=["none","infonce","barlow","vicreg","hsic","pearson"], default="none", help="Latent alignment loss across views")
-    ap.add_argument("--align-weight", type=float, default=0.05, help="Fixed weight for alignment loss (if --weighting=fixed)")
-    ap.add_argument("--align-warmup", type=int, default=500, help="Number of warm-up alignment its")
-    ap.add_argument("--proj-dim", type=int, default=256, help="Projection head output dim")
-    ap.add_argument("--proj-hidden", type=int, default=512, help="Projection MLP hidden dim")
-    ap.add_argument("--temperature", type=float, default=0.1, help="InfoNCE temperature")
-    ap.add_argument("--barlow-lambda", type=float, default=5e-3, help="Off-diagonal weight (lambda) for Barlow Twins")
-    ap.add_argument("--weighting", choices=["fixed","kendall"], default="fixed", help="Loss weighting strategy")
-    ap.add_argument("--init-logvar-nll", type=float, default=0.0, help="Init log variance (s) for NLL in Kendall weighting")
-    ap.add_argument("--init-logvar-align", type=float, default=0.0, help="Init log variance (s) for ALIGN in Kendall weighting")
-    # VICReg hyperparameters
-    ap.add_argument("--vicreg-inv", type=float, default=25.0, help="VICReg invariance weight (MSE between views)")
-    ap.add_argument("--vicreg-var", type=float, default=25.0, help="VICReg variance weight (keep per-dim std above gamma)")
-    ap.add_argument("--vicreg-cov", type=float, default=1.0,  help="VICReg covariance weight (penalize off-diagonals)")
-    ap.add_argument("--vicreg-gamma", type=float, default=1.0, help="VICReg variance floor (target std per feature)")
-    # HSIC hyperparameters (RBF kernel)
-    ap.add_argument("--hsic-sigma", type=float, default=0.0, help="RBF bandwidth; 0 -> median heuristic per batch")
+    # --- Multimodal Latent Alignment ---
+    ap.add_argument("--align", choices=["none","infonce","barlow","vicreg","hsic","pearson"], default="none", 
+                    help="Latent alignment loss function to synchronize representations across different views.")
+    ap.add_argument("--align-weight", type=float, default=0.05, 
+                    help="Fixed weight for alignment loss (used if --weighting=fixed).")
+    ap.add_argument("--align-warmup", type=int, default=500, 
+                    help="Number of iterations to gradually scale up alignment loss from 0 to its target weight.")
+    ap.add_argument("--proj-dim", type=int, default=256, 
+                    help="Output dimensionality of the projection head used before alignment.")
+    ap.add_argument("--proj-hidden", type=int, default=512, 
+                    help="Hidden layer dimensionality of the projection MLP.")
+    ap.add_argument("--temperature", type=float, default=0.1, 
+                    help="Temperature parameter for the InfoNCE contrastive loss.")
+    ap.add_argument("--barlow-lambda", type=float, default=5e-3, 
+                    help="Off-diagonal weight penalty (lambda) for Barlow Twins loss.")
+    ap.add_argument("--weighting", choices=["fixed","kendall"], default="fixed", 
+                    help="Loss weighting strategy. 'kendall' learns the balance between NLL and Alignment dynamically.")
+    ap.add_argument("--init-logvar-nll", type=float, default=0.0, 
+                    help="Initial log variance (s) for NLL when using Kendall weighting.")
+    ap.add_argument("--init-logvar-align", type=float, default=0.0, 
+                    help="Initial log variance (s) for Alignment when using Kendall weighting.")
+    
+    # --- VICReg Hyperparameters ---
+    ap.add_argument("--vicreg-inv", type=float, default=25.0, 
+                    help="VICReg invariance weight (pulls representations of the same subject closer).")
+    ap.add_argument("--vicreg-var", type=float, default=25.0, 
+                    help="VICReg variance weight (pushes standard deviation per feature towards gamma).")
+    ap.add_argument("--vicreg-cov", type=float, default=1.0,  
+                    help="VICReg covariance weight (penalizes off-diagonal correlations to prevent collapse).")
+    ap.add_argument("--vicreg-gamma", type=float, default=1.0, 
+                    help="VICReg variance floor (target standard deviation per feature).")
+    
+    # --- HSIC Hyperparameters ---
+    ap.add_argument("--hsic-sigma", type=float, default=0.0, 
+                    help="RBF bandwidth for HSIC. 0 -> use the median pairwise distance heuristic per batch.")
 
     ap.add_argument("--use-ckpt-config", action="store_true",
-                help="When resuming, override arch args with those saved in the checkpoint.")
+                help="When resuming, override command-line architectural args with those saved in the checkpoint.")
 
+    # --- Data Augmentation ---
     ap.add_argument("--aug-schedules", type=str,
         default=(
             "noise_std:cos:0.05->0.00@150k,"
@@ -1104,30 +1173,32 @@ def main():
             "sd_simulated_bias_field:cos:1.00->0.00@120k,"
             "sd_histogram_warping:exp:0.05->0.00@120k"
         ),
-        help="Multi-parameter anneal spec for ANTs data_augmentation knobs.")
-    ap.add_argument("--disable-aug-anneal", action="store_true", help="If set, uses static augmentation values from dataset ctor.")
+        help="Multi-parameter anneal spec for ANTs data augmentation intensities (param:curve:start->end@iters).")
+    ap.add_argument("--disable-aug-anneal", action="store_true", 
+                    help="If set, uses static augmentation values from the dataset constructor instead of annealing.")
 
-    # Preview grids
+    # --- Previews & Grids ---
     ap.add_argument("--sample-mode", type=str, choices=["model","data","off"], default="model",
-                    help="How to produce preview grids during eval: model sampling, random val batch, or skip")
+                    help="How to produce preview grids during eval: 'model' sampling from prior, random 'data' batch, or 'off'.")
     ap.add_argument("--sample-temp", type=float, default=1.0,
-                help="Sampling temperature: scales prior noise (z = T·ε) when --sample-mode model")
-    ap.add_argument("--sample-grid-norm", type=str, choices=["to01","clamp","both"], default="to01")
+                help="Sampling temperature: scales prior noise (z = T·ε) when generating images. Lower T = sharper/less diverse.")
+    ap.add_argument("--sample-grid-norm", type=str, choices=["to01","clamp","both"], default="to01",
+                    help="How to normalize pixel intensities before saving preview grids. 'to01' min-max scales, 'clamp' strictly clips to [0,1].")
 
-    # --- Screening (shared subspace discovery) ---
+    # --- Screening (Shared Subspace Discovery) ---
     ap.add_argument("--screen", type=str, default="none", choices=["none","cca","hsic"],
-                    help="Optional subspace screening before alignment.")
+                    help="Optional subspace screening method to filter out unshared information before applying alignment loss.")
     ap.add_argument("--screen-warmup", type=int, default=1000,
-                    help="Iterations before first screening pass.")
+                    help="Iterations to wait before running the first screening pass.")
     ap.add_argument("--screen-refresh", type=int, default=0,
-                    help="Recompute screening every N iters (0 = one-shot).")
+                    help="Recompute screening projection matrix every N iterations (0 = compute only once).")
     ap.add_argument("--screen-frac", type=float, default=0.5,
-                    help="Fraction of projected dims to keep as shared (0,1].")
+                    help="Fraction of total projected dimensions to retain as 'shared' (0,1].")
     ap.add_argument("--cca-ridge", type=float, default=1e-3,
-                    help="CCA ridge regularization (stability).")
+                    help="Ridge regularization penalty for Canonical Correlation Analysis (CCA) numerical stability.")
     ap.add_argument("--prefilter-frac", type=float, default=0.5,
-                help="HSIC Pearson prefilter fraction (0,1].")
-
+                help="Fraction of dimensions to keep during the preliminary Pearson filter step of HSIC screening.")
+    
     args = ap.parse_args()
     args.num_views = len(args.view)
 
