@@ -49,20 +49,18 @@ However, directly computing and operating on the full covariance matrix
 \(\Sigma\) poses a severe computational bottleneck due to the "curse of
 dimensionality." While feasible for 2D images, a small 3D medical volume (e.g.,
 \(64 \times 64 \times 64\)) yields a latent dimension \(D \approx 2.6 \times
-10^5\). Storing the dense \(D \times D\) covariance matrix requires over 500 GB
-of memory, making direct Cholesky inversion \(\mathcal{O}(D^3)\) computationally
-intractable.
+10^5\). Storing the dense \(D \times D\) covariance matrix as 64-bit double
+precision requires over 500 GB of memory, making direct Cholesky inversion
+\(\mathcal{O}(D^3)\) computationally intractable.
 
 To resolve this in high-dimensional 3D settings, we employ a
 low-rank-plus-diagonal parameterization via Singular Value Decomposition (SVD).
 We approximate the covariance as \(\Sigma \approx U \Lambda U^T + \sigma^2 I\),
 where \(U\) contains the top \(r\) eigenvectors (\(r \ll D\)), \(\Lambda\) is
 the diagonal matrix of the top \(r\) eigenvalues, and \(\sigma^2 I\) captures
-the isotropic residual variance.
-
-Given an observed subset of coordinates \(O\) and an unobserved subset \(U\),
-the exact posterior \(p(z_U \mid z_O)\) is Gaussian. The conditional mean and
-covariance are theoretically given by:
+the isotropic residual variance. Given an observed subset of coordinates \(O\)
+and an unobserved subset \(U\), the exact posterior \(p(z_U \mid z_O)\) is
+Gaussian. The conditional mean and covariance are theoretically given by:
 
 \begin{equation}
 \mu_{U\mid O}
@@ -74,19 +72,18 @@ covariance are theoretically given by:
 = \Sigma_{UU} - \Sigma_{UO}\Sigma_{OO}^{-1}\Sigma_{OU}.
 \end{equation}
 
-To evaluate these equations without instantiating the massive \(\Sigma_{OO}\)
-matrix, we utilize the Woodbury matrix identity. Specifically, we apply the
-Push-Through identity to perform the inversion strictly within the
-low-dimensional subspace \(r\). By reformulating the system to solve for a
-strictly positive-definite \(r \times r\) matrix (\(K = \Lambda^{1/2} U_O^T U_O
-\Lambda^{1/2} + \sigma^2 I\)), we bypass catastrophic numerical cancellations
-and reduce the memory footprint to mere megabytes.
-
-Samples from this conditional Gaussian propagate uncertainty, while the
-posterior mean provides a calibrated point estimate. Applying the inverse flows
-to these posterior latents yields imputations, harmonized representations, and
-latent edits in the original data space, with exact likelihoods available for
-all configurations.
+To evaluate these equations without instantiating the massive $\Sigma_{OO}$
+matrix, we utilize the Woodbury matrix identity [@henderson1981deriving].
+Specifically, we apply the Push-Through identity to perform the inversion
+strictly within the low-dimensional subspace $r$ [@rasmussen2006gaussian].
+By reformulating the system to solve for a strictly positive-definite $r \times
+r$ matrix ($K = \Lambda^{1/2} U_O^T U_O \Lambda^{1/2} + \sigma^2 I$), we bypass
+problematic numerical cancellations [@higham2002accuracy] and reduce the
+memory footprint to mere megabytes. Samples from this conditional Gaussian
+propagate uncertainty, while the posterior mean provides a calibrated point
+estimate. Applying the inverse flows to these posterior latents yields
+imputations, harmonized representations, and latent edits in the original data
+space, with exact likelihoods available for all configurations.
 
 <!--
 ### Latent distance as a Riemannian biomarker

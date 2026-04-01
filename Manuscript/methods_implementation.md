@@ -33,7 +33,7 @@ jitter, evaluate \(\log|\Sigma|\) as \(2\sum \log \mathrm{diag}(L)\), and form
 the quadratic term via triangular solves rather than explicit matrix inversion.
 This avoids determinant and matrix-inverse calls that are unstable in high
 dimensions and yields fewer NaNs during training. We initialize \(W\) at small
-scale so that \(\Sigma\) is well conditioned at start, and we learn \(\log
+scale so that \(\Sigma\) is well conditioned at start, and we optimize \(\log
 \sigma\) to keep \(\sigma\) strictly positive.  These choices follow standard
 numerical recommendations for stable positive-definite computations
 [@higham2002accuracy] and pair naturally with shrinkage used elsewhere in our
@@ -64,9 +64,9 @@ certain background modes.
 ### Tabular-specific Implementation Details
 
 For tabular flows we apply a small additive “jitter” noise to the features,
-treated as dequantization [@ho2019flowpp] rather than biological variation. The amplitude is
-also controlled by a scalar schedule \(\alpha(t)\) (linear, cosine, or
-exponential in training time). In addition, certain views can undergo a
+treated as dequantization [@ho2019flowpp] rather than biological variation. The
+amplitude is also controlled by a scalar schedule \(\alpha(t)\) (linear, cosine,
+or exponential in training time). In addition, certain views can undergo a
 per-feature marginal transform prior to normalization, such as an elementwise
 \(\operatorname{asinh}(x)\) for heavy-tailed continuous variables or rank-based
 Gaussianization that maps the empirical CDF of each feature to a standard
@@ -85,22 +85,41 @@ schedule with a plateau-based reducer. We monitor exact negative log-likelihood
 in bits-per-dimension, view-wise breakdowns, and alignment loss values, and
 periodically log reconstructions and samples for visual inspection.
 
-To accommodate training scenarios under constrained VRAM, we enable gradient
-accumulation (microbatching). With an accumulation factor \(A\) and microbatch
-size \(B_{\mu}\), the effective batch is \(B_{\mathrm{eff}} = A \cdot B_{\mu}\).
-We compute per-sample losses on each microbatch, accumulate their gradients, and
-perform a single optimizer step every \(A\) microbatches. Likelihood terms are
-summed in natural units and normalized by the total number of samples across the
-\(A\) microbatches.  Alignment losses (Pearson, Barlow Twins, VICReg, InfoNCE,
-HSIC) are accumulated with microbatch-size weighting so the effective objective
-matches the non-accumulated baseline. Under mixed precision, gradients are
-accumulated in scaled form and unscaled once before a single global-norm clip
-and optimizer step.  EMA updates and learning-rate schedulers advance once per
-effective batch. ActNorm uses fixed statistics after warm-up, so accumulation
-does not change normalization. For InfoNCE, negatives are limited to the current
-microbatch by default. When larger negative sets are required, we optionally
-maintain a cross-microbatch queue to approximate large-batch behavior. 
+To accommodate training scenarios under constrained VRAM, particularly for 3D
+volumes, we enable gradient accumulation (microbatching). With an accumulation
+factor $A$ and microbatch size $B_{\mu}$, the effective batch size is
+$B_{\mathrm{eff}} = A \cdot B_{\mu}$. We compute per-sample losses on each
+microbatch, accumulate their gradients, and perform a single optimizer step
+every $A$ microbatches. Likelihood terms are summed in natural units and
+normalized by the total number of samples across the $A$ microbatches. Alignment
+losses (specifically VICReg and InfoNCE) are normalized by the number of
+accumulation steps to ensure gradient consistency with the non-accumulated
+baseline. While this preserves the scale of the objective, the alignment
+constraints are computed within each microbatch rather than across the full
+effective batch. Consequently, the contrastive "negative pool" and covariance
+statistics are derived from local batch statistics, providing a robust but
+computationally feasible regularization of the manifold. Under mixed precision,
+gradients are accumulated in scaled form and unscaled once before a single
+global-norm clip and optimizer step. EMA updates and learning-rate schedulers
+advance once per effective batch, while ActNorm layers utilize fixed statistics
+after the initial warm-up phase to ensure that accumulation does not alter
+normalization behavior.
 
+To ensure stable density estimation and prevent degenerate likelihoods due to
+data quantization, we also employ uniform dequantization (jittering) during training,
+following the variational framework established in Flow++ [@ho2019flowpp].
+We apply lightweight, label-free augmentations during maximum-likelihood
+training to improve robustness without changing the model’s exact likelihood
+computation (augmentations act on inputs only)
+[@Tustison:2024aa;@Tustison:2025aa] (cf Figure \ref{fig:aug-schedule}). For
+image views, we use geometric transforms (linear and non-linear
+transformations) shared across all views of a subject to preserve alignment
+targets, and per-view intensity-based transforms (noise, simulated bias-field,
+histogram warping).  Similar to the tabular case, the amplitude is controlled by
+a scalar schedule \(\alpha(t)\) (linear, cosine, or exponential in training
+time).
+
+<!--
 The same training loop supports single and multiple views by instantiating one
 flow per view, computing per-view log-likelihoods and latents for each
 minibatch, flattening the multiscale latents, and applying the projector plus
@@ -109,6 +128,7 @@ replace the image Glow architecture with RealNVP while keeping the multiview
 alignment and conditional Gaussian stages unchanged, which allows LAMNr Flows to
 operate uniformly across image contrasts and multiview IDP blocks within the
 same methodological framework.
+-->
 
 \begin{figure*}[!htb]
   \centering
@@ -148,18 +168,4 @@ same methodological framework.
   \label{fig:aug-schedule}
 \end{figure*}
 
-<!-- 
-To ensure stable density estimation and prevent degenerate likelihoods due to
-data quantization, we also employ uniform dequantization (jittering) during training,
-following the variational framework established in Flow++ [@ho2019flowpp].
-We apply lightweight, label-free augmentations during maximum-likelihood
-training to improve robustness without changing the model’s exact likelihood
-computation (augmentations act on inputs only)
-[@Tustison:2024aa;@Tustison:2025aa] (cf Figure \ref{fig:aug-schedule}). For
-image views (2D/3D), we use geometric transforms (linear and non-linear
-transformations) shared across all views of a subject to preserve alignment
-targets, and per-view intensity-based transforms (noise, simulated bias-field,
-histogram warping).  Similar to the tabular case, the amplitude is controlled by
-a scalar schedule \(\alpha(t)\) (linear, cosine, or exponential in training
-time).
 -->

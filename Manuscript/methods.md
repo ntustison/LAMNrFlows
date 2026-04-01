@@ -72,21 +72,30 @@ shared information across views and a block \(z^{(v)}_{P,n}\) that is
 view-specific. The indices that define this split can be chosen a priori or via
 the CCA/HSIC-based screening procedure (described below).
 
-We then attach a small projector network \(\phi^{(v)}_{\psi} : \mathcal{Z}^{(v)}
-\to \mathbb{R}^D\) to each view, with a matched output dimension \(D\) across
-views, and apply a multiview alignment loss to the projected shared coordinates.
-Attaching a small projector $\phi_{\psi}^{(v)} : \mathcal{Z}^{(v)} \rightarrow
-\mathbb{R}^{D}$ decouples the flow's latent dimensionality and arbitrary
-coordinate system from the alignment space, letting each view learn a light
-reparameterization (linear or shallow MLP) that canonizes rotations/scales
-introduced by invertible mixing and harmonizes dimensions across views. By
-restricting alignment to this matched, low-dimensional subspace $D$, we
-stabilize dependence objectives (i.e., latent alignment constraints), avoid
-forcing private directions to align, and integrate CCA/HSIC screening cleanly by
-aligning only the coordinates deemed shared. We summarize the main options in
-Table \ref{tab:alignment}. In all cases, the alignment term acts only on shared
-coordinates, leaving private coordinates free to capture view-specific
-variation.[^align] 
+We attach a small projector network $\phi^{(v)}_{\psi} : \mathcal{Z}^{(v)} \to
+\mathbb{R}^D$ to each view, utilizing a multi-layer perceptron (MLP)
+architecture with a hidden layer width $H$ and a matched output dimensionality
+$D$ across all views. Default values are $H=512$ and $D=256$.  Attaching this
+projector decouples the flow’s internal latent dimensionality and arbitrary
+coordinate system from the alignment space. This allows each view to learn a
+light reparameterization of alignment of rotations and scales frequently
+introduced by invertible mixing layers such as the $1 \times 1 (\times 1)$
+convolutions in Glow, while harmonizing dimensions across disparate views.  The
+role of this $D$ subspace can very strategically depending on the data type. For
+tabular IDPs (i.e., RealNVP) this configuration represents a high-capacity
+expansion of the lower-dimensional latent space. This expansion provides the
+alignment constraints with sufficient degrees of freedom to operate without
+inducing information loss or architectural bottlenecks.  For image
+data (i.e., Glow), the projection acts as an intentional dimensionality
+reduction and selective filter. By compressing the massive raw latent space into
+the lower space $D$, we filter out view-specific high-frequency noise, ensuring
+the alignment objective captures shared, global morphometric trends rather than
+idiosyncratic imaging artifacts. By restricting alignment to this matched
+subspace, we stabilize the specified alignment constraint and avoid the
+instability of forcing private, view-specific anatomical directions to align. We
+summarize the main options in Table \ref{tab:alignment}. In all cases, the
+alignment term acts only on these shared coordinates, leaving private
+coordinates free to capture independent morphological variation.[^align] 
 
 \input{latent_alignment_table.tex}
 
@@ -255,20 +264,19 @@ data is employed.
 ## High-dimensional Geometry and Latent Space Navigation
 
 In high-dimensional standard normal latent spaces, such as those optimized by
-LAMNr flows ($\mathcal{Z} \sim \mathcal{N}(0, I)$), the geometric properties of
-the data distribution become highly counterintuitive due to the concentration of
-measure phenomenon [@white2016sampling; @vershynin2018high;
-@blum2020foundations]. As dimensionality increases, probability mass does not
-concentrate at the origin; instead, the volume of the space grows exponentially
-with distance from the center, causing the vast majority of the mass to
-concentrate within a narrow spherical shell of radius $\approx \sqrt{d}$. This
-region is often referred to as the typical set [@vershynin2018high;
-@blum2020foundations] or the "soap bubble"[^blogpost] effect. 
-Consequently, the latent origin $z=0$ is a highly atypical
-point containing near-zero probability mass. The inverse mapping $f^{-1}(0)$
-must therefore be understood strictly as a barycentric geometric anchor
-representing a central axis of symmetry for the learned bijection, rather than a
-statistically representative anatomical mode.  
+LAMNr flows, the geometric properties of the data distribution become highly
+counterintuitive due to the concentration of measure phenomenon
+[@white2016sampling; @vershynin2018high; @blum2020foundations]. As
+dimensionality increases, probability mass moves away from concentration at the
+origin. Instead, the volume of the space grows exponentially with distance from
+the center, causing the vast majority of the mass to concentrate within a narrow
+spherical shell of radius $\approx \sqrt{d}$. This region is often referred to
+as the typical set [@vershynin2018high; @blum2020foundations] or the "soap
+bubble"[^blogpost] effect. Consequently, the latent origin $z=0$ is a highly
+atypical point containing near-zero probability mass. The inverse mapping
+$f^{-1}(0)$ must therefore be understood strictly as a barycentric geometric
+anchor representing a central axis of symmetry for the learned bijection, rather
+than a statistically representative anatomical mode.  
 
 [^blogpost]: https://www.inference.vc/high-dimensional-gaussian-distributions-are-soap-bubble/
 
@@ -284,7 +292,7 @@ in the latent space do not correspond to the shortest paths (geodesics) on the
 underlying image manifold. 
 
 This geometric distortion has immediate, tangible consequences for cohort
-alignment and interpolation. Linearly interpolating (LERP) between two latent
+alignment and interpolation. Linearly interpolating between two latent
 points located on the typical set creates a trajectory that moves inward toward
 the latent origin. In high dimensions, this effect forces the interpolation path
 through unpopulated latent regions of extremely low probability, causing a
@@ -295,7 +303,7 @@ principles of computational anatomy, Euclidean operations must be replaced with
 distribution-preserving mechanisms.
 
 To navigate this geometry appropriately, we replace standard linear
-interpolation (LERP) with spherical linear interpolation (SLERP) when traversing
+interpolation with spherical linear interpolation (SLERP) when traversing
 the latent space between two generated samples $z_1$ and $z_2$
 [@white2016sampling; @agustsson2018optimaltransportmapsdistribution]. For an
 interpolation parameter $t \in [0, 1]$ and the angle $\theta =
