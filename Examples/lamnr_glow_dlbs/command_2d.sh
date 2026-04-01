@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # --- SOLUTION ANTI-BLOCAGE & PERF ---
-export OMP_NUM_THREADS=8
-export MKL_NUM_THREADS=8
-export OPENBLAS_NUM_THREADS=8
-export ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS=8
+export OMP_NUM_THREADS=4
+export MKL_NUM_THREADS=4
+export OPENBLAS_NUM_THREADS=4
+export ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS=4
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # ------------------------------------
 
@@ -13,7 +13,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 iterations=100000
 
 # model / data (OPTIMISÉ POUR ANISOTROPIE)
-H=96; W=128; L=5; K=12; hidden=192  
+H=96; W=128; L=5; K=12; hidden=256  
 SLICE_IDX=115
 
 # optimization
@@ -21,11 +21,11 @@ LR=2.5e-5
 WARMUP=2000
 WEIGHT_DECAY=1e-6
 LR_DECAY_GAMMA=0.5
-LR_DECAY_STEPS="80000"
+LR_DECAY_STEPS=50000
 
 # --- CONFIG MULTI-GPU ROBUSTE ---
-BATCH=32             
-GRAD_ACCUM=4         # Batch effectif = 128
+BATCH=25             
+GRAD_ACCUM=5         # Batch effectif = 128
 NUM_WORKERS=4        
 DEVICES="cuda:1"
 PRECISION="float"    
@@ -44,7 +44,7 @@ ALIGN_WEIGHT=0.01
 ALIGN_VICREG_INV=25.0
 ALIGN_VICREG_VAR=25.0
 ALIGN_VICREG_GAMMA=1.0
-ALIGN_VICREG_COV=1.0
+ALIGN_VICREG_COV=10.0
 
 ALIGN_WARMUP=500
 
@@ -56,7 +56,7 @@ CCA_RIDGE=1e-3
 PREFILTER_FRAC=0.3    # Réduit pour 3 vues (anciennement 0.5)
 
 # sampling / eval
-SAMPLE_TEMP=1.0
+SAMPLE_TEMP=0.8
 EVAL_INTERVAL=1000
 PLOT_INTERVAL=1000
 
@@ -73,8 +73,8 @@ GLOWBASE_LOGSCALE_FACTOR=1.0
 SCALE_MAP="tanh"
 
 # Augmentation schedule
-aug_params_phase1="noise_std:cos:0.05->0.004@${iterations},\
-sd_affine:cos:0.05->0.00@${iterations},\
+aug_params_phase1="noise_std:cos:0.05->0.015@${iterations},\
+sd_affine:cos:0.05->0.01@${iterations},\
 sd_deformation:linear:12.0->0.6@${iterations},\
 sd_simulated_bias_field:cos:0.20->0.03@${iterations},\
 sd_histogram_warping:cos:0.04->0.008@${iterations}"
@@ -87,7 +87,7 @@ mapfile -t FA < <(ls -1 ${DLBS_ROOT}/sub-*/ses-wave1/dwi/*fa.nii.gz | sort)
 
 echo "T1: ${#T1[@]}  T2: ${#T2[@]}  FA: ${#FA[@]}"
 
-python train_2d.py \
+python train_lamnr_glow_2d.py \
   --view "${T1[@]}" \
   --view "${T2[@]}" \
   --view "${FA[@]}" \

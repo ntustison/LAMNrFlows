@@ -14,11 +14,11 @@ ITERATIONS=100000
 
 # Model / Data (3D T1)
 H=64; W=80; D=64               
-L=4; K=32; HIDDEN=48
+L=4; K=32; HIDDEN=96
 
 # --- CONFIG MULTI-GPU & VRAM ROBUSTE ---
-BATCH=10
-GRAD_ACCUM=4        # Batch effectif stable à 128
+BATCH=5
+GRAD_ACCUM=8        # Batch effectif stable à 128
 NUM_WORKERS=4
 VAL_SAMPLES=32       # Évite le pic OOM lors de l'évaluation
 DEVICES="cuda:0"
@@ -76,7 +76,7 @@ mapfile -t T1 < <(ls -1 ${DLBS_ROOT}/sub-*/ses-wave1/anat/*T1w.nii.gz | sort)
 
 echo "T1 Volumes trouvés: ${#T1[@]}"
 
-python train_3d.py \
+python train_lamnr_glow_3d.py \
   --view "${T1[@]}" \
   --auto-resume \
   --H ${H} --W ${W} --D ${D} \
