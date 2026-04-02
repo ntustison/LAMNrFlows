@@ -23,6 +23,10 @@ ants_template="/Users/ntustison/Data/Public/OpenNeuro/ds004856/Template/nki_x.ni
 # Image d'un sujet spécifique pour les tests d'interpolation vers la cible
 example_image="/Users/ntustison/Data/Public/OpenNeuro/ds004856/BIDSAlignedToTemplate/sub-1022/ses-wave1/anat/sub-1022_ses-wave1_acq-MPRAGE_run-1_T1w.nii.gz"
 
+# Images Pre-/Post- d'un sujet spécifique dans l'ensemble BRATsReg
+brats_image_pre="/Users/ntustison/Data/Public/BRATS/RegistrationCompetition2022/Data/BraTSReg_Training_Data_v2_in_DLBS_space/BraTSReg_003/BraTSReg_003_00_0000_t1.nii.gz"
+brats_image_post="/Users/ntustison/Data/Public/BRATS/RegistrationCompetition2022/Data/BraTSReg_Training_Data_v2_in_DLBS_space/BraTSReg_003/BraTSReg_003_01_0029_t1.nii.gz"
+
 # Hyperparamètres de l'architecture entraînée
 which_experiment="96x128"  
 runs_dir="${base_dir}/runs2d/dlbs_t1_t2flair_fa_${which_experiment}_K12_L5_HC256"
@@ -272,6 +276,20 @@ for t_val in 0.00 0.25 0.50 0.75 1.00; do
   ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-interpolate \
     --ckpt ${ckpt} --gauss ${gaussian_lr} --source-image ${ants_template} \
     --target-image ${example_image} --views T1 \
+    --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
+    --t ${t_val} --out "${output_interp}" 
+done
+
+# 7C. Trajectoire : BRATs Pre -> BRATs Post
+echo "[7C] Interpolation (Sujet -> Image BRATs)..."
+for t_val in 0.00 0.25 0.50 0.75 1.00; do
+  output_interp="${out_dir}/interpolation/inter_brats_example_t${t_val}.nii.gz"
+  if [[ -f ${output_interp} ]]; then continue; fi
+  
+  mkdir -p $(dirname "${output_interp}")
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-interpolate \
+    --ckpt ${ckpt} --gauss ${gaussian_lr} --source-image ${brats_image_pre} \
+    --target-image ${brats_image_post} --views T1 \
     --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
     --t ${t_val} --out "${output_interp}" 
 done
