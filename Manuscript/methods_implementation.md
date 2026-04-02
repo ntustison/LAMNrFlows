@@ -167,5 +167,3 @@ same methodological framework.
    }
   \label{fig:aug-schedule}
 \end{figure*}
-
--->
