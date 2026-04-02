@@ -43,8 +43,13 @@ qualities comparable to other state-of-the-art generative models
 Beyond density estimation, normalizing flows provide a geometric framework for
 topologically unfolding the complex anatomical manifold sampled by modern
 medical imaging. By mapping complex imaging data to a symmetric Gaussian base
-distribution, the flow-induced metric ensures that latent paths
-approximate geodesics in the original data domain. 
+distribution, the flow-induced metric ensures that latent paths approximate
+geodesics in the original data domain. Recent advancements have further refined
+these flow trajectories by incorporating Semi-Discrete Optimal Transport (SDOT)
+during training [@kong2025alignflow].  This approach establishes an explicit,
+optimal alignment between the noise distribution and data points to ensure
+straighter paths and more effective inference, even in high-dimensional
+settings.
 
 The bijective aspect of these models also enables the synthesis of biological
 variation through stochastic sampling, where latent vectors drawn from the
