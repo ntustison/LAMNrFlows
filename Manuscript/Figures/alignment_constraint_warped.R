@@ -129,8 +129,8 @@ p_single <- ggplot(df_combined, aes(x = x, y = y, color = View, linetype = State
   annotate("label", x = 12.5, y = 0.5, 
            label = formula_text, fill = 'grey10', colour = 'black', alpha = 0.25,
            size = 6, fontface = "bold", label.padding = unit(1.00, "lines"), label.r = unit(0.1, "lines")) +
-  annotate("text", x = 0.5, y = 7.5, label = "Pre-alignment", size = 5, fontface = "bold") +
-  annotate("text", x = 25., y = 7.5, label = "Post-alignment", size = 5, fontface = "bold") +
+  annotate("text", x = 0.5, y = 10.5, label = "Pre-alignment", size = 5, fontface = "bold") +
+  annotate("text", x = 25., y = 10.5, label = "Post-alignment", size = 5, fontface = "bold") +
   annotate("text", x = 1.5, y = 5.0, label = "View 1", size = 5, fontface = "bold") +
   annotate("text", x = -4.75, y = 2.0, label = "View 2", size = 5, fontface = "bold") +
   annotate("text", x = 2.75, y = -2.15, label = "View 3", size = 5, fontface = "bold") +
