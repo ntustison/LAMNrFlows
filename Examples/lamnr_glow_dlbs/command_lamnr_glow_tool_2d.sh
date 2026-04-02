@@ -25,7 +25,7 @@ example_image="/Users/ntustison/Data/Public/OpenNeuro/ds004856/BIDSAlignedToTemp
 
 # Hyperparamètres de l'architecture entraînée
 which_experiment="96x128"  
-runs_dir="${base_dir}/runs2d/dlbs_t1_t2flair_fa_${which_experiment}_K12_L5_HC192/"
+runs_dir="${base_dir}/runs2d/dlbs_t1_t2flair_fa_${which_experiment}_K12_L5_HC256"
 ckpt="${runs_dir}/training_state.pt"
 
 # Répertoires de sortie et manifestes
@@ -38,6 +38,7 @@ manifest_lesions="${manifest_dir}/manifest_brats_short.csv"
 # Paramètres d'exécution
 SLICE_INDEX=115
 WHICH_PYTHON="/Users/ntustison/anaconda3/bin/python3"
+WHICH_LAMNR_TOOL="${base_dir}/lamnr_glow_tool_2d.py"
 DEVICE="cpu"
 
 # Chemins des modèles dérivés
@@ -61,7 +62,7 @@ if [[ ! -f ${gaussian_lr} ]]; then
   cov_mode="perlevel"
   cov_estimator="full" 
 
-  ${WHICH_PYTHON} lamnr_glow_tool.py gauss-fit \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} gauss-fit \
     --ckpt ${ckpt} \
     --manifest ${manifest} \
     --views T1,T2,FA \
@@ -88,7 +89,7 @@ if [[ ! -d ${manifest_input_dir} ]]; then
   echo "[2] Exportation des coupes 2D depuis les volumes 3D..."
   mkdir -p "${manifest_input_dir}"
 
-  ${WHICH_PYTHON} lamnr_glow_tool.py export-slices \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} export-slices \
     --manifest ${manifest_short} \
     --slice-axis 2 --slice-index ${SLICE_INDEX} \
     --views T1,T2,FA \
@@ -113,7 +114,7 @@ if [[ -d ${impute_out_dir} && $(ls -A ${impute_out_dir}) ]]; then
 else 
   echo "[3a] Imputation cross-modale : Prédiction de T1 à partir de T2..."
   mkdir -p "${impute_out_dir}" 
-  ${WHICH_PYTHON} lamnr_glow_tool.py gauss-impute \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} gauss-impute \
     --ckpt ${ckpt} --gauss ${gaussian_lr} --manifest ${manifest_short} \
     --views T1,T2,FA --observed T2 --target T1 \
     --slice-axis 2 --slice-index ${SLICE_INDEX} \
@@ -127,7 +128,7 @@ if [[ -d ${impute_out_dir} && $(ls -A ${impute_out_dir}) ]]; then
 else 
   echo "[3b] Imputation cross-modale : Prédiction de T1, T2 à partir de FA..."
   mkdir -p "${impute_out_dir}" 
-  ${WHICH_PYTHON} lamnr_glow_tool.py gauss-impute \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} gauss-impute \
     --ckpt ${ckpt} --gauss ${gaussian_lr} --manifest ${manifest_short} \
     --views T1,T2,FA --observed FA --target T1,T2 \
     --slice-axis 2 --slice-index ${SLICE_INDEX} \
@@ -141,7 +142,7 @@ if [[ -d ${impute_out_dir} && $(ls -A ${impute_out_dir}) ]]; then
 else 
   echo "[3c] Imputation cross-modale : Prédiction de T1 à partir de T2 et FA..."
   mkdir -p "${impute_out_dir}" 
-  ${WHICH_PYTHON} lamnr_glow_tool.py gauss-impute \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} gauss-impute \
     --ckpt ${ckpt} --gauss ${gaussian_lr} --manifest ${manifest_short} \
     --views T1,T2,FA --observed T2,FA --target T1 \
     --slice-axis 2 --slice-index ${SLICE_INDEX} \
@@ -157,7 +158,7 @@ fi
 recon_panel_out="${out_dir}/recon_panel.png"
 if [[ ! -f ${recon_panel_out} ]]; then
   echo "[4] Génération du panneau de vérification de reconstruction..."
-  ${WHICH_PYTHON} lamnr_glow_tool.py recon \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon \
     --ckpt ${ckpt} --manifest ${manifest_short} --views T1,T2,FA --view-index 0 \
     --slice-axis 2 --slice-index ${SLICE_INDEX} --batch 6 --devices ${DEVICE} \
     --out ${recon_panel_out} 
@@ -189,7 +190,7 @@ for which_modality in fa t2 t1; do
      mkdir -p $(dirname "${sample_output}")
      echo "[5] Échantillonnage (${which_modality}) à température = ${temp}..."
      
-     ${WHICH_PYTHON} lamnr_glow_tool.py sample \
+     ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} sample \
        --ckpt ${ckpt} --view-index ${view_index} --sample-grid-size ${grid_size} \
        --image-size ${which_experiment} --temperature ${temp} \
        --devices ${DEVICE} --sample-grid-out "${sample_output}" --seed $RANDOM
@@ -206,7 +207,7 @@ done
 output_template="${out_dir}/template_T1_mu_sharpened.png"
 if [[ ! -f ${output_template} ]]; then
   echo "[6a] Génération du template de population (Moyenne Latente)..."
-  ${WHICH_PYTHON} lamnr_glow_tool.py recon-template \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-template \
     --ckpt ${ckpt} --gauss ${gaussian_lr} --views T1 --view-index 0 \
     --mc-samples 10 --mc-temp 0.01 --out "${output_template}" \
     --sharpen-image --devices ${DEVICE} --seed ${RANDOM}
@@ -226,7 +227,7 @@ output_template_cohort="${out_dir}/template_T1_cohort.png"
 
 if [[ ! -f ${output_template_cohort} ]]; then
   echo "[6b] Génération du template de cohorte (Moyenne Empirique)..."
-  ${WHICH_PYTHON} lamnr_glow_tool.py recon-cohort-template \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-cohort-template \
     --ckpt ${ckpt} \
     --manifest ${manifest_short} \
     --views T1 \
@@ -255,7 +256,7 @@ for t_val in 0.00 0.25 0.50 0.75 1.00; do
   if [[ -f ${output_interp} ]]; then continue; fi
   
   mkdir -p $(dirname "${output_interp}") 
-  ${WHICH_PYTHON} lamnr_glow_tool.py recon-interpolate \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-interpolate \
     --ckpt ${ckpt} --gauss ${gaussian_lr} --source-image ${example_image} \
     --views T1 --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
     --t ${t_val} --interp-level 0,1.0 --interp-level 1,1.0 --out "${output_interp}"
@@ -268,7 +269,7 @@ for t_val in 0.00 0.25 0.50 0.75 1.00; do
   if [[ -f ${output_interp} ]]; then continue; fi
   
   mkdir -p $(dirname "${output_interp}")
-  ${WHICH_PYTHON} lamnr_glow_tool.py recon-interpolate \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-interpolate \
     --ckpt ${ckpt} --gauss ${gaussian_lr} --source-image ${ants_template} \
     --target-image ${example_image} --views T1 \
     --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
@@ -283,7 +284,7 @@ done
 
 if [[ ! -f ${dist_csv} ]]; then
   echo "[8] Calcul des distances latentes par rapport au modèle Gaussien..."
-  ${WHICH_PYTHON} lamnr_glow_tool.py calc-distance \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} calc-distance \
     --ckpt ${ckpt} --gauss ${gaussian_lr} --manifest ${manifest} \
     --views T1 --slice-axis 2 --slice-index ${SLICE_INDEX} \
     --out "${dist_csv}" --distance-metric geodesic --devices ${DEVICE} --save-levels 
@@ -305,7 +306,7 @@ for tau in 0.01 0.25 0.50 0.75 0.95 0.99; do
   if [[ ! -f ${output_temp} ]]; then
     echo "[9A] Temperature Scaling (Niveau 0) avec tau=${tau}..."
     mkdir -p $(dirname "${output_temp}")
-    ${WHICH_PYTHON} lamnr_glow_tool.py recon-temperature \
+    ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-temperature \
       --ckpt ${ckpt} --manifest ${manifest_lesions} --views T1 \
       --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
       --out "${output_temp}" --tau-level 0,${tau}
@@ -318,7 +319,7 @@ for tau in 0.01 0.25 0.50 0.75 0.95 0.99; do
   if [[ ! -f ${output_temp} ]]; then
     echo "[9B] Temperature Scaling (Niveau 5) avec tau=${tau}..."
     mkdir -p $(dirname "${output_temp}")
-    ${WHICH_PYTHON} lamnr_glow_tool.py recon-temperature \
+    ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-temperature \
       --ckpt ${ckpt} --manifest ${manifest_lesions} --views T1 \
       --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
       --out "${output_temp}" --tau-level 5,${tau}
@@ -331,7 +332,7 @@ for tau in 0.01 0.25 0.50 0.75 0.95 0.99; do
   if [[ ! -f ${output_temp} ]]; then
     echo "[9C] Temperature Scaling Global avec tau=${tau}..."
     mkdir -p $(dirname "${output_temp}")
-    ${WHICH_PYTHON} lamnr_glow_tool.py recon-temperature \
+    ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-temperature \
       --ckpt ${ckpt} --manifest ${manifest_lesions} --views T1 \
       --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
       --out "${output_temp}" --tau ${tau}

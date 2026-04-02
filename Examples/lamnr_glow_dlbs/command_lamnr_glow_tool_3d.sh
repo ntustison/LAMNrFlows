@@ -13,7 +13,7 @@
 # Répertoire de base du projet
 base_dir="/Users/ntustison/Desktop/lamnr_glow_dlbs"
 which_experiment="64x80x64"  
-runs_dir="${base_dir}/runs3d/dlbs_t1_${which_experiment}_K32_L4_H64/"
+runs_dir="${base_dir}/runs3d/dlbs_t1_${which_experiment}_K32_L4_H48/"
 
 # Destination pour toutes les images générées et modèles Gaussiens
 out_dir="${base_dir}/output${which_experiment}/"
@@ -29,6 +29,7 @@ manifest_lesions="${manifest_dir}/manifest_brats_short.csv"
 ants_template="/Users/ntustison/Data/Public/OpenNeuro/ds004856/Template/nki_x.nii.gz"
 
 WHICH_PYTHON="/Users/ntustison/anaconda3/bin/python3"
+WHICH_LAMNR_TOOL="${base_dir}/lamnr_glow_tool_3d.py"
 
 # MPS (Metal Performance Shaders) est l'API d'accélération matérielle d'Apple.
 # Le backend 'mps' exploite les cœurs graphiques des puces Apple Silicon (M1/M2/M3).
@@ -53,7 +54,7 @@ dist_csv="${out_dir}/t1_distance_to_gaussian.csv"
 if [[ ! -f ${gaussian_lr} ]]; then
   echo "Modèle Gaussien introuvable. Ajustement en cours..."
 
-  ${WHICH_PYTHON} lamnr_glow_tool_3d.py gauss-fit \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} gauss-fit \
     --ckpt ${ckpt} \
     --manifest ${manifest} \
     --views T1 \
@@ -78,7 +79,7 @@ if [[ ! -d ${recon_out_dir} ]]; then
   echo "Exécution de la reconstruction 3D (Sanity Check)..."
   mkdir -p "${recon_out_dir}"
 
-  ${WHICH_PYTHON} lamnr_glow_tool_3d.py recon \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon \
     --ckpt ${ckpt} \
     --gauss ${gaussian_lr} \
     --manifest ${manifest_short} \
@@ -106,7 +107,7 @@ else
   echo "Génération de nouveaux échantillons 3D (Sampling)..."
   mkdir -p "${sample_out_dir}"
 
-  ${WHICH_PYTHON} lamnr_glow_tool_3d.py sample \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} sample \
     --ckpt ${ckpt} \
     --view-index 0 \
     --n-samples 5 \
@@ -128,7 +129,7 @@ if [[ ! -d ${template_out_dir} ]]; then
   echo "Génération du template de population 3D..."
   mkdir -p "${template_out_dir}"
 
-  ${WHICH_PYTHON} lamnr_glow_tool_3d.py recon-template \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-template \
     --ckpt ${ckpt} \
     --gauss ${gaussian_lr} \
     --manifest ${manifest} \
@@ -141,7 +142,7 @@ if [[ ! -d ${template_out_dir} ]]; then
     --out-dir ${template_out_dir} \
     --devices ${DEVICE}
 
-  ${WHICH_PYTHON}  lamnr_glow_tool_3d.py recon-cohort-template \
+  ${WHICH_PYTHON}  ${WHICH_LAMNR_TOOL} recon-cohort-template \
     --ckpt ${ckpt} \
     --manifest ${manifest} \
     --views T1 \
@@ -171,7 +172,7 @@ fi
 #   echo "Exécution de l'imputation conditionnelle (T1 -> FA)..."
 #   mkdir -p "${impute_out_dir}"
   
-#   ${WHICH_PYTHON} lamnr_glow_tool_3d.py gauss-impute \
+#   ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} gauss-impute \
 #     --ckpt ${ckpt} \
 #     --gauss ${gaussian_lr} \
 #     --manifest ${manifest_short} \
@@ -192,7 +193,7 @@ fi
 if [[ ! -f ${dist_csv} ]]; then
   echo "Calcul de la distance à la moyenne Gaussienne pour la vue T1..."  
   
-  ${WHICH_PYTHON} lamnr_glow_tool_3d.py calc-distance \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} calc-distance \
     --ckpt ${ckpt} \
     --gauss ${gaussian_lr} \
     --manifest ${manifest_short} \
@@ -221,7 +222,7 @@ if [[ ! -d ${temperature_out_dir} ]]; then
   echo "Exécution du lissage par température sur le jeu de données pathologique..."
   mkdir -p "${temperature_out_dir}"
 
-  ${WHICH_PYTHON} lamnr_glow_tool_3d.py recon-temperature \
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-temperature \
     --ckpt ${ckpt} \
     --manifest ${manifest_lesions} \
     --views T1 \
@@ -253,7 +254,7 @@ if [[ ! -d ${interp_out_dir} ]]; then
   
   for t in 0.00 0.25 0.50 0.75 1.0; 
     do
-      ${WHICH_PYTHON} lamnr_glow_tool_3d.py recon-interpolate \
+      ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-interpolate \
         --ckpt ${ckpt} \
         --gauss ${gaussian_lr} \
         --source-image ${source_image} \
