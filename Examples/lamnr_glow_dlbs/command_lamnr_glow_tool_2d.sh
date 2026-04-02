@@ -24,8 +24,11 @@ ants_template="/Users/ntustison/Data/Public/OpenNeuro/ds004856/Template/nki_x.ni
 example_image="/Users/ntustison/Data/Public/OpenNeuro/ds004856/BIDSAlignedToTemplate/sub-1022/ses-wave1/anat/sub-1022_ses-wave1_acq-MPRAGE_run-1_T1w.nii.gz"
 
 # Images Pre-/Post- d'un sujet spécifique dans l'ensemble BRATsReg
-brats_image_pre="/Users/ntustison/Data/Public/BRATS/RegistrationCompetition2022/Data/BraTSReg_Training_Data_v2_in_DLBS_space/BraTSReg_003/BraTSReg_003_00_0000_t1.nii.gz"
-brats_image_post="/Users/ntustison/Data/Public/BRATS/RegistrationCompetition2022/Data/BraTSReg_Training_Data_v2_in_DLBS_space/BraTSReg_003/BraTSReg_003_01_0029_t1.nii.gz"
+brats_dir="/Users/ntustison/Data/Public/BRATS/RegistrationCompetition2022/Data/BraTSReg_Training_Data_v2_in_DLBS_space/BraTSReg_003/"
+brats_t1_pre="${brats_dir}/BraTSReg_003_00_0000_t1.nii.gz"
+brats_t2_pre="${brats_dir}/BraTSReg_003_00_0000_t2.nii.gz"
+brats_t1_post="${brats_dir}/BraTSReg_003_01_0029_t1.nii.gz"
+brats_t2_post="${brats_dir}/BraTSReg_003_01_0029_t2.nii.gz"
 
 # Hyperparamètres de l'architecture entraînée
 which_experiment="96x128"  
@@ -37,7 +40,7 @@ out_dir="${base_dir}/output${which_experiment}/"
 manifest_dir="${base_dir}/manifests/"
 manifest="${manifest_dir}/manifest.csv"
 manifest_short="${manifest_dir}/manifest_short.csv"
-manifest_lesions="${manifest_dir}/manifest_brats_short.csv"  
+manifest_brats_short="${manifest_dir}/manifest_brats_short.csv"
 
 # Paramètres d'exécution
 SLICE_INDEX=115
@@ -112,7 +115,7 @@ fi
 ###############################################################################
 
 # 3A. T2 -> T1
-impute_out_dir="${out_dir}/impute_T1_from_T2/"
+impute_out_dir="${out_dir}/dlbs_impute_T1_from_T2/"
 if [[ -d ${impute_out_dir} && $(ls -A ${impute_out_dir}) ]]; then
   echo "[3a] Imputation T2 -> T1 existante. Étape ignorée."
 else 
@@ -126,7 +129,7 @@ else
 fi
 
 # 3B. FA -> T1, T2
-impute_out_dir="${out_dir}/impute_T1T2_from_FA/"
+impute_out_dir="${out_dir}/dlbs_impute_T1T2_from_FA/"
 if [[ -d ${impute_out_dir} && $(ls -A ${impute_out_dir}) ]]; then
   echo "[3b] Imputation FA -> T1,T2 existante. Étape ignorée."
 else 
@@ -140,7 +143,7 @@ else
 fi
 
 # 3C. T2, FA -> T1
-impute_out_dir="${out_dir}/impute_T1_from_T2FA/"
+impute_out_dir="${out_dir}/dlbs_impute_T1_from_T2FA/"
 if [[ -d ${impute_out_dir} && $(ls -A ${impute_out_dir}) ]]; then
   echo "[3c] Imputation T2,FA -> T1 existante. Étape ignorée."
 else 
@@ -152,6 +155,22 @@ else
     --slice-axis 2 --slice-index ${SLICE_INDEX} \
     --batch 2 --devices ${DEVICE} --outdir "${impute_out_dir}" --output-format nii.gz
 fi
+
+# 3D. T2 -> T1 (BRATS).  Il n'y pas des images FA, alors on met une « dummy » image.
+
+impute_out_dir="${out_dir}/brats_impute_T1_from_T2/"
+if [[ -d ${impute_out_dir} && $(ls -A ${impute_out_dir}) ]]; then
+  echo "[3d] Imputation T2 -> T1 existante. Étape ignorée."
+else 
+  echo "[3d] Imputation cross-modale : Prédiction de T1 à partir de T2..."
+  mkdir -p "${impute_out_dir}" 
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} gauss-impute \
+    --ckpt ${ckpt} --gauss ${gaussian_lr} --manifest ${manifest_brats_short} \
+    --views T1,T2,FA --observed T2 --target T1 \
+    --slice-axis 2 --slice-index ${SLICE_INDEX} \
+    --batch 2 --devices ${DEVICE} --outdir "${impute_out_dir}" --output-format nii.gz
+fi
+
 
 ###############################################################################
 # 4. VÉRIFICATION DE RECONSTRUCTION (Sanity Check)
@@ -281,15 +300,29 @@ for t_val in 0.00 0.25 0.50 0.75 1.00; do
 done
 
 # 7C. Trajectoire : BRATs Pre -> BRATs Post
-echo "[7C] Interpolation (Sujet -> Image BRATs)..."
+echo "[7C] T1 Interpolation (Sujet -> Image BRATs) ..."
 for t_val in 0.00 0.25 0.50 0.75 1.00; do
-  output_interp="${out_dir}/interpolation/inter_brats_example_t${t_val}.nii.gz"
+  output_interp="${out_dir}/interpolation/inter_brats_example_t1_t${t_val}.nii.gz"
   if [[ -f ${output_interp} ]]; then continue; fi
   
   mkdir -p $(dirname "${output_interp}")
   ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-interpolate \
-    --ckpt ${ckpt} --gauss ${gaussian_lr} --source-image ${brats_image_pre} \
-    --target-image ${brats_image_post} --views T1 \
+    --ckpt ${ckpt} --gauss ${gaussian_lr} --source-image ${brats_t1_pre} \
+    --target-image ${brats_t1_post} --views T1 \
+    --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
+    --t ${t_val} --out "${output_interp}" 
+done
+
+# 7D. Trajectoire : BRATs Pre -> BRATs Post
+echo "[7D] T2 Interpolation (Sujet -> Image BRATs) ..."
+for t_val in 0.00 0.25 0.50 0.75 1.00; do
+  output_interp="${out_dir}/interpolation/inter_brats_example_t2_t${t_val}.nii.gz"
+  if [[ -f ${output_interp} ]]; then continue; fi
+  
+  mkdir -p $(dirname "${output_interp}")
+  ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-interpolate \
+    --ckpt ${ckpt} --gauss ${gaussian_lr} --source-image ${brats_t2_pre} \
+    --target-image ${brats_t2_post} --views T2 \
     --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
     --t ${t_val} --out "${output_interp}" 
 done
@@ -325,7 +358,7 @@ for tau in 0.01 0.25 0.50 0.75 0.95 0.99; do
     echo "[9A] Temperature Scaling (Niveau 0) avec tau=${tau}..."
     mkdir -p $(dirname "${output_temp}")
     ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-temperature \
-      --ckpt ${ckpt} --manifest ${manifest_lesions} --views T1 \
+      --ckpt ${ckpt} --manifest ${manifest_brats_short} --views T1 \
       --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
       --out "${output_temp}" --tau-level 0,${tau}
   fi 
@@ -338,7 +371,7 @@ for tau in 0.01 0.25 0.50 0.75 0.95 0.99; do
     echo "[9B] Temperature Scaling (Niveau 5) avec tau=${tau}..."
     mkdir -p $(dirname "${output_temp}")
     ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-temperature \
-      --ckpt ${ckpt} --manifest ${manifest_lesions} --views T1 \
+      --ckpt ${ckpt} --manifest ${manifest_brats_short} --views T1 \
       --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
       --out "${output_temp}" --tau-level 5,${tau}
    fi  
@@ -351,7 +384,7 @@ for tau in 0.01 0.25 0.50 0.75 0.95 0.99; do
     echo "[9C] Temperature Scaling Global avec tau=${tau}..."
     mkdir -p $(dirname "${output_temp}")
     ${WHICH_PYTHON} ${WHICH_LAMNR_TOOL} recon-temperature \
-      --ckpt ${ckpt} --manifest ${manifest_lesions} --views T1 \
+      --ckpt ${ckpt} --manifest ${manifest_brats_short} --views T1 \
       --slice-axis 2 --slice-index ${SLICE_INDEX} --devices ${DEVICE} \
       --out "${output_temp}" --tau ${tau}
   fi
