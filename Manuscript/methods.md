@@ -95,7 +95,7 @@ subspace, we stabilize the specified alignment constraint and avoid the
 instability of forcing private, view-specific anatomical directions to align. We
 summarize the main options in Table \ref{tab:alignment}. In all cases, the
 alignment term acts only on these shared coordinates, leaving private
-coordinates free to capture independent morphological variation.[^align] 
+coordinates free to capture independent variation.[^align] 
 
 \input{latent_alignment_table.tex}
 
