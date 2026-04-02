@@ -955,7 +955,7 @@ def _save_samples_grid(model, n, temp, out_path, nrow=10, target_hw=None, warm_x
     except Exception as e:
         return False, str(e)
 
-def _save_metric_plots(csv_path: Path, out_dir: Path):
+def _save_metric_plots(csv_path: Path, out_dir: Path, remove_spikes: bool = False):
     if not csv_path.exists():
         return
     iters, losses, bpds = [], [], []
@@ -966,22 +966,54 @@ def _save_metric_plots(csv_path: Path, out_dir: Path):
             for row in reader:
                 if len(row) < 4:
                     continue
-                it, loss, bpd = int(float(row[0])), float(row[1]), float(row[2])
-                iters.append(it); losses.append(loss); bpds.append(bpd)
+                # Le bloc try/except évite un crash si le script lit la ligne exactement 
+                # au moment où l'écrivain CSV est en train de l'enregistrer.
+                try:
+                    it, loss, bpd = int(float(row[0])), float(row[1]), float(row[2])
+                    iters.append(it); losses.append(loss); bpds.append(bpd)
+                except ValueError:
+                    continue
+                    
         if len(iters) < 2:
             return
+            
+        if remove_spikes and len(losses) > 10:
+            s_losses = pd.Series(losses)
+            
+            # Fenêtre adaptative (max 50, s'ajuste si le fichier est petit)
+            w = min(50, max(5, len(losses) // 10))
+            
+            # Calcul de la médiane glissante locale
+            rolling_med = s_losses.rolling(window=w, center=True, min_periods=1).median()
+            
+            # Calcul de l'écart absolu de chaque point par rapport à la médiane
+            diff = np.abs(s_losses - rolling_med)
+            
+            # Calcul du MAD (Median Absolute Deviation) local
+            rolling_mad = diff.rolling(window=w, center=True, min_periods=1).median()
+            
+            # Un 'spike' est un point qui dévie de plus de 5 fois le MAD (avec une tolérance minimale de sécurité)
+            is_spike = diff > (5 * rolling_mad + 1e-6)
+            
+            # Remplacer les valeurs par NaN pour créer une cassure visuelle sur le graphique
+            losses = np.where(is_spike, np.nan, losses)
+            bpds = np.where(is_spike, np.nan, bpds)
+
         plt.figure()
         plt.plot(iters, losses)
         plt.xlabel("iter"); plt.ylabel("loss"); plt.title("Training loss")
         plt.tight_layout()
         plt.savefig(out_dir / "loss_curve.png"); plt.close()
+        
         plt.figure()
         plt.plot(iters, bpds)
         plt.xlabel("iter"); plt.ylabel("sum_bpd"); plt.title("Sum BPD (training batches)")
         plt.tight_layout()
         plt.savefig(out_dir / "bpd_curve.png"); plt.close()
-    except Exception:
+        
+    except Exception as e:
         pass
+
 
 import shutil
 
@@ -2194,7 +2226,7 @@ def main():
                         tqdm.write(f"[warn] val-batch grid failed at iter {it}: {err}")
                 else:
                     tqdm.write("[samples] skipping previews (--sample-mode off)")
-            _save_metric_plots(csv_path, run_dir)
+            _save_metric_plots(csv_path, run_dir, remove_spikes=True)
 
         with open(csv_path, "a") as f:
             f.write(f"{it},{curr_loss:.6f},{sum_bpd:.6f},{lr_now:.6g}\n")
