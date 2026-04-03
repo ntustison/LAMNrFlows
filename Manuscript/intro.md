@@ -161,8 +161,8 @@ Karcher mean, and the statistical mode [@Fletcher2009aa].
 
 Normalizing flows offer a transformative perspective by topologically unfolding
 these nonlinear manifolds into a symmetric, centered diagonal Gaussian base
-distribution (Figure \ref{fig:single_view_flow}). This framework provides
-significant flexibility for template construction. One principled approach is
+distribution (Figure \ref{fig:single_view_flow}). One potential application
+provided by this framework is template construction. One principled approach is
 the inverse mapping of the latent origin, $\hat{x}_0 = f^{-1}(0)$, which
 leverages the property that the Gaussian mean, mode, and median coincide
 precisely at the origin.   While registration-based templates (e.g., via
@@ -178,14 +178,7 @@ cohort. By isolating the macroscopic structural tendencies common to the entire
 population, the framework accounts for the concentration of measure phenomenon
 in high dimensions, where probability mass concentrates within a thin spherical
 shell rather than at the origin [@white2016sampling; @vershynin2018high;
-@blum2020foundations].  Alternatively, a latent-based template within the LAMNr
-flows framework can be defined as the numerical average of the latent
-representations across a cohort, which is then decoded back to the image domain.
-In the small-variance or locally linear regime, these constructions coincide up
-to second-order terms, linking both latent-space definitions to Fréchet means in
-the induced image metric [@Pennec2006; @arvanitidis2018latent]. This latter
-template definition typically exhibits increased anatomical details similar to
-the registration-based analogs.
+@blum2020foundations].  
 
 Beyond template construction, this continuous latent framework provides direct
 analogues to the fundamental metric operations of traditional computational
