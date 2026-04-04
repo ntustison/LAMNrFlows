@@ -203,9 +203,15 @@ Data from [*The Dallas Lifespan Brain Study: A Comprehensive Adult Lifespan Data
   <img src="Manuscript/Figures/input_data_view1.png" alt="T2" width="30%">
   <img src="Manuscript/Figures/input_data_view2.png" alt="FA" width="30%">
 </p> -->
-  
+
+<details>
+<summary>Data augmentation:  HCP YA T1</summary>
+
+<video src="Manuscript/Figures/aug_dlbs.mp4" width="50%" controls></video>
+
 </details>
 
+<!--
 <details>
 <summary>Output:  Generative sampling</summary>
 
@@ -247,7 +253,7 @@ Data from [*The Dallas Lifespan Brain Study: A Comprehensive Adult Lifespan Data
 
   
 </details>
-
+-->
 
 ***
 
