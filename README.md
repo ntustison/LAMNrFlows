@@ -209,7 +209,9 @@ Data from [*The Dallas Lifespan Brain Study: A Comprehensive Adult Lifespan Data
 <details>
 <summary>Data augmentation:  HCP YA T1</summary>
 
-<video src="Manuscript/Figures/aug_dlbs.mp4" width="50%" controls></video>
+<video width="300" height="300" controls loop="" muted="" autoplay="">
+    <source src="https://github.com/ntustison/LAMNrFlows/raw/refs/heads/main/Manuscript/Figures/aug_dlbs.mp4">
+</video>
 
 </details>
 
