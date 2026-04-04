@@ -204,6 +204,8 @@ Data from [*The Dallas Lifespan Brain Study: A Comprehensive Adult Lifespan Data
   <img src="Manuscript/Figures/input_data_view2.png" alt="FA" width="30%">
 </p> -->
 
+</details>
+
 <details>
 <summary>Data augmentation:  HCP YA T1</summary>
 
