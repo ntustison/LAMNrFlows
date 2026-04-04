@@ -213,8 +213,9 @@ Data from [*The Dallas Lifespan Brain Study: A Comprehensive Adult Lifespan Data
 
 </details>
 
-<video src="https://github.com/ntustison/LAMNrFlows/blob/main/Manuscript/Figures/aug_dlbs.mp4" width="50%" controls></video>
-
+<video width="300" height="300" controls loop="" muted="" autoplay="">
+    <source src="https://github.com/ntustison/LAMNrFlows/raw/refs/heads/main/Manuscript/Figures/aug_dlbs.mp4">
+</video>
 <!--
 <details>
 <summary>Output:  Generative sampling</summary>
