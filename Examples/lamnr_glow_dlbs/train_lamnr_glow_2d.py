@@ -1181,13 +1181,13 @@ def main():
     # --- VICReg Hyperparameters ---
     ap.add_argument("--vicreg-inv", type=float, default=25.0, 
                     help="VICReg invariance weight (pulls representations of the same subject closer).")
-    ap.add_argument("--vicreg-var", type=float, default=25.0, 
-                    help="VICReg variance weight (pushes standard deviation per feature towards gamma).")
     ap.add_argument("--vicreg-cov", type=float, default=1.0,  
                     help="VICReg covariance weight (penalizes off-diagonal correlations to prevent collapse).")
-    ap.add_argument("--vicreg-gamma", type=float, default=1.0, 
-                    help="VICReg variance floor (target standard deviation per feature).")
-    
+    ap.add_argument("--vicreg-var", type=float, nargs="+", default=[25.0], 
+                    help="VICReg variance weight. Pass multiple values for asymmetric weighting per view.")
+    ap.add_argument("--vicreg-gamma", type=float, nargs="+", default=[1.0], 
+                    help="VICReg variance floor. Pass multiple values for asymmetric targets per view.")    
+
     # --- HSIC Hyperparameters ---
     ap.add_argument("--hsic-sigma", type=float, default=0.0, 
                     help="RBF bandwidth for HSIC. 0 -> use the median pairwise distance heuristic per batch.")
@@ -1715,6 +1715,25 @@ def main():
                         refresh=do_refresh,
                     )
                     feats_screened = apply_screen(feats, screen_state)
+
+                    if do_refresh and args.screen == "cca" and screen_state is not None and screen_state.meta:
+                        spectrum = screen_state.meta.get("cca_info", {}).get("mean_spectrum", None)
+                        if spectrum is not None:
+                            try:
+                                plt.figure(figsize=(8, 5))
+                                plt.plot(spectrum, marker='.', linestyle='-', markersize=4)
+                                plt.axvline(x=screen_state.keep_dim, color='red', linestyle='--', label=f"Coupure actuelle (frac={args.screen_frac})")
+                                plt.title(f"Spectre CCA (Itération {it})")
+                                plt.xlabel("Dimensions Latentes")
+                                plt.ylabel("Magnitude de Corrélation")
+                                plt.grid(True, alpha=0.3)
+                                plt.legend()
+                                plt.tight_layout()
+                                plt.savefig(run_dir / f"cca_spectrum_it{it}.png")
+                                plt.close()
+                            except Exception as e:
+                                tqdm.write(f"[warn] Impossible de tracer le spectre CCA : {e}")
+
                 else:
                     feats_screened = feats
 
@@ -1722,15 +1741,26 @@ def main():
                 if args.align == "barlow":
                     L_align = antstorch.barlow_twins_multi(feats_screened, lam=float(args.barlow_lambda))
                 elif args.align == "vicreg":
-                    # Keep CLI consistent with the rest of this trainer and the 3-D trainer:
-                    # --vicreg-inv/--vicreg-var/--vicreg-cov/--vicreg-gamma
-                    L_align = antstorch.vicreg_multi(
+                    # 1. Obtenir les composantes Invariance et Covariance (symétriques)
+                    L_inv_cov = antstorch.vicreg_multi(
                         feats_screened,
                         w_inv=float(args.vicreg_inv),
-                        w_var=float(args.vicreg_var),
+                        w_var=0.0, # Désactivé temporairement
                         w_cov=float(args.vicreg_cov),
-                        gamma=float(args.vicreg_gamma),
+                        gamma=1.0
                     )
+                    
+                    # 2. Calculer la Variance asymétrique
+                    L_var = torch.tensor(0.0, device=dev)
+                    for vi, feat in enumerate(feats_screened):
+                        # Fallback au premier élément si l'utilisateur ne fournit qu'un seul scalaire
+                        w_var_v = args.vicreg_var[vi] if vi < len(args.vicreg_var) else args.vicreg_var[0]
+                        gamma_v = args.vicreg_gamma[vi] if vi < len(args.vicreg_gamma) else args.vicreg_gamma[0]
+                        
+                        std = torch.sqrt(feat.var(dim=0) + 1e-04)
+                        L_var += w_var_v * torch.mean(F.relu(gamma_v - std))
+                        
+                    L_align = L_inv_cov + L_var
                 elif args.align == "infonce":
                     L_align = antstorch.info_nce_multi(feats_screened, T=float(args.temperature))
                 elif args.align == "hsic":

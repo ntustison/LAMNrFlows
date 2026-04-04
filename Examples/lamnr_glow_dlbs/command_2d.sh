@@ -10,18 +10,20 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # ------------------------------------
 
 # total steps
-iterations=100000
+iterations=150000
+aug_iterations=100000
+
 
 # model / data (OPTIMISÉ POUR ANISOTROPIE)
 H=96; W=128; L=5; K=12; hidden=256  
 SLICE_IDX=115
 
 # optimization
-LR=2.5e-5
+LR=5e-5
 WARMUP=2000
 WEIGHT_DECAY=1e-6
 LR_DECAY_GAMMA=0.5
-LR_DECAY_STEPS=50000
+LR_DECAY_STEPS=80000
 
 # --- CONFIG MULTI-GPU ROBUSTE ---
 BATCH=25             
@@ -43,7 +45,7 @@ ALIGN="vicreg"
 ALIGN_WEIGHT=0.01
 ALIGN_VICREG_INV=25.0
 ALIGN_VICREG_VAR=25.0
-ALIGN_VICREG_GAMMA=1.0
+ALIGN_VICREG_GAMMA="1.0 2.0 1.0"
 ALIGN_VICREG_COV=10.0
 
 ALIGN_WARMUP=500
@@ -73,11 +75,11 @@ GLOWBASE_LOGSCALE_FACTOR=1.0
 SCALE_MAP="tanh"
 
 # Augmentation schedule
-aug_params_phase1="noise_std:cos:0.05->0.015@${iterations},\
-sd_affine:cos:0.05->0.01@${iterations},\
-sd_deformation:linear:12.0->0.6@${iterations},\
-sd_simulated_bias_field:cos:0.20->0.03@${iterations},\
-sd_histogram_warping:cos:0.04->0.008@${iterations}"
+aug_params_phase1="noise_std:cos:0.05->0.015@${aug_iterations},\
+sd_affine:cos:0.05->0.01@${aug_iterations},\
+sd_deformation:linear:12.0->0.6@${aug_iterations},\
+sd_simulated_bias_field:cos:0.20->0.03@${aug_iterations},\
+sd_histogram_warping:cos:0.04->0.008@${aug_iterations}"
 
 DLBS_ROOT="/home/ntustison/Data/ds004856/BIDSAlignedToTemplate/"
 
@@ -114,7 +116,7 @@ python train_lamnr_glow_2d.py \
   --vicreg-inv "${ALIGN_VICREG_INV}" \
   --vicreg-var "${ALIGN_VICREG_VAR}" \
   --vicreg-cov "${ALIGN_VICREG_COV}" \
-  --vicreg-gamma "${ALIGN_VICREG_GAMMA}" \
+  --vicreg-gamma ${ALIGN_VICREG_GAMMA} \
   --screen "${SCREEN_METHOD}" \
   --screen-warmup "${SCREEN_WARMUP}" --screen-refresh "${SCREEN_REFRESH}" --screen-frac "${SCREEN_FRAC}" \
   --cca-ridge "${CCA_RIDGE}" --prefilter-frac "${PREFILTER_FRAC}" \

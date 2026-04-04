@@ -1452,15 +1452,15 @@ def main():
                     help="Initial log variance parameter for Alignment when using Kendall weighting.")
     
     # --- VICReg Hyperparameters ---
-    ap.add_argument("--vicreg-inv", type=float, default=1.0, 
-                    help="VICReg invariance weight (pulls representations of the same subject across views together).")
-    ap.add_argument("--vicreg-var", type=float, default=1.0, 
-                    help="VICReg variance weight (pushes representations to have high variance, preventing mode collapse).")
+    ap.add_argument("--vicreg-inv", type=float, default=25.0, 
+                    help="VICReg invariance weight (pulls representations of the same subject closer).")
     ap.add_argument("--vicreg-cov", type=float, default=1.0,  
-                    help="VICReg covariance weight (decorrelates features to maximize information content).")
-    ap.add_argument("--vicreg-gamma", type=float, default=1.0, 
-                    help="Target standard deviation (variance floor) per feature dimension for VICReg.")
-    
+                    help="VICReg covariance weight (penalizes off-diagonal correlations to prevent collapse).")
+    ap.add_argument("--vicreg-var", type=float, nargs="+", default=[25.0], 
+                    help="VICReg variance weight. Pass multiple values for asymmetric weighting per view.")
+    ap.add_argument("--vicreg-gamma", type=float, nargs="+", default=[1.0], 
+                    help="VICReg variance floor. Pass multiple values for asymmetric targets per view.")    
+
     # --- HSIC Alignment ---
     ap.add_argument("--hsic-sigma", type=float, default=0.0, 
                     help="Bandwidth parameter for the RBF kernel in HSIC. If 0, uses the median pairwise distance heuristic per batch.")
@@ -2029,11 +2029,45 @@ def main():
                     )
                     feats = apply_screen(feats, screen_state)
 
-                if args.align == "vicreg":
-                    L_align = antstorch.vicreg_multi(
-                        feats, w_inv=float(args.vicreg_inv), w_var=float(args.vicreg_var),
-                        w_cov=float(args.vicreg_cov), gamma=float(args.vicreg_gamma),
+                    if do_refresh and args.screen == "cca" and screen_state is not None and screen_state.meta:
+                        spectrum = screen_state.meta.get("cca_info", {}).get("mean_spectrum", None)
+                        if spectrum is not None:
+                            try:
+                                plt.figure(figsize=(8, 5))
+                                plt.plot(spectrum, marker='.', linestyle='-', markersize=4)
+                                plt.axvline(x=screen_state.keep_dim, color='red', linestyle='--', label=f"Coupure actuelle (frac={args.screen_frac})")
+                                plt.title(f"Spectre CCA (Itération {it})")
+                                plt.xlabel("Dimensions Latentes")
+                                plt.ylabel("Magnitude de Corrélation")
+                                plt.grid(True, alpha=0.3)
+                                plt.legend()
+                                plt.tight_layout()
+                                plt.savefig(run_dir / f"cca_spectrum_it{it}.png")
+                                plt.close()
+                            except Exception as e:
+                                tqdm.write(f"[warn] Impossible de tracer le spectre CCA : {e}")
+
+                elif args.align == "vicreg":
+                    # 1. Obtenir les composantes Invariance et Covariance (symétriques)
+                    L_inv_cov = antstorch.vicreg_multi(
+                        feats,
+                        w_inv=float(args.vicreg_inv),
+                        w_var=0.0, # Désactivé temporairement
+                        w_cov=float(args.vicreg_cov),
+                        gamma=1.0
                     )
+                    
+                    # 2. Calculer la Variance asymétrique
+                    L_var = torch.tensor(0.0, device=dev)
+                    for vi, feat in enumerate(feats):
+                        # Fallback au premier élément si l'utilisateur ne fournit qu'un seul scalaire
+                        w_var_v = args.vicreg_var[vi] if vi < len(args.vicreg_var) else args.vicreg_var[0]
+                        gamma_v = args.vicreg_gamma[vi] if vi < len(args.vicreg_gamma) else args.vicreg_gamma[0]
+                        
+                        std = torch.sqrt(feat.var(dim=0) + 1e-04)
+                        L_var += w_var_v * torch.mean(F.relu(gamma_v - std))
+                        
+                    L_align = L_inv_cov + L_var
                 elif args.align == "barlow":
                     L_align = antstorch.barlow_twins_multi(feats, lam=float(args.barlow_lambda))
                 elif args.align == "infonce":
