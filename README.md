@@ -207,13 +207,21 @@ Data from [*The Dallas Lifespan Brain Study: A Comprehensive Adult Lifespan Data
 </details>
 
 <details>
-<summary>Data augmentation:  HCP YA T1</summary>
+<summary>Data augmentation:  (HCP-YA T1w template example)</summary>
 
-<video width="300" height="300" controls loop="" muted="" autoplay="">
-    <source src="https://github.com/ntustison/LAMNrFlows/raw/refs/heads/main/Manuscript/Figures/aug_dlbs.mp4">
-</video>
+```bash
+iterations=100000
+aug_params="noise_std:cos:0.05->0.015@${iterations},\
+            sd_affine:cos:0.05->0.01@${iterations},\
+            sd_deformation:linear:12.0->0.6@${iterations},\
+            sd_simulated_bias_field:cos:0.20->0.03@${iterations},\
+            sd_histogram_warping:cos:0.04->0.008@${iterations}"
+```
+
+<img src="Manuscript/Figures/aug_dlbs.gif" alt="HCP YA T1 aug" width="50%">
 
 </details>
+
 
 <!--
 <details>
