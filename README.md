@@ -204,7 +204,7 @@ aug_params="noise_std:cos:0.05->0.015@${iterations},\
             sd_simulated_bias_field:cos:0.20->0.03@${iterations},\
             sd_histogram_warping:cos:0.04->0.008@${iterations}"
 ```
-
+Visualization cycle (~20 seconds)
 <img src="Manuscript/Figures/aug_dlbs.gif" alt="HCP YA T1 aug" width="100%">
 
 </details>
@@ -216,12 +216,6 @@ aug_params="noise_std:cos:0.05->0.015@${iterations},\
 <summary>Multimodal brain lifespan data with augmentation</summary>
 
 Data from [*The Dallas Lifespan Brain Study: A Comprehensive Adult Lifespan Data Set of Brain and Cognitive Aging*](https://www.nature.com/articles/s41597-025-04847-7)
-
-<!-- <p align="center">
-  <img src="Manuscript/Figures/input_data_view0.png" alt="T1" width="30%">
-  <img src="Manuscript/Figures/input_data_view1.png" alt="T2" width="30%">
-  <img src="Manuscript/Figures/input_data_view2.png" alt="FA" width="30%">
-</p> -->
 
 </details>
 
