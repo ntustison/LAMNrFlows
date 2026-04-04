@@ -2221,7 +2221,7 @@ def main_recon_cohort_template(argv=None):
         mu = torch.mean(z_spheres, dim=0)
         mu = mu / torch.norm(mu).clamp(min=1e-8)
         
-        for _ in range(max_iter):
+        for i in range(max_iter):
             # 1. Logarithmic Map : Projection vers l'espace tangent de mu
             # Le clamp évite les NaN dans arccos à cause des erreurs d'arrondi
             dot_prods = torch.matmul(z_spheres, mu).clamp(-1.0 + 1e-7, 1.0 - 1e-7)
@@ -2292,7 +2292,7 @@ def main_recon_cohort_template(argv=None):
     if N == 0: raise RuntimeError("Aucune image trouvée dans le manifest.")
     print(f"[info] Calcul de la moyenne latente pour {N} sujets (Vue: {vname})...")
 
-# 3. Encodage et Stockage Latent
+    # 3. Encodage et Stockage Latent
     # Au lieu d'accumuler, on stocke les représentations de chaque sujet
     z_all_subjects = None 
 
