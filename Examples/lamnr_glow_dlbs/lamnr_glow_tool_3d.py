@@ -938,9 +938,43 @@ def main_recon_template(argv=None):
 
 def main_recon_cohort_template(argv=None):
     """
-    Génère un template 3D spécifique à une cohorte (Cohort Average).
-    Idéal pour générer un atlas "moyen" d'une sous-population clinique (ex: lésions).
+    Génère un template 2D spécifique à une cohorte (Cohort Average).
+    Lit un manifest, encode toutes les images dans l'espace latent, 
+    calcule le barycentre (moyenne Frechèt) et le décode.
     """
+
+    def frechet_mean_spherical(z_points, max_iter=50, tol=1e-5, verbose=True):
+        norms = torch.norm(z_points, p=2, dim=1, keepdim=True)
+        z_spheres = z_points / norms.clamp(min=1e-8)
+        
+        mu = torch.mean(z_spheres, dim=0)
+        mu = mu / torch.norm(mu).clamp(min=1e-8)
+        
+        for _ in range(max_iter):
+            dot_prods = torch.matmul(z_spheres, mu).clamp(-1.0 + 1e-7, 1.0 - 1e-7)
+            thetas = torch.acos(dot_prods).unsqueeze(1)
+            
+            diff = z_spheres - (dot_prods.unsqueeze(1) * mu.unsqueeze(0))
+            diff_norms = torch.norm(diff, p=2, dim=1, keepdim=True).clamp(min=1e-8)
+            
+            tangent_vectors = (diff / diff_norms) * thetas
+            tangent_mean = torch.mean(tangent_vectors, dim=0)
+            tangent_mean_norm = torch.norm(tangent_mean)
+            
+            if verbose:
+                print(f"    Iter {i+1}/{max_iter} | Erreur (Norme Tangente) : {tangent_mean_norm.item():.6f}")
+        
+            if tangent_mean_norm < tol:
+                if verbose:
+                    print(f"    -> Convergence atteinte à l'itération {i+1} !")
+                break
+                
+            mu = mu * torch.cos(tangent_mean_norm) + (tangent_mean / tangent_mean_norm) * torch.sin(tangent_mean_norm)
+            mu = mu / torch.norm(mu).clamp(min=1e-8)
+            
+        avg_norm = torch.mean(norms)
+        return mu * avg_norm
+
     ap = argparse.ArgumentParser("LAM-Flow 3D Cohort Template (recon-cohort-template)")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
     ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV with cohort images")
@@ -977,8 +1011,9 @@ def main_recon_cohort_template(argv=None):
     if N == 0: raise RuntimeError("Aucune image trouvée dans le manifest.")
     print(f"[info] Calcul de la moyenne latente 3D pour {N} sujets (Vue: {vname})...")
 
-    # 3. Encodage et Accumulation
-    z_accum = None
+# 3. Encodage et Stockage Latent (sur CPU pour économiser la VRAM)
+    z_all_subjects = None
+    
     for p in tqdm(paths, desc="Encoding Cohort 3D", unit="vol"):
         x = _read_image_3d(p, args.volume_size).to(device)
 
@@ -987,26 +1022,35 @@ def main_recon_cohort_template(argv=None):
             if isinstance(z_list, tuple): z_list = list(z_list)
             if not isinstance(z_list, list): z_list = [z_list]
 
-        if z_accum is None:
-            z_accum = [torch.zeros_like(z) for z in z_list]
+        if z_all_subjects is None:
+            z_all_subjects = [ [] for _ in range(len(z_list)) ]
 
         for l in range(len(z_list)):
-            z_accum[l] += z_list[l]
+            # CRITIQUE 3D : .cpu() libère la VRAM à chaque itération
+            z_all_subjects[l].append(z_list[l].cpu()) 
 
-    # 4. Moyenne et Décodage
-    z_mean = [z / float(N) for z in z_accum]
+    # 4. Calcul de la Moyenne Tangentielle et Décodage
+    z_mean = []
+    print(f"[info] Calcul de la moyenne de Fréchet sur la variété sphérique (3D)...")
+    
+    for l in range(len(z_all_subjects)):
+        # Empilement pour le niveau l (toujours sur CPU): forme (N, C, D, H, W)
+        z_stack = torch.cat(z_all_subjects[l], dim=0)
+        N_subj, C, D_z, H_z, W_z = z_stack.shape
+        
+        # Aplatissement en 2D (N, D) et transfert sur GPU pour le calcul rapide
+        z_flat = z_stack.view(N_subj, -1).to(device)
+        
+        # Calcul de la moyenne riemannienne
+        mu_flat = frechet_mean_spherical(z_flat)
+        
+        # Remodelage vers les dimensions spatiales 3D (1, C, D, H, W)
+        z_mean.append(mu_flat.view(1, C, D_z, H_z, W_z))
 
     with torch.no_grad():
+        # z_mean est déjà sur le GPU grâce à l'étape précédente
         x_recon, _ = model.forward_and_log_det(z_mean)
         x_recon = to01(_coerce_5d(x_recon, args.volume_size))
-
-    if args.sharpen_image:
-        import ants
-        if x_recon.is_cuda: x_recon = x_recon.cpu()
-        ants_img = ants.from_numpy(x_recon.squeeze().numpy())
-        img_smooth = ants.smooth_image(ants_img, 1.0)
-        img_sharp = ants.iMath_sharpen(img_smooth)
-        x_recon = torch.from_numpy(img_sharp.numpy()).view(1, 1, *args.volume_size).to(device)
 
     # 5. Sauvegarde
     outp = Path(args.out)
