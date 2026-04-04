@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
