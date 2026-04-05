@@ -163,7 +163,7 @@ Normalizing flows offer an alternative, deep learning perspective by
 topologically unfolding these nonlinear manifolds into a symmetric, centered
 diagonal Gaussian base distribution (Figure \ref{fig:single_view_flow}). Within
 this framework, one principled approach to template construction is the inverse
-mapping of the latent origin, $\hat{x}_0 = f^{-1}(0)$, which leverages the
+mapping of the latent origin, $\hat{x}_0 = f_{\theta}^{-1}(0)$, which leverages the
 property that the Gaussian mean, mode, and median coincide precisely at the
 origin. While registration-based templates (e.g., via Symmetric Normalization
 [@Avants:2010aa] or Large Deformation Diffeomorphic Metric Mapping
@@ -185,10 +185,9 @@ mapping in a spatial normalizing flow to force the template onto the
 high-probability "typical set" destroys the anatomical signal. Because LAMNr
 flows preserve spatial dimensions, projecting the vector norm to this spherical
 shell normalizes the spatial contrast energy, resulting in severe high-frequency
-noise. Consequently, the Euclidean latent origin $z=0$ must not be interpreted
-as a statistically typical anatomical instance, but strictly as a barycentric
-geometric anchor representing the central axis of symmetry for the learned
-bijection.
+noise. Consequently, the latent origin $z=0$ is not a statistically typical
+anatomical instance, but rather a barycentric geometric anchor representing the
+central axis of symmetry for the learned bijection.
 
 Beyond template construction, this continuous latent framework provides direct
 analogues to the fundamental metric operations of traditional computational
