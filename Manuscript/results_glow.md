@@ -56,17 +56,6 @@ limitations[^comp].
   central morphometric tendency of the cohort without the computational overhead
   of iterative diffeomorphic averaging [@Avants:2010aa].  Figure \ref{fig:frechet_mean}.
 
-* __Cohort template.__ Beyond simple point estimation, the generative nature of
-  LAMNr flows allows for the construction of a high-fidelity cohort template
-  that functions as an alternative to the Fréchet mean approximation. By
-  calculating the arithmetic centroid of the subject-specific latent vectors and
-  mapping this central point back to the physical domain, we generate a
-  synthetic image that represents the cohort-specific anatomical
-  characterization. Unlike the Fréchet mean approximation, this manifold-based
-  synthesis preserves sharp morphological boundaries by operating within the
-  linearized geometry of the "unfolded" anatomical distribution. Figure
-  \ref{fig:cohort_template}.
-
 * __Latent distances.__ The bijective nature of normalizing flows allows complex
   anatomical deviations to be quantified through a flexible suite of distance
   metrics in the learned latent space, depending on the analytical
@@ -220,22 +209,16 @@ limitations[^comp].
     \centering
 
     % --- Baseline Row ---
-    \begin{subfigure}{0.30\textwidth}
+    \begin{subfigure}{0.45\textwidth}
         \includegraphics[width=\linewidth]{Figures/PPMI_template0_256x256x256_slice138.png}
         \caption{ANTsX Template}
         \label{fig:template_antsx}
     \end{subfigure}
     \hspace{0.01\textwidth} % Space to center the three images
-    \begin{subfigure}{0.30\textwidth}
+    \begin{subfigure}{0.45\textwidth}
         \includegraphics[width=\linewidth]{Figures/template_T1_mu_sharpened_256x256.png}
         \caption{T1: $f^{-1}_{\theta}(0)$}
         \label{fig:template_flow}
-    \end{subfigure}
-    \hspace{0.01\textwidth} % Space to center the two images
-    \begin{subfigure}{0.30\textwidth}
-        \includegraphics[width=\linewidth]{Figures/template_T1_mu_sharpened_256x256.png}
-        \caption{Need an image of the cohort-based template !}
-        \label{fig:template_cohort_flow}
     \end{subfigure}
 
     \caption{Comparison of population Fréchet mean approximations. (a) The standard

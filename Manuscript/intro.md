@@ -51,7 +51,7 @@ optimal alignment between the noise distribution and data points to ensure
 straighter paths and more effective inference, even in high-dimensional
 settings.
 
-The bijective aspect of these models also enables the synthesis of biological
+The bijective formulation of these models also enables the synthesis of biological
 variation through stochastic sampling, where latent vectors drawn from the
 Gaussian prior are mapped back to the high-dimensional image space. While latent
 diffusion and flow matching achieve high sample quality, they optimize denoising
@@ -159,14 +159,14 @@ distances across a cohort [@Avants:2010aa]. Traditionally, the intrinsic
 curvature of image spaces causes a divergence between the Fréchet mean, the
 Karcher mean, and the statistical mode [@Fletcher2009aa]. 
 
-Normalizing flows offer a transformative perspective by topologically unfolding
-these nonlinear manifolds into a symmetric, centered diagonal Gaussian base
-distribution (Figure \ref{fig:single_view_flow}). One potential application
-provided by this framework is template construction. One principled approach is
-the inverse mapping of the latent origin, $\hat{x}_0 = f^{-1}(0)$, which
-leverages the property that the Gaussian mean, mode, and median coincide
-precisely at the origin. While registration-based templates (e.g., via Symmetric
-Normalization [@Avants:2010aa] or Large Deformation Diffeomorphic Metric Mapping
+Normalizing flows offer an alternative, deep learning perspective by
+topologically unfolding these nonlinear manifolds into a symmetric, centered
+diagonal Gaussian base distribution (Figure \ref{fig:single_view_flow}). Within
+this framework, one principled approach to template construction is the inverse
+mapping of the latent origin, $\hat{x}_0 = f^{-1}(0)$, which leverages the
+property that the Gaussian mean, mode, and median coincide precisely at the
+origin. While registration-based templates (e.g., via Symmetric Normalization
+[@Avants:2010aa] or Large Deformation Diffeomorphic Metric Mapping
 [@Miller2002LDDMMOverview]) typically preserve high-frequency details through
 iterative normalization, spatial averaging, and sharpening, the generative
 latent origin-based template exhibits a visually smoother appearance. This
@@ -175,21 +175,20 @@ As the exact mode of the latent distribution, the origin averages out
 idiosyncratic, high-frequency anatomical variations, such as individual cortical
 folding patterns, that do not strictly persist across the cohort.
 
-However, a critical caveat must be established regarding the geometric
-interpretation of this template. In high dimensions, the concentration of
-measure phenomenon dictates that probability mass concentrates within a thin
-spherical shell rather than at the origin [@white2016sampling;
-@vershynin2018high; @blum2020foundations]. While classical geometric morphometry
-often utilizes the Fréchet mean to compute a statistically valid average on a
-Riemannian manifold [@Pennec2006], applying such spherical mapping in a spatial
-normalizing flow to force the template onto the high-probability "typical set"
-paradoxically destroys the anatomical signal. Because LAMNr flows preserve
-spatial dimensions, artificially inflating the vector norm to reach this
-spherical shell forcibly normalizes the spatial contrast energy, resulting in
-severe high-frequency noise. Consequently, the Euclidean latent origin $z=0$
-must not be interpreted as a statistically typical anatomical instance, but
-strictly as a barycentric geometric anchor representing the central axis of
-symmetry for the learned bijection.
+Furthermore, regarding the geometric interpretation of this template, in high
+dimensions the concentration of measure phenomenon dictates that probability
+mass concentrates within a thin spherical shell rather than at the origin
+[@white2016sampling; @vershynin2018high; @blum2020foundations]. While classical
+geometric morphometry often utilizes the Fréchet mean to compute a statistically
+valid average on a Riemannian manifold [@Pennec2006], applying such spherical
+mapping in a spatial normalizing flow to force the template onto the
+high-probability "typical set" destroys the anatomical signal. Because LAMNr
+flows preserve spatial dimensions, projecting the vector norm to this spherical
+shell normalizes the spatial contrast energy, resulting in severe high-frequency
+noise. Consequently, the Euclidean latent origin $z=0$ must not be interpreted
+as a statistically typical anatomical instance, but strictly as a barycentric
+geometric anchor representing the central axis of symmetry for the learned
+bijection.
 
 Beyond template construction, this continuous latent framework provides direct
 analogues to the fundamental metric operations of traditional computational
