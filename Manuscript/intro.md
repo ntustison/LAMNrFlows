@@ -165,20 +165,31 @@ distribution (Figure \ref{fig:single_view_flow}). One potential application
 provided by this framework is template construction. One principled approach is
 the inverse mapping of the latent origin, $\hat{x}_0 = f^{-1}(0)$, which
 leverages the property that the Gaussian mean, mode, and median coincide
-precisely at the origin.   While registration-based templates (e.g., via
-Symmetric Normalization [@Avants:2010aa] or Large Deformation Diffeomorphic
-Metric Mapping [@Miller2002LDDMMOverview]) typically preserve high-frequency
-details through iterative normalization, spatial averaging, and sharpening; the
-generative latent origin-based templates exhibits a visually smoother
-appearance. This smoothness is a direct consequence of high-dimensional
-probabilistic modeling. As the exact mode of the latent distribution, the origin
-averages out idiosyncratic, high-frequency anatomical variations, such as
-individual cortical folding patterns, that do not strictly persist across the
-cohort. By isolating the macroscopic structural tendencies common to the entire
-population, the framework accounts for the concentration of measure phenomenon
-in high dimensions, where probability mass concentrates within a thin spherical
-shell rather than at the origin [@white2016sampling; @vershynin2018high;
-@blum2020foundations].  
+precisely at the origin. While registration-based templates (e.g., via Symmetric
+Normalization [@Avants:2010aa] or Large Deformation Diffeomorphic Metric Mapping
+[@Miller2002LDDMMOverview]) typically preserve high-frequency details through
+iterative normalization, spatial averaging, and sharpening, the generative
+latent origin-based template exhibits a visually smoother appearance. This
+smoothness is a direct consequence of high-dimensional probabilistic modeling.
+As the exact mode of the latent distribution, the origin averages out
+idiosyncratic, high-frequency anatomical variations, such as individual cortical
+folding patterns, that do not strictly persist across the cohort.
+
+However, a critical caveat must be established regarding the geometric
+interpretation of this template. In high dimensions, the concentration of
+measure phenomenon dictates that probability mass concentrates within a thin
+spherical shell rather than at the origin [@white2016sampling;
+@vershynin2018high; @blum2020foundations]. While classical geometric morphometry
+often utilizes the Fréchet mean to compute a statistically valid average on a
+Riemannian manifold [@Pennec2006], applying such spherical mapping in a spatial
+normalizing flow to force the template onto the high-probability "typical set"
+paradoxically destroys the anatomical signal. Because LAMNr flows preserve
+spatial dimensions, artificially inflating the vector norm to reach this
+spherical shell forcibly normalizes the spatial contrast energy, resulting in
+severe high-frequency noise. Consequently, the Euclidean latent origin $z=0$
+must not be interpreted as a statistically typical anatomical instance, but
+strictly as a barycentric geometric anchor representing the central axis of
+symmetry for the learned bijection.
 
 Beyond template construction, this continuous latent framework provides direct
 analogues to the fundamental metric operations of traditional computational
