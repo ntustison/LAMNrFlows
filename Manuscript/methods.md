@@ -17,7 +17,7 @@
    distribution in the latent space $\mathcal{Z}\sim\mathcal{N}(0,1)$. This
    mapping is performed by the individual normalizing flows sequential bijections
    ($T_1$, $T_2$, $\dots$, $T_n$). Joint alignment optimization is performed on
-   latent distributions to drive convergence towards a harmonized shared space
+   latent distributions to drive convergence towards a normalized shared space
    through the application of the alignment loss function
    $\mathcal{L}_{align}(\{\phi_{v}^{(v)}(z_{S,n}^{(v)})\}_{v,n})$.}
    \label{fig:lamnr_flows_illustration}
@@ -44,7 +44,7 @@ follows from the change-of-variables formula:
 \end{equation}
 
 which can be evaluated exactly for the RealNVP [@dinh2016realnvp] and Glow
-[@kingma2018glow] architectures used this proposed framework. The maximum-likelihood
+[@kingma2018glow] architectures. The maximum-likelihood
 estimation chooses \(\theta^{(v)}\) to maximize the sum of log-likelihoods over
 subjects, or equivalently to minimize the average negative log-likelihood
 [@kobyzev2020nfsurvey].
@@ -81,7 +81,7 @@ coordinate system from the alignment space. This allows each view to learn a
 light reparameterization of alignment of rotations and scales frequently
 introduced by invertible mixing layers such as the $1 \times 1 (\times 1)$
 convolutions in Glow, while harmonizing dimensions across disparate views.  The
-role of this $D$ subspace can very strategically depending on the data type. For
+role of this $D$ subspace can vary strategically depending on the data type. For
 tabular IDPs (i.e., RealNVP) this configuration represents a high-capacity
 expansion of the lower-dimensional latent space. This expansion provides the
 alignment constraints with sufficient degrees of freedom to operate without
@@ -101,7 +101,7 @@ coordinates free to capture independent variation.[^align]
 
 [^align]: In practice, we choose the alignment objective based on both computational
 budget and the expected cross-view structure. For small batches or limited
-compute, simple second-order methods such as Pearson correlation, or
+computational resources, simple second-order methods such as Pearson correlation, or
 non-contrastive objectives such as VICReg, are attractive because they are
 stable and inexpensive to estimate. When stronger redundancy reduction is needed
 while still avoiding negative pairs, Barlow Twins is a good default, explicitly
@@ -127,7 +127,6 @@ view. Alignment losses are applied only to these projected or masked
 coordinates, so that dependence is enforced where cross-view signal is strongest
 and private dimensions remain free to capture view-specific variation. Screening
 can be performed once after warm-up or periodically refreshed during training.
-
 For a subject-matched minibatch of size \(N\), the full training objective becomes
 
 \begin{equation}
@@ -166,12 +165,12 @@ experiments.
 (a) & (b)
 \end{tabular}
 \caption{
-Overview of the LAMNr flows architectures.  
+Overview of the constituent normalizing flows architectures for LAMNr flows.  
 (a) Single-scale RealNVP architecture for tabular data. An
-input vector $x \in \mathbb{R}^{B \times D}$ (e.g., imaging-derived phenotypes)
+input vector $x \in \mathbb{R}^{B \times D}$ (e.g., IDPs)
 is processed through $K$ coupling steps to produce a latent representation $z_K$
 of the same dimensionality. In addition to a diagonal Gaussian distribution, 
-a $\texttt{GaussianPCA}$ base distribution is also supported where 
+a Gaussian-PCA base distribution is also supported where 
 $z \sim \mathcal{N}(\mu, WW^\top + \sigma^2 I_D)$, which acts as a
 learnable, geometrically-informed coordinate system. This unified approach
 ensures exact invertibility and facilitates principled latent alignment across
@@ -258,49 +257,45 @@ where \(\mu_c\) and \(s_c\) are per-channel parameters broadcast over all
 spatial indices \(\mathbf{x}\). Compared to a conventional per-voxel diagonal
 Gaussian, tying parameters within each channel reduces degrees of freedom,
 matches Glow’s multiscale semantics, and avoids per-voxel scale collapse.
-However, in the medical imaging context discussed here, only single channel
-data is employed.
 
 ## High-dimensional Geometry and Latent Space Navigation
 
 In high-dimensional standard normal latent spaces, such as those optimized by
-LAMNr flows, the geometric properties of the data distribution become highly
+LAMNr flows, the geometric properties of the data distribution become
 counterintuitive due to the concentration of measure phenomenon
-[@white2016sampling; @vershynin2018high; @blum2020foundations]. As
-dimensionality increases, probability mass moves away from concentration at the
-origin. Instead, the volume of the space grows exponentially with distance from
-the center, causing the vast majority of the mass to concentrate within a narrow
-spherical shell of radius $\approx \sqrt{d}$. This region is often referred to
-as the typical set [@vershynin2018high; @blum2020foundations] or the "soap
-bubble"[^blogpost] effect. Consequently, the latent origin $z=0$ is a highly
-atypical point containing near-zero probability mass. The inverse mapping
-$f^{-1}(0)$ must therefore be understood strictly as a barycentric geometric
-anchor representing a central axis of symmetry for the learned bijection, rather
-than a statistically representative anatomical mode.  
+[@white2016sampling; @vershynin2018high; @blum2020foundations]. In other words,
+as dimensionality increases, probability mass moves away from concentration at
+the origin. Instead, the volume of the space grows exponentially with distance
+from the center, causing the vast majority of the mass to concentrate within a
+narrow spherical shell of radius $\approx \sqrt{d}$ (i.e., the "soap
+bubble" effect[^blogpost]). This region is often referred to as the typical set
+[@vershynin2018high; @blum2020foundations] . Consequently, the latent origin
+$z=0$ is a highly atypical point containing near-zero probability mass. The
+inverse mapping $f^{-1}(0)$ must therefore be understood strictly as a
+barycentric geometric anchor representing a central axis of symmetry for the
+learned bijection, rather than a statistically representative anatomical mode.  
 
 [^blogpost]: https://www.inference.vc/high-dimensional-gaussian-distributions-are-soap-bubble/
 
-Furthermore, while the normalizing flow successfully unfolds the global topology
-of the anatomical data, the assumption that Euclidean operations in the latent
-space seamlessly translate to valid anatomical transformations in the image
-space is mathematically flawed. The latent space is not a flat Euclidean
-manifold.  Rather, its intrinsic distances are governed by a stochastic
-Riemannian metric induced by the generator's Jacobian, defined as $M_z =
-J_z^\top J_z$ [@arvanitidis2018latent]. Because the network non-linearly expands
-and compresses the data space to maximize likelihood, Euclidean straight lines
-in the latent space do not correspond to the shortest paths (geodesics) on the
-underlying image manifold. 
-
-This geometric distortion has immediate, tangible consequences for cohort
-alignment and interpolation. Linearly interpolating between two latent
-points located on the typical set creates a trajectory that moves inward toward
-the latent origin. In high dimensions, this effect forces the interpolation path
-through unpopulated latent regions of extremely low probability, causing a
-severe distribution mismatch [@agustsson2018optimaltransportmapsdistribution].
-The resulting generated images exhibit blurriness, structural artifacts, and
-anatomical inconsistencies. To better align deep generative models with the
-principles of computational anatomy, Euclidean operations must be replaced with
-distribution-preserving mechanisms.
+Furthermore, as the normalizing flow unfolds the global topology of the
+anatomical data, the resulting latent space is not a flat Euclidean manifold
+such that Euclidean operations in the latent space do not translate to valid
+anatomical transformations in the image space.  Rather, latent-based distances
+are governed by a stochastic Riemannian metric induced by the generator's
+Jacobian, defined as $M_z = J_z^\top J_z$ [@arvanitidis2018latent]. Because the
+network non-linearly expands and compresses the data space to maximize
+likelihood, Euclidean straight lines in the latent space do not correspond to
+the shortest paths (geodesics) on the underlying image manifold. This geometric
+distortion has immediate, tangible consequences for cohort alignment and
+interpolation. Linearly interpolating between two latent points located on the
+typical set creates a trajectory that moves inward toward the latent origin. In
+high dimensions, this effect forces the interpolation path through unpopulated
+latent regions of extremely low probability, causing a distribution mismatch
+[@agustsson2018optimaltransportmapsdistribution]. The resulting generated images
+exhibit blurriness, structural artifacts, and anatomical inconsistencies. To
+better align deep generative models with the principles of computational
+anatomy, Euclidean operations must be replaced with distribution-preserving
+mechanisms.
 
 To navigate this geometry appropriately, we replace standard linear
 interpolation with spherical linear interpolation (SLERP) when traversing
@@ -308,7 +303,7 @@ the latent space between two generated samples $z_1$ and $z_2$
 [@white2016sampling; @agustsson2018optimaltransportmapsdistribution]. For an
 interpolation parameter $t \in [0, 1]$ and the angle $\theta =
 \arccos\left(\frac{z_1 \cdot z_2}{\|z_1\|_2 \|z_2\|_2}\right)$ between the
-vectors, the SLERP trajectory is defined as:
+vectors, the SLERP interpolative trajectory is defined as:
 
 \begin{equation}\text{SLERP}(z_1,
 z_2; t) = \frac{\sin((1-t)\theta)}{\sin(\theta)}z_1 +
@@ -336,7 +331,4 @@ the Mahalanobis distance relative to the Gaussian mean ($\mu = 0$):
 d_M(z) = \sqrt{z^\top\Sigma^{-1} z} 
 \end{equation}
 
-where $\Sigma$ represents the covariance matrix of the reference cohort. In this
-scenario, the radial distance from the origin, captured by the Mahalanobis
-metric, is precisely the signal required to quantify the statistical
-unlikelihood of an abnormal sample.
+where $\Sigma$ represents the covariance matrix of the reference cohort. 

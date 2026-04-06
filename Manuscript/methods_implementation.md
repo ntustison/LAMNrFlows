@@ -55,8 +55,7 @@ perturbations early and then decays smoothly, and an exponential schedule
 reduces aggressive warps and noise most rapidly at the beginning of training.
 This allows us to start with heavier augmentations to regularize the flows and
 discourage overfitting to discrete templates, then gradually emphasize fidelity
-to the true data distribution as training progresses. For validation, we use the
-same spatial transforms but disable additional noise and histogram warping. This
+to the true data distribution as training progresses. This
 design preserves anatomical variability while preventing overfitting to
 discrete, noise-free templates that would otherwise cause flows to collapse onto
 certain background modes.  
@@ -106,18 +105,17 @@ after the initial warm-up phase to ensure that accumulation does not alter
 normalization behavior.
 
 To ensure stable density estimation and prevent degenerate likelihoods due to
-data quantization, we also employ uniform dequantization (jittering) during training,
-following the variational framework established in Flow++ [@ho2019flowpp].
-We apply lightweight, label-free augmentations during maximum-likelihood
-training to improve robustness without changing the model’s exact likelihood
-computation (augmentations act on inputs only)
-[@Tustison:2024aa;@Tustison:2025aa] (cf Figure \ref{fig:aug-schedule}). For
-image views, we use geometric transforms (linear and non-linear
-transformations) shared across all views of a subject to preserve alignment
-targets, and per-view intensity-based transforms (noise, simulated bias-field,
-histogram warping).  Similar to the tabular case, the amplitude is controlled by
-a scalar schedule \(\alpha(t)\) (linear, cosine, or exponential in training
-time).
+data quantization, we also employ uniform dequantization (jittering) during
+training, following the variational framework established in Flow++
+[@ho2019flowpp]. We apply lightweight, label-free augmentations during
+maximum-likelihood training to improve robustness without changing the model’s
+exact likelihood computation (augmentations act on inputs only)
+[@Tustison:2024aa;@Tustison:2025aa]. For image views, we use geometric
+transforms (linear and non-linear transformations) shared across all views of a
+subject to preserve alignment targets, and per-view intensity-based transforms
+(noise, simulated bias-field, histogram warping) .  Similar to the tabular case,
+the amplitude is controlled by a scalar schedule \(\alpha(t)\) (linear, cosine,
+or exponential in training time) (cf Figure \ref{fig:aug-schedule}).
 
 <!--
 The same training loop supports single and multiple views by instantiating one

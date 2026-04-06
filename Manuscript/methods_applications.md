@@ -37,7 +37,7 @@ and counterfactuals that are fully consistent with the learned flow model.
 After training the per-view flows and projector alignment, we freeze the flow
 parameters and collect latents for all subjects. For image views, we retain a
 multiscale representation \(z^{(v)}_\ell\) at each level \(\ell \in
-\{1,\dots,L\}\); for tabular views we have a single level. Concatenating across
+\{1,\dots,L\}\); for tabular views, we have a single level. Concatenating across
 views and levels yields a joint latent vector
 
 \begin{equation}
@@ -51,7 +51,7 @@ dimensionality." While feasible for 2D images, a small 3D medical volume (e.g.,
 \(64 \times 64 \times 64\)) yields a latent dimension \(D \approx 2.6 \times
 10^5\). Storing the dense \(D \times D\) covariance matrix as 64-bit double
 precision requires over 500 GB of memory, making direct Cholesky inversion
-\(\mathcal{O}(D^3)\) computationally intractable.
+computationally intractable.
 
 To resolve this in high-dimensional 3D settings, we employ a
 low-rank-plus-diagonal parameterization via Singular Value Decomposition (SVD).

@@ -3,20 +3,20 @@
 
 # Introduction
 
-Medical imaging data and their representative latent spaces are fundamental to
-gaining insight into biological structure and function. While deep learning has
-become the current standard for navigating these high-dimensional spaces,
-certain aspects of contemporary architectures (e.g., intractable likelihoods,
-lack of bijective mappings) limit exploration, quantitative analysis, and other
-potential applications through latent space evaluations and manipulations.
-Generative Adversarial Networks (GANs), for instance, are implicit samplers
-trained with divergence surrogates rather than likelihoods, which precludes
-calibration by exact probabilities [@papamakarios2021nfreview]. Variational
-Autoencoders (VAEs) optimize an evidence lower bound rather than the exact log
-likelihood [@kobyzev2020nfsurvey]. Diffusion and score-based models rely on
-denoising or score-matching objectives with likelihoods obtained only indirectly
-[@croitoru2023diffusion_vision_survey]. Finally, while autoregressive decoders
-offer exact likelihoods, they do not yield a one-shot invertible latent
+Medical imaging data and their representative latent spaces have become
+fundamental for insight into biological structure and function. While deep
+learning has become the current standard for navigating these high-dimensional
+spaces, certain aspects of contemporary architectures (e.g., intractable
+likelihoods, lack of bijective mappings) limit exploration, quantitative
+analysis, and other potential applications through latent space evaluations and
+manipulations. Generative Adversarial Networks (GANs), for instance, are
+implicit samplers trained with divergence surrogates rather than likelihoods,
+which precludes calibration by exact probabilities [@papamakarios2021nfreview].
+Variational Autoencoders (VAEs) optimize an evidence lower bound rather than the
+exact log likelihood [@kobyzev2020nfsurvey]. Diffusion and score-based models
+rely on denoising or score-matching objectives with likelihoods obtained only
+indirectly [@croitoru2023diffusion_vision_survey]. Finally, while autoregressive
+decoders offer exact likelihoods, they do not yield a one-shot invertible latent
 representation [@papamakarios2021nfreview]. Such limitations extend to
 multimodal and multiview settings, where heterogeneous or missing data often
 require cross-view comparisons and coherent anatomical reconstructions.
@@ -44,12 +44,12 @@ Beyond density estimation, normalizing flows provide a geometric framework for
 topologically unfolding the complex anatomical manifold sampled by modern
 medical imaging. By mapping complex imaging data to a symmetric Gaussian base
 distribution, the flow-induced metric ensures that latent paths approximate
-geodesics in the original data domain. Recent advancements have further refined
-these flow trajectories by incorporating Semi-Discrete Optimal Transport (SDOT)
-during training [@kong2025alignflow].  This approach establishes an explicit,
-optimal alignment between the noise distribution and data points to ensure
-straighter paths and more effective inference, even in high-dimensional
-settings.
+geodesics in the original data domain [@arvanitidis2018latent;
+@kobyzev2020nfsurvey]. Recent advancements have further refined these flow
+trajectories by incorporating Semi-Discrete Optimal Transport (SDOT) during
+training [@kong2025alignflow].  This approach establishes an explicit, optimal
+alignment between the noise distribution and data points to ensure straighter
+paths and more effective inference, even in high-dimensional settings.
 
 The bijective formulation of these models also enables the synthesis of biological
 variation through stochastic sampling, where latent vectors drawn from the
@@ -153,27 +153,28 @@ formalizes the study of biological shape and its variability through the action
 of diffeomorphic transformation groups on anatomical manifolds
 [@GrenanderMiller1998CA;@Miller2002LDDMMOverview]. As one important example,
 within this probabilistic and geometric framework, population structure is
-typically represented by a deformable template, a central reference formally
-established as the Fréchet mean that minimizes the sum of squared geodesic
-distances across a cohort [@Avants:2010aa]. Traditionally, the intrinsic
-curvature of image spaces causes a divergence between the Fréchet mean, the
-Karcher mean, and the statistical mode [@Fletcher2009aa]. 
+typically represented by a population template, i.e., a reference space
+formally established as the Fréchet mean that minimizes the sum of squared
+geodesic distances across a cohort [@Avants:2010aa]. Traditionally, the
+intrinsic curvature of image spaces causes a divergence between the Fréchet
+mean, the Karcher mean, and the statistical mode [@Fletcher2009aa]. 
 
 Normalizing flows offer an alternative, deep learning perspective by
 topologically unfolding these nonlinear manifolds into a symmetric, centered
 diagonal Gaussian base distribution (Figure \ref{fig:single_view_flow}). Within
 this framework, one principled approach to template construction is the inverse
-mapping of the latent origin, $\hat{x}_0 = f_{\theta}^{-1}(0)$, which leverages the
-property that the Gaussian mean, mode, and median coincide precisely at the
-origin. While registration-based templates (e.g., via Symmetric Normalization
-[@Avants:2010aa] or Large Deformation Diffeomorphic Metric Mapping
-[@Miller2002LDDMMOverview]) typically preserve high-frequency details through
-iterative normalization, spatial averaging, and sharpening, the generative
-latent origin-based template exhibits a visually smoother appearance. This
-smoothness is a direct consequence of high-dimensional probabilistic modeling.
-As the exact mode of the latent distribution, the origin averages out
-idiosyncratic, high-frequency anatomical variations, such as individual cortical
-folding patterns, that do not strictly persist across the cohort.
+mapping of the latent origin, $\hat{x}_0 = f_{\theta}^{-1}(0)$, which leverages
+the property that the Gaussian mean, mode, and median coincide precisely at the
+origin (cf. Figure \ref{fig:single_view_flow}). While registration-based
+templates (e.g., via Symmetric Normalization [@Avants:2010aa] or Large
+Deformation Diffeomorphic Metric Mapping [@Miller2002LDDMMOverview]) typically
+preserve high-frequency details through iterative normalization, spatial
+averaging, and sharpening, the generative latent origin-based template exhibits
+a visually smoother appearance. This smoothness is a direct consequence of
+high-dimensional probabilistic modeling. As the exact mode of the latent
+distribution, the origin averages out idiosyncratic, high-frequency anatomical
+variations, such as individual cortical folding patterns, that do not strictly
+persist across the cohort.
 
 Furthermore, regarding the geometric interpretation of this template, in high
 dimensions the concentration of measure phenomenon dictates that probability
@@ -203,7 +204,7 @@ $z_1$, using a scalar interpolation parameter $\alpha \in [0, 1]$ generates a
 continuous trajectory of decoded images that closely approximates this
 diffeomorphic flow. Consequently, the distances computed directly in the latent
 space, when properly evaluated via distribution-preserving spherical metrics
-rather than naive Euclidean norms, serve as highly efficient surrogates for the
+rather than Euclidean norms, serve as highly efficient surrogates for the
 complex, deformation-based geodesic distances of traditional computational
 anatomy.  These conceptualizations, along with other illustrative results, are
 discussed and provided below in the context of our proposed LAMNr flows

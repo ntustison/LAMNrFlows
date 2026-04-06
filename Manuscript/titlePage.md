@@ -31,7 +31,7 @@ James R. Stone\textsuperscript{1}$^\dagger$
 
 \end{centering}
 
-\vspace{7 cm}
+\vspace{8 cm}
 
 \noindent\rule{8cm}{0.4pt}
 
@@ -40,7 +40,6 @@ $^\dagger$ J.C.G. and J.R.S. are co-senior authors.
 \vspace{0.2 cm}
 
 \Letter$\,$ Corresponding author: \
-
 Nicholas J. Tustison, DSc \
 Department of Radiology and Medical Imaging \
 University of Virginia \
