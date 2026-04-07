@@ -72,12 +72,15 @@ sd_histogram_warping:cos:0.04->0.002@${AUG_STOP_STEP}"
 
 DLBS_ROOT="/home/ntustison/Data/ds005752/BIDSAlignedToTemplate/"
 
-mapfile -t T1 < <(ls -1 ${DLBS_ROOT}/sub-*/ses-wave1/anat/*T1w.nii.gz | sort)
+mapfile -t T1 < <(ls -1 ${DLBS_ROOT}/sub-*/ses-*/anat/*T1w.nii.gz | sort)
+mapfile -t T2 < <(ls -1 ${DLBS_ROOT}/sub-*/ses-*/anat/*T2w.nii.gz | sort)
 
 echo "T1 Volumes trouvés: ${#T1[@]}"
+echo "T2 Volumes trouvés: ${#T2[@]}"
 
 python train_lamnr_glow_3d.py \
   --view "${T1[@]}" \
+  --view "${T2[@]}" \
   --auto-resume \
   --H ${H} --W ${W} --D ${D} \
   --spatial-dims 3 \
