@@ -72,8 +72,8 @@ sd_histogram_warping:cos:0.04->0.002@${AUG_STOP_STEP}"
 
 DATA_ROOT="/home/ntustison/Data/ds005752/BIDSAlignedToTemplate/"
 
-mapfile -t T1 < <(ls -1 ${DATA_ROOT}/sub-*/ses-*/anat/*T1w.nii.gz | sort)
-mapfile -t T2 < <(ls -1 ${DATA_ROOT}/sub-*/ses-*/anat/*T2w.nii.gz | sort)
+mapfile -t T1 < <(ls -1 ${DATA_ROOT}/sub-*/ses-*/anat/*T1w*left*.nii.gz | sort)
+mapfile -t T2 < <(ls -1 ${DATA_ROOT}/sub-*/ses-*/anat/*T2w*left*.nii.gz | sort)
 
 echo "T1 Volumes trouvés: ${#T1[@]}"
 echo "T2 Volumes trouvés: ${#T2[@]}"
