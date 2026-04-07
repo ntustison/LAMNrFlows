@@ -46,6 +46,13 @@ ALIGN_VICREG_VAR=25.0
 ALIGN_VICREG_GAMMA=1.0
 ALIGN_VICREG_COV=1.0
 
+SCREEN_METHOD="cca"
+SCREEN_FRAC=0.5  
+SCREEN_WARMUP=1000
+SCREEN_REFRESH=5000
+CCA_RIDGE=1e-3
+PREFILTER_FRAC=0.5 
+
 # Sampling / Eval
 SAMPLE_TEMP=1.0
 EVAL_INTERVAL=1000
@@ -107,6 +114,9 @@ python train_lamnr_glow_3d.py \
   --vicreg-var "${ALIGN_VICREG_VAR}" \
   --vicreg-cov "${ALIGN_VICREG_COV}" \
   --vicreg-gamma "${ALIGN_VICREG_GAMMA}" \
+  --screen "${SCREEN_METHOD}" \
+  --screen-warmup "${SCREEN_WARMUP}" --screen-refresh "${SCREEN_REFRESH}" --screen-frac "${SCREEN_FRAC}" \
+  --cca-ridge "${CCA_RIDGE}" --prefilter-frac "${PREFILTER_FRAC}" \
   --scale-cap ${SCALE_CAP} \
   --glowbase-max-log ${GLOWBASE_MAX_LOG} --glowbase-min-log ${GLOWBASE_MIN_LOG} \
   --out-dir "${OUTDIR}" \
