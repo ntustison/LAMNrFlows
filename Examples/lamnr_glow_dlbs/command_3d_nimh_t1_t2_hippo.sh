@@ -70,10 +70,11 @@ sd_deformation:linear:12.0->0.2@${AUG_STOP_STEP},\
 sd_simulated_bias_field:cos:0.20->0.01@${AUG_STOP_STEP},\
 sd_histogram_warping:cos:0.04->0.002@${AUG_STOP_STEP}"
 
-DLBS_ROOT="/home/ntustison/Data/ds005752/BIDSAlignedToTemplate/"
+# DLBS_ROOT="/home/ntustison/Data/ds005752/BIDSAlignedToTemplate/"
+DATA_ROOT="/User/ntustison/Data/Public/OpenNeuro/ds005752/BIDSAlignedToTemplate/"
 
-mapfile -t T1 < <(ls -1 ${DLBS_ROOT}/sub-*/ses-*/anat/*T1w.nii.gz | sort)
-mapfile -t T2 < <(ls -1 ${DLBS_ROOT}/sub-*/ses-*/anat/*T2w.nii.gz | sort)
+mapfile -t T1 < <(ls -1 ${DATA_ROOT}/sub-*/ses-*/anat/*T1w.nii.gz | sort)
+mapfile -t T2 < <(ls -1 ${DATA_ROOT}/sub-*/ses-*/anat/*T2w.nii.gz | sort)
 
 echo "T1 Volumes trouvés: ${#T1[@]}"
 echo "T2 Volumes trouvés: ${#T2[@]}"
