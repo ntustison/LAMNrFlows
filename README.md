@@ -223,13 +223,26 @@ Visualization cycle (~20 seconds)
 
 </details>
 
+<details>
+<summary>Training multiview LAMNr flows model</summary>
+
+Data from [*The Dallas Lifespan Brain Study: A Comprehensive Adult Lifespan Data Set of Brain and Cognitive Aging*](https://www.nature.com/articles/s41597-025-04847-7)
+
+100k iterations
+<img src="Manuscript/Figures/training_evolution_dlbs_2d_view0.gif" alt="T1 view" width="30%">
+<img src="Manuscript/Figures/training_evolution_dlbs_2d_view1.gif" alt="T2Flair view" width="30%">
+<img src="Manuscript/Figures/training_evolution_dlbs_2d_view2.gif" alt="FA" width="30%">
+
+</details>
+
+
 
 <!--
 
 <details>
 <summary>Multimodal brain lifespan data with augmentation</summary>
 
-Data from [*The Dallas Lifespan Brain Study: A Comprehensive Adult Lifespan Data Set of Brain and Cognitive Aging*](https://www.nature.com/articles/s41597-025-04847-7)
+
 
 </details>
 
