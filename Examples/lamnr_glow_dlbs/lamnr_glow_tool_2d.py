@@ -450,7 +450,6 @@ def save_grid(x: torch.Tensor, out_path: Path, nrow: int, target_hw: Tuple[int, 
 
     x = _coerce_nchw_4d(x, target_hw=target_hw)
     x = to01(x, winsorize=winsorize)
-    x = x.rot90(k=1, dims=(2, 3))  # rotate back to (H,W) for correct orientation
     
     out_path = Path(out_path)
     ext = "".join(out_path.suffixes).lower()
@@ -2674,236 +2673,7 @@ def main_recon_interpolate(argv=None):
     if out_path.suffix.lower() in [".nii", ".gz"]:
         import ants
         xh_np = _coerce_nchw_4d(xh, target_hw=(Hc, Wc)).squeeze().cpu().numpy()
-        ants_img = ants.from_numpy(np.flip(xh_np, axis=(1,0)))
-        ants.image_write(ants_img, str(out_path))
-        print(f"[ok] Saved interpolated NIfTI to {out_path}")
-    else:
-        if args.target_image:
-             x_tgt_decoded = _decode_latents(model, z_target_list, target_hw=(Hc, Wc))
-             panels_list = []
-             for i in range(xb.shape[0]):
-                 panels_list.extend([xb[i:i+1], xh[i:i+1], x_tgt_decoded[i:i+1]])
-             panel = torch.cat(panels_list, dim=0)
-             save_grid(panel, out_path, nrow=3, target_hw=(Hc, Wc))
-        else:
-             panel = make_recon_panel(xb, xh)
-             save_grid(panel, out_path, nrow=3, target_hw=(Hc, Wc))
-             
-        print(f"[ok] Saved interpolated panel to {out_path}")
-
-def main_recon_interpolate(argv=None):
-    """
-    Interpole entre une cible et le latent du sujet.
-    Utilise Slerp centré sur la moyenne empirique (\mu) pour l'interpolation Image-Image,
-    et Lerp pour l'interpolation Image-Moyenne.
-    """
-    
-    def _slerp(t: float, v0: torch.Tensor, v1: torch.Tensor, DOT_THRESHOLD: float = 0.9995):
-        v0_norm = torch.norm(v0, dim=1, keepdim=True)
-        v1_norm = torch.norm(v1, dim=1, keepdim=True)
-        
-        v0_norm_safe = torch.clamp(v0_norm, min=1e-8)
-        v1_norm_safe = torch.clamp(v1_norm, min=1e-8)
-        
-        v0_dir = v0 / v0_norm_safe
-        v1_dir = v1 / v1_norm_safe
-        
-        dot = torch.sum(v0_dir * v1_dir, dim=1, keepdim=True)
-        dot = torch.clamp(dot, -1.0, 1.0)
-        
-        omega = torch.acos(dot)
-        sin_omega = torch.sin(omega)
-        
-        lerp_mask = (torch.abs(dot) > DOT_THRESHOLD)
-        
-        mag = (1.0 - t) * v0_norm + t * v1_norm
-        
-        slerp_dir = (torch.sin((1.0 - t) * omega) / sin_omega) * v0_dir + (torch.sin(t * omega) / sin_omega) * v1_dir
-        res = slerp_dir * mag
-        
-        lerp_res = (1.0 - t) * v0 + t * v1
-        
-        return torch.where(lerp_mask, lerp_res, res)
-
-    ap = argparse.ArgumentParser("LAM-Flow Latent Interpolation")
-    ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
-    ap.add_argument("--gauss", type=str, required=True, help="Gaussian model (.npz or .pt)")
-    ap.add_argument("--views", type=str, required=True, help="Views list (e.g. T1,FA)")
-    ap.add_argument("--view-index", type=int, default=0, help="View to process")
-    ap.add_argument("--slice-axis", type=int, required=True)
-    ap.add_argument("--slice-index", type=int, required=True)
-    ap.add_argument("--batch", type=int, default=1)
-    ap.add_argument("--devices", type=str, default="cuda:0")
-    ap.add_argument("--out", type=str, required=True, help="Output PNG panel")
-    
-    # Options Source
-    ap.add_argument("--manifest", type=str, default=None, 
-                    help="Manifest CSV (optional if --source-image is provided)")
-    ap.add_argument("--source-image", type=str, default=None,
-                    help="Optional single source image. If set, ignores the manifest.")
-    
-    ap.add_argument("--target-image", type=str, default=None,
-                    help="Optional target image path. If not set, interpolates towards Gaussian mean.")
-    ap.add_argument("--t", type=float, default=0.5, 
-                    help="Interpolation factor [0.0 = Target/Mean, 1.0 = Source].")
-    ap.add_argument("--interp-level", action="append", type=str,
-                    help="Override t for a specific level. Format 'level,t'.")
-
-    args = ap.parse_args(argv)
-    
-    if not args.manifest and not args.source_image:
-        raise ValueError("You must provide either --manifest or --source-image.")
-        
-    device = torch.device(args.devices)
-
-    level_overrides = {}
-    if args.interp_level:
-        for item in args.interp_level:
-            try:
-                parts = item.split(',')
-                if len(parts) != 2: raise ValueError
-                lvl = int(parts[0]); val = float(parts[1])
-                level_overrides[lvl] = val
-            except ValueError:
-                raise RuntimeError(f"Invalid format for --interp-level: '{item}'. Expected 'level,t'.")
-
-    # 1. Chargement Modèle
-    ckpt_path = resolve_ckpt_path(Path(args.ckpt))
-    try:
-        blob = torch.load(ckpt_path, map_location=device, weights_only=True)
-    except Exception as e:
-        blob = torch.load(ckpt_path, map_location=device)
-
-    cfg = blob.get("config", {})
-    Hc, Wc = int(cfg.get("H", 128)), int(cfg.get("W", 128))
-    model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc}, device=device)
-    model.eval()
-    _prime_if_needed(model, Hc, Wc, device=device)
-
-    # 2. Chargement Poids & Source
-    views_list = [v.strip() for v in args.views.split(",")]
-    vname = views_list[int(args.view_index)]
-    
-    ok, note = load_weights_into_model(model, blob, view_idx=int(args.view_index), prefer_ema=True, view_name=vname, cfg_views=views_list)
-    if not ok: raise RuntimeError(f"Weights failed: {note}")
-
-    paths = []
-    if args.source_image:
-        src_path = Path(args.source_image)
-        if not src_path.exists(): raise FileNotFoundError(f"Source image not found: {src_path}")
-        paths = [src_path]
-        print(f"[info] Using single source image: {src_path.name}")
-    else:
-        manifest_path = Path(args.manifest)
-        cols = _read_manifest_csv(manifest_path)
-        view_names, per_view_paths = _resolve_views(cols, manifest_path.parent, args.views)
-        paths = per_view_paths[int(args.view_index)]
-
-    xs = []
-    limit = min(int(args.batch), len(paths))
-    for i in range(limit):
-        xi = _read_image_any(paths[i], args.slice_axis, args.slice_index)
-        xi = torch.nn.functional.interpolate(xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear").squeeze(0)
-        xi = to01(xi.unsqueeze(0)).squeeze(0)
-        xs.append(xi)
-    xb = torch.stack(xs, dim=0).to(device)
-
-    # 3. Encodage Source (x -> z_source)
-    z_source_list = _encode_latents(model, xb)
-
-    # 4. Chargement de la Moyenne Gaussienne (\mu) pour le centrage
-    print(f"[info] Loading Gaussian Mean (Mu)...")
-    gauss_blob = _load_gaussian_model(Path(args.gauss))
-    views_g, dims_tbl, shapes_by_view, L = _validate_gauss_blob(gauss_blob)
-    if vname not in views_g: raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
-    v_idx_g = views_g.index(vname)
-    mu_list_raw = gauss_blob["mu"]
-
-    level_view_slices = []
-    raw_slices = gauss_blob.get("level_view_slices", None)
-    if raw_slices:
-        for l in range(L):
-            row = raw_slices[l]
-            if isinstance(row, dict): row = {int(k): tuple(v) for k, v in row.items()}
-            else: row = {vi: tuple(row[vi]) for vi in range(len(views_g))}
-            level_view_slices.append(row)
-    else:
-        for l in range(L):
-            off = 0; row = {}
-            for vi in range(len(views_g)):
-                d = int(np.asarray(dims_tbl[vi][l]).item()); row[vi] = (off, off+d); off += d
-            level_view_slices.append(row)
-
-    # Préparation des tenseurs \mu par niveau
-    mu_tensors = []
-    for l in range(L):
-        a, b = level_view_slices[l][v_idx_g]
-        mu_flat = np.asarray(mu_list_raw[l], dtype=np.float64).ravel()[a:b]
-        mu_tensors.append(torch.from_numpy(mu_flat).float().to(device))
-
-    # 5. Détermination de la Cible (z_target)
-    z_target_list = []
-    is_slerp = False
-
-    if args.target_image:
-        tgt_path = Path(args.target_image)
-        if not tgt_path.exists():
-            raise FileNotFoundError(f"Target image not found: {tgt_path}")
-        
-        print(f"[info] Target: Image ({tgt_path.name}) -> Using Mu-centered Slerp")
-        xt = _read_image_any(tgt_path, args.slice_axis, args.slice_index)
-        xt = torch.nn.functional.interpolate(xt.unsqueeze(0), size=(Hc, Wc), mode="bilinear").squeeze(0)
-        xt = to01(xt.unsqueeze(0)).squeeze(0)
-        xb_target = xt.unsqueeze(0).to(device)
-        
-        if xb.shape[0] > 1:
-            xb_target = xb_target.expand(xb.shape[0], -1, -1, -1)
-            
-        z_target_list = _encode_latents(model, xb_target)
-        is_slerp = True
-    
-    else:
-        print(f"[info] Target: Gaussian Mean -> Using standard Lerp")
-        for l, z in enumerate(z_source_list):
-            B, C, H, W = z.shape
-            mu_t = mu_tensors[l].view(1, C, H, W)
-            z_target_list.append(mu_t.expand(B, C, H, W))
-
-    # 6. Interpolation
-    z_interp_list = []
-    
-    for l, (z_src, z_tgt, mu_t) in enumerate(zip(z_source_list, z_target_list, mu_tensors)):
-        t_level = level_overrides.get(l, float(args.t))
-        
-        B, C, H, W = z_src.shape
-        z_src_flat = z_src.view(B, -1)
-        z_tgt_flat = z_tgt.view(B, -1)
-        mu_flat_b = mu_t.view(1, -1)
-        
-        if is_slerp:
-            # Slerp rigoureux : On soustrait la moyenne, on pivote, on rajoute la moyenne
-            z_src_c = z_src_flat - mu_flat_b
-            z_tgt_c = z_tgt_flat - mu_flat_b
-            z_new_c = _slerp(t_level, z_tgt_c, z_src_c)
-            z_new_flat = z_new_c + mu_flat_b
-        else:
-            # Lerp classique vers la moyenne (t=0 -> z_tgt, t=1 -> z_src)
-            z_new_flat = z_tgt_flat + t_level * (z_src_flat - z_tgt_flat)
-            
-        z_new = z_new_flat.view(B, C, H, W)
-        print(f"  Level {l}: t={t_level}")
-        z_interp_list.append(z_new)
-
-    # 7. Décodage et Sauvegarde
-    xh = _decode_latents(model, z_interp_list, target_hw=(Hc, Wc))
-    
-    out_path = Path(args.out)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if out_path.suffix.lower() in [".nii", ".gz"]:
-        import ants
-        xh_np = _coerce_nchw_4d(xh, target_hw=(Hc, Wc)).squeeze().cpu().numpy()
-        ants_img = ants.from_numpy(np.flip(xh_np, axis=(1,0)))
+        ants_img = ants.from_numpy(xh_np)
         ants.image_write(ants_img, str(out_path))
         print(f"[ok] Saved interpolated NIfTI to {out_path}")
     else:
@@ -3918,23 +3688,37 @@ def main_gauss_impute(argv=None):
         header_row = f.readline().strip().split(",")
         col_idx = []
         for v in views:
-            try:
+            if v in header_row:
                 col_idx.append(header_row.index(v))
-            except ValueError:
-                raise ValueError(f"View '{v}' not found in manifest header: {header_row}")
+            else:    
+                col_idx.append(None)
+                
+        # 1. Calcul de l'index maximal valide pour vérifier la longueur de la ligne
+        valid_idx = [idx for idx in col_idx if idx is not None]
+        max_idx = max(valid_idx) if valid_idx else -1
+        
         rows = []
         for line in f:
             parts = [s.strip() for s in line.strip().split(",")]
             if not parts or all(p == "" for p in parts):
                 continue
-            if len(parts) < max(col_idx)+1:
-                raise ValueError("Manifest row has too few columns")
-            paths = [Path(parts[j]) for j in col_idx]
-            if any(str(p)=="" for p in paths):
-                raise ValueError("Manifest has empty cell; missing files are not allowed")
-            if any(not p.exists() for p in paths):
-                missing = [str(p) for p in paths if not p.exists()]
-                raise FileNotFoundError(f"Missing files in manifest row: {missing}")
+                
+            if len(parts) < max_idx + 1:
+                raise ValueError(f"Manifest row has too few columns: {parts}")
+                
+            paths = []
+            for j in col_idx:
+                if j is not None:
+                    p = Path(parts[j])
+                    if str(p) == "":
+                        raise ValueError("Manifest has empty cell for an observed modality.")
+                    if not p.exists():
+                        raise FileNotFoundError(f"Missing file in manifest row: {p}")
+                    paths.append(p)
+                else:
+                    # 2. Assigner un chemin vide silencieux aux modalités manquantes (ex: FA)
+                    paths.append(Path("")) 
+            
             rows.append(paths)
     N = len(rows)
     per_view_paths = [[rows[i][v] for i in range(N)] for v in range(len(views))]
