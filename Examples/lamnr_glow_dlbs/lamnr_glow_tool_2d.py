@@ -98,6 +98,8 @@ import hashlib
 import warnings
 
 import ants
+from antstorch import ImageDataset
+from torch.utils.data import DataLoader
 import torch
 import numpy as np
 from pathlib import Path
@@ -3034,7 +3036,7 @@ def main_gauss_fit(argv: List[str] | None = None):
         print(f"[scrub] dropped {len(bad)} subjects; new N={len(keep)}")
         return z_clean, per_paths_clean, keep, bad_paths
 
-    ap = argparse.ArgumentParser("LAM-Flow conditional Gaussian fitter (gauss-fit)")
+    ap = argparse.ArgumentParser("LAMNr-Flows conditional Gaussian fitter (gauss-fit)")
     ap.add_argument("--ckpt", type=str, required=True, 
                     help="Path to the trained model checkpoint (.pt).")
     ap.add_argument("--manifest", type=str, required=True, 
@@ -3049,6 +3051,12 @@ def main_gauss_fit(argv: List[str] | None = None):
                     help="Batch size for encoding images into latent vectors.")
     ap.add_argument("--devices", type=str, default="cuda:0", 
                     help="Computing device (e.g., 'cuda:0', 'cpu', 'mps').")
+
+    # Ajoutez ceci à votre ArgumentParser existant
+    ap.add_argument("--aug-params", type=str, default="", 
+                    help="Augmentation parameters (ex: 'sd_deformation:constant:2.0').")
+    ap.add_argument("--aug-epochs", type=int, default=1, 
+                    help="Number of iterations over the input data set for data augmentation. ")
 
     # Gaussian options
     ap.add_argument("--cov-mode", type=str, choices=["perlevel","merged"], default="perlevel",
@@ -3184,19 +3192,103 @@ def main_gauss_fit(argv: List[str] | None = None):
             for li, arr in enumerate(zl):
                 latents_per_level_list[li].append(arr.detach().cpu())
 
-        # main batching (preprocess exactly like warmup)
-        batch = []
-        for pth in tqdm(paths, desc=f"Encoding {vname}", unit="img"):
-            xi = _read_image_any(pth, int(args.slice_axis), int(args.slice_index))  # (1,h,w) in [0,1]
-            xi = torch.nn.functional.interpolate(
-                xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False
-            ).squeeze(0)
-            xi = to01(xi.unsqueeze(0)).squeeze(0)
-            batch.append(xi)
-            if len(batch) >= bs:
-                _flush_batch(batch); batch = []
-        if batch:
-            _flush_batch(batch)
+
+        def _parse_aug_params_to_kwargs(aug_str):
+            """
+            Convertit une chaîne comme 'sd_deformation:constant:2.0,sd_affine:constant:0.02'
+            en un dictionnaire d'arguments pour ImageDataset.
+            """
+            kwargs = {}
+            if not aug_str:
+                return kwargs
+               
+            parts = aug_str.split(',')
+            for part in parts:
+                if not part.strip(): 
+                    continue
+                tokens = part.split(':')
+                
+                # Extrait le nom du paramètre et sa valeur (en ignorant le mot 'constant' au milieu)
+                if len(tokens) >= 3:
+                    param_name = f"data_augmentation_{tokens[0].strip()}"
+                    param_value = float(tokens[-1].strip())
+                    kwargs[param_name] = param_value
+                    
+            return kwargs
+
+        if args.aug_epochs > 1:
+            print(f"[info] Densification activée pour {vname}: {args.aug_epochs} itérations.")
+            
+            # 1. Charger les images en mémoire via ANTs (requis par antstorch.ImageDataset)
+            loaded_images = []
+            for pth in tqdm(paths, desc=f"Loading {vname} to memory", leave=False):
+                im = ants.image_read(str(pth))
+                slc = ants.slice_image(im, axis=int(args.slice_axis), idx=int(args.slice_index), collapse_strategy=1)
+                
+                resize_factor = min(float(Hc)/float(slc.shape[0]), float(Wc)/float(slc.shape[1]))
+                spacing = (slc.spacing[0] / resize_factor, slc.spacing[1] / resize_factor)   
+                slc = ants.resample_image(slc, spacing, use_voxels=False, interp_type=0)
+                slc = ants.pad_or_crop_image_to_size(slc, (Hc, Wc))
+                
+                # ImageDataset attend une liste de listes (sujets -> vues)
+                loaded_images.append([slc])
+            
+            tmpl = loaded_images[0][0]
+
+            aug_kwargs = _parse_aug_params_to_kwargs(args.aug_params)
+
+            # 2. Configurer le socle par défaut via un DICTIONNAIRE PYTHON (accolades)
+            dataset_args = {
+                "images": loaded_images,
+                "template": tmpl,
+                "do_data_augmentation": True,
+                "data_augmentation_transform_type": "affineAndDeformation",
+                "data_augmentation_sd_affine": 0.0,
+                "data_augmentation_sd_deformation": 0.0,
+                "data_augmentation_noise_model": "additivegaussian",
+                "data_augmentation_noise_parameters": (0.0, 0.0),
+                "data_augmentation_sd_simulated_bias_field": 0.0,
+                "data_augmentation_sd_histogram_warping": 0.0,
+                "number_of_samples": len(paths) * args.aug_epochs
+            }
+
+            dataset_args.update(aug_kwargs)
+            ds = ImageDataset(**dataset_args)
+
+            loader = DataLoader(ds, batch_size=bs, shuffle=True, num_workers=4)
+
+            # 3. Boucle d'encodage
+            for x_batch in tqdm(loader, desc=f"Encoding {vname} (Augmented)", unit="batch"):
+                # antstorch.ImageDataset renvoie une liste de tenseurs (un par vue)
+                if isinstance(x_batch, list):
+                    x_tensor = x_batch[0] 
+                else:
+                    x_tensor = x_batch
+                    
+                x_tensor = x_tensor.to(device, dtype=torch.float32)
+                
+                batch_list = []
+                for i in range(x_tensor.shape[0]):
+                    # On applique to01() pour correspondre au prétraitement d'origine
+                    xi = to01(x_tensor[i].unsqueeze(0)).squeeze(0)
+                    batch_list.append(xi)
+                
+                _flush_batch(batch_list)
+
+        else:
+            # Comportement statique d'origine (fallback)
+            batch = []
+            for pth in tqdm(paths, desc=f"Encoding {vname} (Static)", unit="img"):
+                xi = _read_image_any(pth, int(args.slice_axis), int(args.slice_index))  # (1,h,w) in [0,1]
+                xi = torch.nn.functional.interpolate(
+                    xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False
+                ).squeeze(0)
+                xi = to01(xi.unsqueeze(0)).squeeze(0)
+                batch.append(xi)
+                if len(batch) >= bs:
+                    _flush_batch(batch); batch = []
+            if batch:
+                _flush_batch(batch)
 
         if latents_per_level_list is None:
             raise RuntimeError(f"No latents collected for view {v_idx} ({vname}). Check manifest paths and preprocessing.")
