@@ -29,7 +29,7 @@ OUTDIR="runs3d/dlbs_t1_${H}x${W}x${D}_K${K}_L${L}_HC${HIDDEN}"
 
 # Optimization
 LR=2.5e-5
-WARMUP=5000
+WARMUP=15000
 LR_DECAY_GAMMA=0.5
 LR_DECAY_STEPS=120000
 
@@ -51,10 +51,10 @@ SAMPLE_TEMP=1.0
 EVAL_INTERVAL=1000
 PLOT_INTERVAL=1000
 
-GRAD_CLIP=1.0
+GRAD_CLIP=0.2
 
 # Base distribution / Scale config
-SCALE_CAP=1.0
+SCALE_CAP=0.5
 GLOWBASE_MIN_LOG=-5.0
 GLOWBASE_MAX_LOG=5.0
 SCALE_MAP="tanh"
@@ -64,7 +64,7 @@ GLOWBASE_LOGSCALE_FACTOR=1.0
 
 AUG_STOP_STEP=$(( ITERATIONS * 4 / 5 ))
 
-AUG_PARAMS="noise_std:cos:0.05->0.002@${AUG_STOP_STEP},\
+AUG_PARAMS="noise_std:cos:0.05->0.02@${AUG_STOP_STEP},\
 sd_affine:cos:0.05->0.005@${AUG_STOP_STEP},\
 sd_deformation:linear:12.0->0.2@${AUG_STOP_STEP},\
 sd_simulated_bias_field:cos:0.20->0.01@${AUG_STOP_STEP},\
