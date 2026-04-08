@@ -2030,24 +2030,6 @@ def main():
                     )
                     feats = apply_screen(feats, screen_state)
 
-                    if do_refresh and args.screen == "cca" and screen_state is not None and screen_state.meta:
-                        spectrum = screen_state.meta.get("cca_info", {}).get("mean_spectrum", None)
-                        if spectrum is not None:
-                            try:
-                                plt.figure(figsize=(8, 5))
-                                plt.plot(spectrum, marker='.', linestyle='-', markersize=4)
-                                plt.axvline(x=screen_state.keep_dim, color='red', linestyle='--', label=f"Coupure actuelle (frac={args.screen_frac})")
-                                plt.title(f"Spectre CCA (Itération {it})")
-                                plt.xlabel("Dimensions Latentes")
-                                plt.ylabel("Magnitude de Corrélation")
-                                plt.grid(True, alpha=0.3)
-                                plt.legend()
-                                plt.tight_layout()
-                                plt.savefig(run_dir / f"cca_spectrum_it{it}.png")
-                                plt.close()
-                            except Exception as e:
-                                tqdm.write(f"[warn] Impossible de tracer le spectre CCA : {e}")
-
                 elif args.align == "vicreg":
                     # 1. Obtenir les composantes Invariance et Covariance (symétriques)
                     L_inv_cov = antstorch.vicreg_multi(
