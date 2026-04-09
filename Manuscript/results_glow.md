@@ -19,7 +19,7 @@ limitations[^comp].
     (T1, FLAIR, FA) over the course of optimization.  Samples were drawn at every
     1000 iterations to monitor the current training state of the model. Here we 
     show samples at 25000, 50000, 75000 and 100000 iterations. The sample temperature
-    was $\tau = 1.0$ (i.e., samples were drawn from $\mathcal{N}(0, \tau^2 I)$.)}
+    was $\tau = 0.8$ (i.e., samples were drawn from $\mathcal{N}(0, \tau^2 I)$.)}
 
     \label{fig:2d_training}
 \end{figure}
