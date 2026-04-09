@@ -230,9 +230,7 @@ Visualization cycle (~20 seconds)
 * [Command script](https://github.com/ntustison/LAMNrFlows/blob/main/Examples/lamnr_glow_dlbs/command_train_lamnr_glow_2d_t1_t2flair_fa_whole_head.sh)
 * [Trainer](https://github.com/ntustison/LAMNrFlows/blob/main/Examples/lamnr_glow_dlbs/train_lamnr_glow_2d.py)
 
-<img src="Manuscript/Figures/training_evolution_dlbs_2d_view0.gif" alt="T1 view" width="30%">
-<img src="Manuscript/Figures/training_evolution_dlbs_2d_view1.gif" alt="T2Flair view" width="30%">
-<img src="Manuscript/Figures/training_evolution_dlbs_2d_view2.gif" alt="FA" width="30%">
+<img src="Manuscript/Figures/training_evolution_dlbs_2d_views.gif" alt="training evolution" width="100%">
 
 </details>
 
