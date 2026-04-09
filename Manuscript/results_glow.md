@@ -9,6 +9,25 @@ provide visualizations of the various possibilities of the proposed computationa
 anatomy framework restricted to 2D architectures due to modern hardware 
 limitations[^comp]. 
 
+## DLBS 
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{Figures/training_evolution.pdf}
+
+    \caption{Samples drawn from the learned LAMNr flows model for the 3-view model 
+    (T1, FLAIR, FA) over the course of optimization.  Samples were drawn at every
+    1000 iterations to monitor the current training state of the model. Here we 
+    show samples at 25000, 50000, 75000 and 100000 iterations. The sample temperature
+    was $\tau = 1.0$ (i.e., samples were drawn from $\mathcal{N}(0, \tau^2 I)$.)}
+
+    \label{fig:2d_training}
+\end{figure}
+
+
+
+
+
 [^comp]: 
     Unlike standard CNNs, Glow architectures require storing all
     intermediate activations to compute exact gradients, which quickly saturates
