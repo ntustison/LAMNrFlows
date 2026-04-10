@@ -4,11 +4,88 @@
 
 ## Glow-based LAMNr Flows
 
-Prior to our registration-based evaluation of 3D LAMNr Flows, we first 
-provide visualizations of the various possibilities of the proposed computational
-anatomy framework restricted to 2D architectures due to modern hardware 
-limitations[^comp]. 
+Transitioning from tabular to image data within the LAMNr Flows context
+introduces significant computational challenges, particularly with the Glow
+architecture which, unlike standard CNNs, requires storing all intermediate
+activations to compute exact gradients [@Gomez2017RevNet;@kingma2018glow]. This
+requirement quickly saturates the VRAM (Video RAM), or memory, of the graphics
+card. This memory bottleneck is exacerbated when moving from 2D to 3D.  For
+example, considering a conventional shape size of 256 voxels per dimension, a 2D
+slice contains only 65,536 pixels whereas the 3D volume increases the total unit
+count to over 16 million voxels. On greater capacity hardware (such as the
+NVIDIA RTX A6000 48 GB used for the experiments herein), processing $64^3$
+volumes already necessitates strict architectural compromises, such as reducing
+the number of hidden channels and batch sizes, to prevent memory overflow. Given
+these hardware constraints, we adopt a dual organizational approach for this
+Glow-based LAMNr flows evaluation. Although the clinical utility of 2D imaging
+is limited compared to 3D volumes, 2D slices provide a practical context for
+visualizing certain aspects of the proposed framework.  We also demonstrate the
+3D capabilities of the framework, although currently restricted in training and
+application to lower resolutions, remain robust and useful.  We note that these 
+limitations only pertain to current hardware availability while the software 
+is certainly capable of scaling.
 
+We use three data cohorts in the experiments below:  the Dallas Life Brain Study
+[@ds004856:1.3.0;@Park:2025aa], the NIMH Healthy Research Volunteer Dataset
+[@ds005752:2.1.0], and the Brain Tumor Sequence Registration Challenge dataset
+[@baheti2024braintumorsequenceregistration]. Whereas the first two datasets are
+openly available at [OpenNeuro](https://openneuro.org/), the third dataset is
+available upon request from the challenge organizers.  Reader reproducibility 
+These are further summarized as follows:
+
+* __Dallas Life Brain Study (DLBS).__
+
+
+* __NIMH Research Volunteer Dataset (NIMH).__
+
+* __Brain Tumor Sequence Registration Challenge (BraTS-Reg).__
+
+
+
+## DLBS 
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{Figures/training_evolution.pdf}
+
+    \caption{Samples drawn from the learned LAMNr flows model for the 3-view model 
+    (T1, FLAIR, FA) over the course of optimization.  Samples were drawn at every
+    1000 iterations to monitor the current training state of the model. Here we 
+    show samples at 25000, 50000, 75000 and 100000 iterations. The sample temperature
+    was $\tau = 0.8$ (i.e., samples were drawn from $\mathcal{N}(0, \tau^2 I)$.)}
+
+    \label{fig:2d_training}
+\end{figure}
+
+Scaling the LAMNr architecture to accommodate additional modalities (e.g., from
+a bivariate T1/FA model to a trivariate T1/T2-FLAIR/FA configuration) introduces
+a non-trivial geometric constraint on the shared latent subspace. Because the
+inherent anatomical contrasts and noise profiles differ vastly across these
+views—particularly the directional structural information in FA compared to the
+scalar intensity profiles of T1 and T2-FLAIR—forcing a perfectly uniform latent
+alignment becomes mathematically restrictive. In our bivariate models,
+allocating 50% of the latent capacity to the shared space (SCREEN_FRAC=0.5,
+PREFILTER_FRAC=0.5) provided ample bandwidth to encode complex cross-modal
+structural dependencies. However, simply reducing this shared capacity (e.g., to
+20%) to "protect" the network from aligning highly disparate signals creates a
+severe information bottleneck. During conditional imputation, the network is
+then forced to hallucinate missing high-frequency details from an overly
+compressed shared subspace, degrading the fidelity of the generated target
+modality.
+
+To resolve this bottleneck in higher-dimensional multi-view settings, it is
+necessary to maintain a wide shared latent bandwidth (e.g., SCREEN_FRAC=0.5,
+PREFILTER_FRAC=0.5) while simultaneously relaxing the rigidity of the alignment
+penalty. Rather than enforcing an exact L2 latent matching—which would force the
+network to destroy unalignable fine-grained details—we utilize
+Variance-Invariance-Covariance Regularization (VICReg). By lowering the global
+alignment weight (e.g., ALIGN_WEIGHT=0.005) and softening the invariance penalty
+(ALIGN_VICREG_INV=10.0), VICReg allows the network to learn correlated rather
+than identical representations.
+
+
+
+<!-- 
 [^comp]: 
     Unlike standard CNNs, Glow architectures require storing all
     intermediate activations to compute exact gradients, which quickly saturates
@@ -33,6 +110,8 @@ limitations[^comp].
     even with a batch size of 1. Future work concerns leveraging the existing 3D
     capabilities of our framework and the acquisition of high-capacity computational
     resources for image volumes $> 64^3$ voxels.
+-->
+
 
 * __Generative sampling.__ Sampling in LAMNr flows is performed by drawing a
   latent vector $z$ from the isotropic Gaussian base distribution, $z \sim
