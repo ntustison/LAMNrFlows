@@ -21,7 +21,7 @@ BATCH=8
 GRAD_ACCUM=8        # Batch effectif stable à 128
 NUM_WORKERS=4
 VAL_SAMPLES=32       # Évite le pic OOM lors de l'évaluation
-DEVICES="cuda:0"
+DEVICES="cuda:1"
 PRECISION="float"    
 # ---------------------------------------
 
@@ -38,7 +38,7 @@ PLATEAU_PATIENCE=100000
 PLATEAU_THRESHOLD=1e-3
 PLATEAU_COOLDOWN=5
 
-# Alignment (Désactivé car 1 seule vue T1)
+# Alignment + Screening (Ajusté pour 2 modalités)
 ALIGN="vicreg"
 ALIGN_WEIGHT=1.0
 ALIGN_VICREG_INV=25.0
@@ -72,8 +72,8 @@ GLOWBASE_LOGSCALE_FACTOR=1.0
 AUG_STOP_STEP=$(( ITERATIONS * 4 / 5 ))
 
 AUG_PARAMS="noise_std:cos:0.05->0.02@${AUG_STOP_STEP},\
-sd_affine:cos:0.05->0.005@${AUG_STOP_STEP},\
-sd_deformation:linear:12.0->0.2@${AUG_STOP_STEP},\
+sd_affine:cos:0.00->0.00@${AUG_STOP_STEP},\
+sd_deformation:linear:6.0->0.2@${AUG_STOP_STEP},\
 sd_simulated_bias_field:cos:0.20->0.01@${AUG_STOP_STEP},\
 sd_histogram_warping:cos:0.04->0.002@${AUG_STOP_STEP}"
 
