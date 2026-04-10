@@ -40,7 +40,31 @@ useful.
     \label{fig:2d_training}
 \end{figure}
 
+Scaling the LAMNr architecture to accommodate additional modalities (e.g., from
+a bivariate T1/FA model to a trivariate T1/T2-FLAIR/FA configuration) introduces
+a non-trivial geometric constraint on the shared latent subspace. Because the
+inherent anatomical contrasts and noise profiles differ vastly across these
+views—particularly the directional structural information in FA compared to the
+scalar intensity profiles of T1 and T2-FLAIR—forcing a perfectly uniform latent
+alignment becomes mathematically restrictive. In our bivariate models,
+allocating 50% of the latent capacity to the shared space (SCREEN_FRAC=0.5,
+PREFILTER_FRAC=0.5) provided ample bandwidth to encode complex cross-modal
+structural dependencies. However, simply reducing this shared capacity (e.g., to
+20%) to "protect" the network from aligning highly disparate signals creates a
+severe information bottleneck. During conditional imputation, the network is
+then forced to hallucinate missing high-frequency details from an overly
+compressed shared subspace, degrading the fidelity of the generated target
+modality.
 
+To resolve this bottleneck in higher-dimensional multi-view settings, it is
+necessary to maintain a wide shared latent bandwidth (e.g., SCREEN_FRAC=0.5,
+PREFILTER_FRAC=0.5) while simultaneously relaxing the rigidity of the alignment
+penalty. Rather than enforcing an exact L2 latent matching—which would force the
+network to destroy unalignable fine-grained details—we utilize
+Variance-Invariance-Covariance Regularization (VICReg). By lowering the global
+alignment weight (e.g., ALIGN_WEIGHT=0.005) and softening the invariance penalty
+(ALIGN_VICREG_INV=10.0), VICReg allows the network to learn correlated rather
+than identical representations.
 
 
 
