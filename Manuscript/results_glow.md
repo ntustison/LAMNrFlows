@@ -4,10 +4,26 @@
 
 ## Glow-based LAMNr Flows
 
-Prior to our registration-based evaluation of 3D LAMNr Flows, we first 
-provide visualizations of the various possibilities of the proposed computational
-anatomy framework restricted to 2D architectures due to modern hardware 
-limitations[^comp]. 
+Transitioning to image modeling within the LAMNr Flows context introduces
+significant computational challenges, particularly with the Glow architecture
+which, unlike standard CNNs, requires storing all intermediate activations to
+compute exact gradients [@Gomez2017RevNet;@kingma2018glow]. This requirement
+quickly saturates the VRAM (Video RAM), or memory, of the graphics card. This
+memory bottleneck is exacerbated when moving from 2D to 3D.  For example,
+considering a conventional shape size of 256 voxels per dimension, a 2D slice
+contains only 65,536 pixels whereas the 3D volume increases the total unit count
+to over 16 million voxels. On professional hardware such as the NVIDIA RTX A6000
+(48 GB) used for the experiments herein, processing $64^3$ volumes already
+necessitates strict architectural compromises, such as reducing the number of
+hidden channels and batch sizes, to prevent memory overflow. Given these
+hardware constraints, we adopt a dual organizational approach for this
+Glow-based LAMNr flows evaluation. Although the clinical utility of 2D imaging
+is limited compared to 3D volumes, 2D slices provide an ideal context for
+visualizing certain aspects of the proposed Deep Computational Anatomy
+perspective such as the Fréchet mean and latent manifold navigation.
+Subsequently, we demonstrate that the 3D capabilities of the framework, while
+restricted to lower resolutions, remain robust and statistically and practically
+useful.
 
 ## DLBS 
 
@@ -28,6 +44,7 @@ limitations[^comp].
 
 
 
+<!-- 
 [^comp]: 
     Unlike standard CNNs, Glow architectures require storing all
     intermediate activations to compute exact gradients, which quickly saturates
@@ -52,6 +69,8 @@ limitations[^comp].
     even with a batch size of 1. Future work concerns leveraging the existing 3D
     capabilities of our framework and the acquisition of high-capacity computational
     resources for image volumes $> 64^3$ voxels.
+-->
+
 
 * __Generative sampling.__ Sampling in LAMNr flows is performed by drawing a
   latent vector $z$ from the isotropic Gaussian base distribution, $z \sim
