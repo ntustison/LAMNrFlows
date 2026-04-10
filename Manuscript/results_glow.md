@@ -4,26 +4,43 @@
 
 ## Glow-based LAMNr Flows
 
-Transitioning to image modeling within the LAMNr Flows context introduces
-significant computational challenges, particularly with the Glow architecture
-which, unlike standard CNNs, requires storing all intermediate activations to
-compute exact gradients [@Gomez2017RevNet;@kingma2018glow]. This requirement
-quickly saturates the VRAM (Video RAM), or memory, of the graphics card. This
-memory bottleneck is exacerbated when moving from 2D to 3D.  For example,
-considering a conventional shape size of 256 voxels per dimension, a 2D slice
-contains only 65,536 pixels whereas the 3D volume increases the total unit count
-to over 16 million voxels. On professional hardware such as the NVIDIA RTX A6000
-(48 GB) used for the experiments herein, processing $64^3$ volumes already
-necessitates strict architectural compromises, such as reducing the number of
-hidden channels and batch sizes, to prevent memory overflow. Given these
-hardware constraints, we adopt a dual organizational approach for this
+Transitioning from tabular to image data within the LAMNr Flows context
+introduces significant computational challenges, particularly with the Glow
+architecture which, unlike standard CNNs, requires storing all intermediate
+activations to compute exact gradients [@Gomez2017RevNet;@kingma2018glow]. This
+requirement quickly saturates the VRAM (Video RAM), or memory, of the graphics
+card. This memory bottleneck is exacerbated when moving from 2D to 3D.  For
+example, considering a conventional shape size of 256 voxels per dimension, a 2D
+slice contains only 65,536 pixels whereas the 3D volume increases the total unit
+count to over 16 million voxels. On greater capacity hardware (such as the
+NVIDIA RTX A6000 48 GB used for the experiments herein), processing $64^3$
+volumes already necessitates strict architectural compromises, such as reducing
+the number of hidden channels and batch sizes, to prevent memory overflow. Given
+these hardware constraints, we adopt a dual organizational approach for this
 Glow-based LAMNr flows evaluation. Although the clinical utility of 2D imaging
-is limited compared to 3D volumes, 2D slices provide an ideal context for
-visualizing certain aspects of the proposed Deep Computational Anatomy
-perspective such as the Fréchet mean and latent manifold navigation.
-Subsequently, we demonstrate that the 3D capabilities of the framework, while
-restricted to lower resolutions, remain robust and statistically and practically
-useful.
+is limited compared to 3D volumes, 2D slices provide a practical context for
+visualizing certain aspects of the proposed framework.  We also demonstrate the
+3D capabilities of the framework, although currently restricted in training and
+application to lower resolutions, remain robust and useful.  We note that these 
+limitations only pertain to current hardware availability while the software 
+is certainly capable of scaling.
+
+We use three data cohorts in the experiments below:  the Dallas Life Brain Study
+[@ds004856:1.3.0;@Park:2025aa], the NIMH Healthy Research Volunteer Dataset
+[@ds005752:2.1.0], and the Brain Tumor Sequence Registration Challenge dataset
+[@baheti2024braintumorsequenceregistration]. Whereas the first two datasets are
+openly available at [OpenNeuro](https://openneuro.org/), the third dataset is
+available upon request from the challenge organizers.  Reader reproducibility 
+These are further summarized as follows:
+
+* __Dallas Life Brain Study (DLBS).__
+
+
+* __NIMH Research Volunteer Dataset (NIMH).__
+
+* __Brain Tumor Sequence Registration Challenge (BraTS-Reg).__
+
+
 
 ## DLBS 
 
