@@ -38,10 +38,10 @@ as follows:
 * __Dallas Life Brain Study (DLBS).__ T1-weighted, FLAIR, diffusion-weighted
 MRI.  Three longitudinal "waves" are included ($N_1=463$, $N_2=298$, $N_3=191$).
 
-* __NIMH Research Volunteer Dataset (NIMH).__. T1-weighted, T2-weighted, 
+* __NIMH Research Volunteer Dataset (NIMH).__ T1-weighted, T2-weighted, 
 diffusion-weighted MRI for $N=234$ complete subjects.  
 
-* __Queensland Twin IMaging (QTIM).__. T1-weighted MRI ($N=1202$)
+* __Queensland Twin IMaging (QTIM).__ T1-weighted MRI ($N=1202$)
 including family identifiers.
 
 * __Brain Tumor Sequence Registration Challenge (BraTS-Reg).__ T1-weighted,
