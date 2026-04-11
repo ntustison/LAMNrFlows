@@ -4,41 +4,67 @@
 
 ## Glow-based LAMNr Flows
 
+### Image Data and Preprocessing
+
 Transitioning from tabular to image data within the LAMNr Flows context
 introduces significant computational challenges, particularly with the Glow
 architecture which, unlike standard CNNs, requires storing all intermediate
 activations to compute exact gradients [@Gomez2017RevNet;@kingma2018glow]. This
 requirement quickly saturates the VRAM (Video RAM), or memory, of the graphics
 card. This memory bottleneck is exacerbated when moving from 2D to 3D.  For
-example, considering a conventional shape size of 256 voxels per dimension, a 2D
-slice contains only 65,536 pixels whereas the 3D volume increases the total unit
-count to over 16 million voxels. On greater capacity hardware (such as the
-NVIDIA RTX A6000 48 GB used for the experiments herein), processing $64^3$
-volumes already necessitates strict architectural compromises, such as reducing
-the number of hidden channels and batch sizes, to prevent memory overflow. Given
-these hardware constraints, we adopt a dual organizational approach for this
-Glow-based LAMNr flows evaluation. Although the clinical utility of 2D imaging
-is limited compared to 3D volumes, 2D slices provide a practical context for
-visualizing certain aspects of the proposed framework.  We also demonstrate the
-3D capabilities of the framework, although currently restricted in training and
-application to lower resolutions, remain robust and useful.  We note that these 
-limitations only pertain to current hardware availability while the software 
-is certainly capable of scaling.
+instance, while a 2D slice at a standard resolution of $256^2$ contains 65,536
+pixels, a corresponding 3D volume exceeds 16 million voxels, constituting a
+256-fold increase in unit count. On high-capacity hardware (e.g., the NVIDIA RTX
+A6000 48 GB utilized here), processing volumes even at reduced resolutions like
+$48^3$ or $64^3$ necessitates strict architectural compromises, including
+reduced hidden channels and micro-batch sizes, to prevent memory overflow.
+Consequently, we adopt a dual organizational approach which utilizes
+high-resolution 2D slices as a practical sandbox for visualizing the geometric
+properties of the framework, while demonstrating that 3D LAMNr flows remain
+robust and biologically informative even at lower resolutions. These constraints
+are primarily a function of current hardware availability, as the software
+framework is currently designed to scale with future computational resources.
 
-We use three data cohorts in the experiments below:  the Dallas Life Brain Study
+We use four data cohorts in the experiments below:  the Dallas Life Brain Study
 [@ds004856:1.3.0;@Park:2025aa], the NIMH Healthy Research Volunteer Dataset
-[@ds005752:2.1.0], and the Brain Tumor Sequence Registration Challenge dataset
-[@baheti2024braintumorsequenceregistration]. Whereas the first two datasets are
-openly available at [OpenNeuro](https://openneuro.org/), the third dataset is
-available upon request from the challenge organizers.  Reader reproducibility 
-These are further summarized as follows:
+[@ds005752:2.1.0], the Queensland Twin IMaging dataset
+[@ds004169:1.0.6;@Strike:2019aa], and the Brain Tumor Sequence Registration
+Challenge dataset [@baheti2024braintumorsequenceregistration].  Whereas the
+first three datasets are openly available at [OpenNeuro](https://openneuro.org/)
+(to facilitate reader reproducibility), the fourth dataset is available upon
+request from the challenge organizers.  These are further summarized as follows:
 
-* __Dallas Life Brain Study (DLBS).__
+* __Dallas Life Brain Study (DLBS).__ T1-weighted, FLAIR, diffusion-weighted
+MRI.  Three longitudinal "waves" are included ($N_1=463$, $N_2=298$, $N_3=191$).
+
+* __NIMH Research Volunteer Dataset (NIMH).__. T1-weighted, T2-weighted, 
+diffusion-weighted MRI for $N=234$ complete subjects.  
+
+* __Queensland Twin IMaging (QTIM).__. T1-weighted MRI ($N=1202$)
+including family identifiers.
+
+* __Brain Tumor Sequence Registration Challenge (BraTS-Reg).__ T1-weighted,
+T1-weighted contrast enhanced, T2-weighted, FLAIR from $N=140$ subjects,
+featuring pre-operative and follow-up scans with expert-validated landmarks.  
+
+Common preprocessing steps for all data include rigid normalization to a common
+reference space, specifically the Nathan Kline Institute (NKI) template
+[@tustison_largescale_2014] (1 mm$^3$, $192 \times 256 \times 224$) using
+brain-extracted T1-weighted images [@tustison_antsx_2021] and ANTs registration
+[@Avants:2014aa].  Cropped volumetric left and right hippocampal sections for
+modeling were derived from the NIMH T1-w and T2-w images using DeepFlash
+[@Tustison:2024aa], a deep-learning approach to parcellating specific structures
+of the medial temporal lobe (MTL).  Similar cropped T1-w volumes from the DLBS
+cohort were also generated for inference. Left and right MTLs for each subject
+were rigidly registered independently using a label-based normalization approach
+[@Roston2025.08.11.669599] to the DeepFlash template [@Tustison:2024aa],
+oriented such that the long-axis of the hippocampus is perpendicular to the
+coronal plane.  Fractional anisotropy (FA) images were derived from
+diffusion-weighted imaging using Dipy [@dipy2014].
+
+### Trained Models
 
 
-* __NIMH Research Volunteer Dataset (NIMH).__
-
-* __Brain Tumor Sequence Registration Challenge (BraTS-Reg).__
 
 
 
