@@ -32,7 +32,8 @@ We use four data cohorts in the experiments below:  the Dallas Life Brain Study
 Challenge dataset [@baheti2024braintumorsequenceregistration].  Whereas the
 first three datasets are openly available at [OpenNeuro](https://openneuro.org/)
 (to facilitate reader reproducibility), the fourth dataset is available upon
-request from the challenge organizers.  These are further summarized as follows:
+request from the challenge organizers.  These datasets are further summarized 
+as follows:
 
 * __Dallas Life Brain Study (DLBS).__ T1-weighted, FLAIR, diffusion-weighted
 MRI.  Three longitudinal "waves" are included ($N_1=463$, $N_2=298$, $N_3=191$).
