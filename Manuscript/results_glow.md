@@ -69,6 +69,19 @@ diffusion-weighted imaging using Dipy [@dipy2014].
 
 ### Trained Models
 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{Figures/training_evolution.pdf}
+
+    \caption{Samples drawn from the learned LAMNr flows model for the 3-view model 
+    (T1, FLAIR, FA) over the course of optimization.  Samples were drawn at every
+    1000 iterations to monitor the current training state of the model. Here we 
+    show samples at 25000, 50000, 75000 and 100000 iterations. The sample temperature
+    was $\tau = 0.8$ (i.e., samples were drawn from $\mathcal{N}(0, \tau^2 I)$.)}
+
+    \label{fig:2d_dlbs_training}
+\end{figure}
+
 To demonstrate the versatility of the LAMNr flows framework across different
 dimensionalities and anatomical scales, we trained three primary model
 configurations. These models serve as the basis for the qualitative and
@@ -80,7 +93,9 @@ quantitative evaluations presented in the subsequent sections:
   depth of $L=5$ levels, $K=12$ coupling steps per level, and a hidden channel
   dimensionality of $HC=256$. Latent alignment was enforced using VICReg
   ($\lambda=0.005$) coupled with a CCA-based screening procedure (screening
-  fraction = 0.5) to isolate shared anatomical features.
+  fraction = 0.5) to isolate shared anatomical features. Samples from the three
+  modalities over the course of optimization is provided in Figure
+  \ref{fig:2d_dlbs_training}.
 
 * __3D Multiview Model (T1-w, T2-w).__ This volumetric model of the left
   hippocampus used NIMH dataset inputs cropped to a size of $40 \times 40 \times
@@ -123,78 +138,58 @@ respects the high-probability manifold (``recon-interpolate``). Finally,
 rigorous anomaly detection relative to the cohort mean is provided through the
 calculation of Mahalanobis or Euclidean distances (``calc-distance``).
 
+### LAMNr Flows-based population template
 
+In the context of the learned data manifold, the Fréchet mean of the anatomical
+distribution can be efficiently approximated by decoding the origin of the
+latent space. By passing the zero-vector of the isotropic Gaussian prior through
+the inverse flow, $x = f^{-1}_\theta(0)$, we synthesize a canonical
+representation that captures the central morphometric tendency of the cohort
+without the computational overhead of iterative diffeomorphic averaging
+[@Avants:2010aa].  Figure \ref{fig:frechet_mean}.
 
-
-## DLBS 
-
+ 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=\linewidth]{Figures/training_evolution.pdf}
 
-    \caption{Samples drawn from the learned LAMNr flows model for the 3-view model 
-    (T1, FLAIR, FA) over the course of optimization.  Samples were drawn at every
-    1000 iterations to monitor the current training state of the model. Here we 
-    show samples at 25000, 50000, 75000 and 100000 iterations. The sample temperature
-    was $\tau = 0.8$ (i.e., samples were drawn from $\mathcal{N}(0, \tau^2 I)$.)}
+    % --- Baseline Row ---
+    \begin{subfigure}{0.45\textwidth}
+        \includegraphics[width=\linewidth]{Figures/PPMI_template0_256x256x256_slice138.png}
+        \caption{ANTsX Template}
+        \label{fig:template_antsx}
+    \end{subfigure}
+    \hspace{0.01\textwidth} % Space to center the three images
+    \begin{subfigure}{0.45\textwidth}
+        \includegraphics[width=\linewidth]{Figures/template_T1_mu_sharpened_256x256.png}
+        \caption{T1: $f^{-1}_{\theta}(0)$}
+        \label{fig:template_flow}
+    \end{subfigure}
 
-    \label{fig:2d_training}
+    \caption{Comparison of population Fréchet mean approximations. (a) The standard
+    ANTsX template, constructed via traditional iterative diffeomorphic
+    registration, representing a geometric spatial average that preserves
+    high-frequency structural details. (b) The generative latent-mean,
+    $f_\theta^{-1}(0)$, obtained in a single forward pass. The visually smoother
+    appearance of the flow-generated template is a direct consequence of
+    high-dimensional probabilistic modeling: as the exact mode of the latent
+    distribution, it averages out idiosyncratic, high-frequency anatomical
+    variations (such as specific cortical folding patterns) that do not strictly
+    persist across the cohort. Instead of producing a single typical sample, it
+    successfully isolates the macroscopic central morphological tendency and shared
+    structural signal of the dataset.}
+
+    \label{fig:frechet_mean}
+
 \end{figure}
 
-Scaling the LAMNr architecture to accommodate additional modalities (e.g., from
-a bivariate T1/FA model to a trivariate T1/T2-FLAIR/FA configuration) introduces
-a non-trivial geometric constraint on the shared latent subspace. Because the
-inherent anatomical contrasts and noise profiles differ vastly across these
-views—particularly the directional structural information in FA compared to the
-scalar intensity profiles of T1 and T2-FLAIR—forcing a perfectly uniform latent
-alignment becomes mathematically restrictive. In our bivariate models,
-allocating 50% of the latent capacity to the shared space (SCREEN_FRAC=0.5,
-PREFILTER_FRAC=0.5) provided ample bandwidth to encode complex cross-modal
-structural dependencies. However, simply reducing this shared capacity (e.g., to
-20%) to "protect" the network from aligning highly disparate signals creates a
-severe information bottleneck. During conditional imputation, the network is
-then forced to hallucinate missing high-frequency details from an overly
-compressed shared subspace, degrading the fidelity of the generated target
-modality.
-
-To resolve this bottleneck in higher-dimensional multi-view settings, it is
-necessary to maintain a wide shared latent bandwidth (e.g., SCREEN_FRAC=0.5,
-PREFILTER_FRAC=0.5) while simultaneously relaxing the rigidity of the alignment
-penalty. Rather than enforcing an exact L2 latent matching—which would force the
-network to destroy unalignable fine-grained details—we utilize
-Variance-Invariance-Covariance Regularization (VICReg). By lowering the global
-alignment weight (e.g., ALIGN_WEIGHT=0.005) and softening the invariance penalty
-(ALIGN_VICREG_INV=10.0), VICReg allows the network to learn correlated rather
-than identical representations.
 
 
 
-<!-- 
-[^comp]: 
-    Unlike standard CNNs, Glow architectures require storing all
-    intermediate activations to compute exact gradients, which quickly saturates
-    Video RAM (VRAM) even when leveraging memory-efficient strategies such as
-    gradient accumulation. The following table illustrates the exponential increase in voxel count compared to a baseline 2D slice:
 
-    | Dimensionality | Resolution | Total Units (Pixels/Voxels) | Scaling Factor (vs. $256^2$) |
-    | :--- | :--- | :--- | :--- |
-    | **2D** | 256 $\times$ 256 | 65,536 | 1$\times$ |
-    | **3D** | 48 $\times$ 48 $\times$ 48 | 110,592 | $\sim 1.7\times$ |
-    | **3D** | 64 $\times$ 64 $\times$ 64 | 262,144 | 4$\times$ |
-    | **3D** | 128 $\times$ 128 $\times$ 128 | 2,097,152 | 32$\times$ |
-    | **3D** | 256 $\times$ 256 $\times$ 256 | 16,777,216 | 256$\times$ |
 
-    Experimental procedures were executed using a single NVIDIA RTX A6000 GPU (48 GB
-    VRAM). Empirically, processing a 3D volume of $48^3$ voxels (depth $L=3$,
-    $K=32$, 64 hidden channels) consumes nearly all available memory with a
-    micro-batch size of 14. Increasing the resolution to $64^3$ voxels imposes
-    strict architectural compromises, forcing a reduction in hidden channels to 48
-    ($L=3$, $K=32$) and batch size to 8 to prevent memory overflow. Projected memory
-    requirements for $128^3$ or $256^3$ resolutions far exceed the 48 GB threshold,
-    even with a batch size of 1. Future work concerns leveraging the existing 3D
-    capabilities of our framework and the acquisition of high-capacity computational
-    resources for image volumes $> 64^3$ voxels.
--->
+
+
+
 
 
 * __Generative sampling.__ Sampling in LAMNr flows is performed by drawing a
@@ -211,13 +206,6 @@ than identical representations.
   variations characteristic of the true empirical distribution. Figures
   \ref{fig:t1_samples} and \ref{fig:fa_samples}.
 
-* __Fréchet mean approximation.__ In the context of the learned data manifold,
-  the Fréchet mean of the anatomical distribution can be efficiently
-  approximated by decoding the origin of the latent space. By passing the
-  zero-vector of the isotropic Gaussian prior through the inverse flow, $x =
-  f^{-1}_\theta(0)$, we synthesize a canonical representation that captures the
-  central morphometric tendency of the cohort without the computational overhead
-  of iterative diffeomorphic averaging [@Avants:2010aa].  Figure \ref{fig:frechet_mean}.
 
 * __Latent distances.__ The bijective nature of normalizing flows allows complex
   anatomical deviations to be quantified through a flexible suite of distance
@@ -368,38 +356,6 @@ than identical representations.
     \label{fig:fa_samples}
 \end{figure}
 
-\begin{figure}[htbp]
-    \centering
-
-    % --- Baseline Row ---
-    \begin{subfigure}{0.45\textwidth}
-        \includegraphics[width=\linewidth]{Figures/PPMI_template0_256x256x256_slice138.png}
-        \caption{ANTsX Template}
-        \label{fig:template_antsx}
-    \end{subfigure}
-    \hspace{0.01\textwidth} % Space to center the three images
-    \begin{subfigure}{0.45\textwidth}
-        \includegraphics[width=\linewidth]{Figures/template_T1_mu_sharpened_256x256.png}
-        \caption{T1: $f^{-1}_{\theta}(0)$}
-        \label{fig:template_flow}
-    \end{subfigure}
-
-    \caption{Comparison of population Fréchet mean approximations. (a) The standard
-    ANTsX template, constructed via traditional iterative diffeomorphic
-    registration, representing a geometric spatial average that preserves
-    high-frequency structural details. (b) The generative latent-mean,
-    $f_\theta^{-1}(0)$, obtained in a single forward pass. The visually smoother
-    appearance of the flow-generated template is a direct consequence of
-    high-dimensional probabilistic modeling: as the exact mode of the latent
-    distribution, it averages out idiosyncratic, high-frequency anatomical
-    variations (such as specific cortical folding patterns) that do not strictly
-    persist across the cohort. Instead of producing a single typical sample, it
-    successfully isolates the macroscopic central morphological tendency and shared
-    structural signal of the dataset.}
-
-    \label{fig:frechet_mean}
-
-\end{figure}
 
 \begin{figure}[htbp]
     \centering
@@ -556,6 +512,64 @@ than identical representations.
 
 
 
+
+<!-- 
+Scaling the LAMNr architecture to accommodate additional modalities (e.g., from
+a bivariate T1/FA model to a trivariate T1/T2-FLAIR/FA configuration) introduces
+a non-trivial geometric constraint on the shared latent subspace. Because the
+inherent anatomical contrasts and noise profiles differ vastly across these
+views—particularly the directional structural information in FA compared to the
+scalar intensity profiles of T1 and T2-FLAIR—forcing a perfectly uniform latent
+alignment becomes mathematically restrictive. In our bivariate models,
+allocating 50% of the latent capacity to the shared space (SCREEN_FRAC=0.5,
+PREFILTER_FRAC=0.5) provided ample bandwidth to encode complex cross-modal
+structural dependencies. However, simply reducing this shared capacity (e.g., to
+20%) to "protect" the network from aligning highly disparate signals creates a
+severe information bottleneck. During conditional imputation, the network is
+then forced to hallucinate missing high-frequency details from an overly
+compressed shared subspace, degrading the fidelity of the generated target
+modality.
+
+To resolve this bottleneck in higher-dimensional multi-view settings, it is
+necessary to maintain a wide shared latent bandwidth (e.g., SCREEN_FRAC=0.5,
+PREFILTER_FRAC=0.5) while simultaneously relaxing the rigidity of the alignment
+penalty. Rather than enforcing an exact L2 latent matching—which would force the
+network to destroy unalignable fine-grained details—we utilize
+Variance-Invariance-Covariance Regularization (VICReg). By lowering the global
+alignment weight (e.g., ALIGN_WEIGHT=0.005) and softening the invariance penalty
+(ALIGN_VICREG_INV=10.0), VICReg allows the network to learn correlated rather
+than identical representations.
+ -->
+
+
+<!-- 
+[^comp]: 
+    Unlike standard CNNs, Glow architectures require storing all
+    intermediate activations to compute exact gradients, which quickly saturates
+    Video RAM (VRAM) even when leveraging memory-efficient strategies such as
+    gradient accumulation. The following table illustrates the exponential increase in voxel count compared to a baseline 2D slice:
+
+    | Dimensionality | Resolution | Total Units (Pixels/Voxels) | Scaling Factor (vs. $256^2$) |
+    | :--- | :--- | :--- | :--- |
+    | **2D** | 256 $\times$ 256 | 65,536 | 1$\times$ |
+    | **3D** | 48 $\times$ 48 $\times$ 48 | 110,592 | $\sim 1.7\times$ |
+    | **3D** | 64 $\times$ 64 $\times$ 64 | 262,144 | 4$\times$ |
+    | **3D** | 128 $\times$ 128 $\times$ 128 | 2,097,152 | 32$\times$ |
+    | **3D** | 256 $\times$ 256 $\times$ 256 | 16,777,216 | 256$\times$ |
+
+    Experimental procedures were executed using a single NVIDIA RTX A6000 GPU (48 GB
+    VRAM). Empirically, processing a 3D volume of $48^3$ voxels (depth $L=3$,
+    $K=32$, 64 hidden channels) consumes nearly all available memory with a
+    micro-batch size of 14. Increasing the resolution to $64^3$ voxels imposes
+    strict architectural compromises, forcing a reduction in hidden channels to 48
+    ($L=3$, $K=32$) and batch size to 8 to prevent memory overflow. Projected memory
+    requirements for $128^3$ or $256^3$ resolutions far exceed the 48 GB threshold,
+    even with a batch size of 1. Future work concerns leveraging the existing 3D
+    capabilities of our framework and the acquisition of high-capacity computational
+    resources for image volumes $> 64^3$ voxels.
+-->
+
+
 <!-- ### Leveraging approximate template $\leftrightsquigarrow$ subject geodesic linearity for image registration via latent winsorization
 
 To evaluate the utility of the learned latent representations for downstream
@@ -584,3 +598,4 @@ leveraging the structured latent space of LAMNr, we achieve a registration that
 is robust to focal pathology without requiring manual lesion masking,
 effectively using the latent space as a prior for anatomical consistency.
  -->
+
