@@ -20,7 +20,6 @@ $ $
 Nicholas J. Tustison\textsuperscript{1,\textrm{\Letter}},
 Brian B. Avants\textsuperscript{1},
 Philip A. Cook\textsuperscript{2},
-\dots\textsuperscript{?},
 James C. Gee\textsuperscript{2}$^\dagger$,
 James R. Stone\textsuperscript{1}$^\dagger$
 \small

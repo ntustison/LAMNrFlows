@@ -28,12 +28,13 @@ framework is currently designed to scale with future computational resources.
 We use four data cohorts in the experiments below:  the Dallas Life Brain Study
 [@ds004856:1.3.0;@Park:2025aa], the NIMH Healthy Research Volunteer Dataset
 [@ds005752:2.1.0], the Queensland Twin IMaging dataset
-[@ds004169:1.0.6;@Strike:2019aa], and the Brain Tumor Sequence Registration
-Challenge dataset [@baheti2024braintumorsequenceregistration].  Whereas the
-first three datasets are openly available at [OpenNeuro](https://openneuro.org/)
-(to facilitate reader reproducibility), the fourth dataset is available upon
-request from the challenge organizers.  These datasets are further summarized 
-as follows:
+[@ds004169:1.0.6;@Strike:2019aa;@Koenders:2016aa], and a T1-weighted structural
+MRI study of cannabis users at baseline and 3 years follow-up, and the Brain
+Tumor Sequence Registration Challenge dataset
+[@baheti2024braintumorsequenceregistration].  Whereas the first four datasets
+are openly available at [OpenNeuro](https://openneuro.org/) (to facilitate
+reader reproducibility), the fourth dataset is available upon request from the
+challenge organizers.  These datasets are further summarized as follows:
 
 * __Dallas Life Brain Study (DLBS).__ T1-weighted, FLAIR, diffusion-weighted
 MRI.  Three longitudinal "waves" are included ($N_1=463$, $N_2=298$, $N_3=191$).
@@ -44,6 +45,9 @@ diffusion-weighted MRI for $N=234$ complete subjects.
 * __Queensland Twin IMaging (QTIM).__ T1-weighted MRI ($N=1202$)
 including family identifiers.
 
+* __Cannabis users: Baseline and Follow-up at 3 Years (CBF3).__ T1-weighted MRI
+($N=42$) including demographics and characterization of cannabis use.
+
 * __Brain Tumor Sequence Registration Challenge (BraTS-Reg).__ T1-weighted,
 T1-weighted contrast enhanced, T2-weighted, FLAIR from $N=140$ subjects,
 featuring pre-operative and follow-up scans with expert-validated landmarks.  
@@ -52,8 +56,8 @@ Common preprocessing steps for all data include rigid normalization to a common
 reference space, specifically the Nathan Kline Institute (NKI) template
 [@tustison_largescale_2014] (1 mm$^3$, $192 \times 256 \times 224$) using
 brain-extracted T1-weighted images [@tustison_antsx_2021] and ANTs registration
-[@Avants:2014aa].  Cropped volumetric left and right hippocampal sections for
-modeling were derived from the NIMH T1-w and T2-w images using DeepFlash
+[@Avants:2014aa].  Cropped volumetric left and right MTL sections for
+modeling were derived from the NIMH and CBF3 T1-w images using DeepFlash
 [@Tustison:2024aa], a deep-learning approach to parcellating specific structures
 of the medial temporal lobe (MTL).  Similar cropped T1-w volumes from the DLBS
 cohort were also generated for inference. Left and right MTLs for each subject
@@ -65,6 +69,59 @@ diffusion-weighted imaging using Dipy [@dipy2014].
 
 ### Trained Models
 
+To demonstrate the versatility of the LAMNr flows framework across different
+dimensionalities and anatomical scales, we trained three primary model
+configurations. These models serve as the basis for the qualitative and
+quantitative evaluations presented in the subsequent sections:
+
+* __2D Multiview Model (T1-w, FLAIR, FA).__ This model was trained on mid-axial
+  slices (index 115) from the DLBS wave 1 cohort. The architecture utilizes a
+  $96 \times 128$ spatial resolution. Key hyperparameters include a multiscale
+  depth of $L=5$ levels, $K=12$ coupling steps per level, and a hidden channel
+  dimensionality of $HC=256$. Latent alignment was enforced using VICReg
+  ($\lambda=0.005$) coupled with a CCA-based screening procedure (screening
+  fraction = 0.5) to isolate shared anatomical features.
+
+* __3D Multiview Model (T1-w, T2-w).__ This volumetric model of the left
+  hippocampus used NIMH dataset inputs cropped to a size of $40 \times 40 \times
+  64$ voxels. The network configuration consists of $L=3$ levels with $K=32$
+  coupling steps and $HC=128$ hidden channels. Due to the high structural
+  correlation between T1 and T2 modalities in the hippocampus, a stronger
+  alignment weight was applied (VICReg $\lambda=1.0$) with CCA-based screening.
+
+* __3D Single-view Model (T1-w).__ This whole-head model was trained on DLBS
+  wave 1 T1-weighted volumes downsampled to $64 \times 80 \times 64$ voxels. The
+  architecture utilizes $L=4$ levels, $K=32$ steps, and $HC=96$. As this
+  represents a single-view baseline, the alignment weight was set to
+  $\lambda=0.0$, focusing purely on exact likelihood-based density estimation.
+
+All models were optimized using the Adamax optimizer with a scheduled learning
+rate ranging from $2.5 \times 10^{-5}$ to $5 \times 10^{-5}$. To ensure
+numerical stability during the training of deep multiscale flows, we utilized
+gradient norm clipping at $0.1$ or $0.2$ and employed mixed precision training
+via a gradient scaler. To further stabilize the learned manifold and improve
+generative quality, an Exponential Moving Average (EMA) of model parameters was
+maintained throughout the optimization process.  Command line interfaces for these
+workflows are provided through the Python-based CLIs ``train_lamnr_glow_2d.py`` and
+``train_lamnr_glow_3d.py``, which natively handle dataset-level normalization,
+coordinated data augmentation, and periodic logging of reconstructions for
+visual quality assessment.
+
+To support downstream inference and analysis, the framework includes the
+``lamnr_glow_tool_2d.py`` and ``lamnr_glow_tool_3d.py`` CLI tools, which provide
+extended functionality for sampling, reconstruction, and latent space
+manipulation. These utilities allow for the fitting of conditional Gaussian
+models to the learned latents via the ``gauss-fit`` sub-function, utilizing
+low-rank (SVD) or diagonal covariance estimators to bypass memory errors when
+processing high-dimensional 3D volumes. The ``gauss-impute`` sub-function
+facilitates the synthesis of missing modalities (e.g., T1 to FA) by leveraging
+the "Push-Through" Woodbury identity to ensure numerical stability in high
+dimensions. Furthermore, the toolkit supports the construction of population
+templates (``recon-template``), latent temperature modulation to suppress
+anatomical anomalies (``recon-temperature``), and geodesic interpolation that
+respects the high-probability manifold (``recon-interpolate``). Finally,
+rigorous anomaly detection relative to the cohort mean is provided through the
+calculation of Mahalanobis or Euclidean distances (``calc-distance``).
 
 
 

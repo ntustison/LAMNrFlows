@@ -157,7 +157,7 @@ experiments.
 
 ## View-specific Flow Architectures
 
-\begin{figure}
+<!-- \begin{figure}
 \centering
 \begin{tabular}{cc}
 \raisebox{1.25cm}{\includegraphics[width=0.4\textwidth]{Figures/realnvp.pdf}} &
@@ -187,7 +187,7 @@ complete latent representation $z = \{z_1, \dots, z_N\}$ preserves the original
 image dimensionality. 
 }
 \label{fig:lamnr_diagrams}
-\end{figure}
+\end{figure} -->
 
 ### Tabular/IDP Views via RealNVP
 
@@ -203,8 +203,7 @@ variables can optionally be $\log$- or $\log1p$-transformed before normalization
 reduce skewness.
 
 We use two base distributions: a diagonal Gaussian and a Gaussian–PCA base that
-performs an additional linear whitening of the flow latents (see Figure
-\ref{fig:lamnr_diagrams}(a)). In the latter case, the flow acts as a learnable
+performs an additional linear whitening of the flow latents. In the latter case, the flow acts as a learnable
 multiview “whitener” that maps each tabular view to a standardized latent
 \(\varepsilon\) with approximately independent components. Both the raw flow
 latents \(z^{(v)}\) and the whitened coordinates \(\varepsilon^{(v)}\) can be
@@ -219,7 +218,7 @@ is used only for the alignment head.
 ### Image Views via Glow-based Multiscale Flows
 
 For image views we adopt Glow-style discrete normalizing flows with \(L\) levels
-and \(K\) coupling steps per level (see Figure \ref{fig:lamnr_diagrams}(b)) and
+and \(K\) coupling steps per level and
 a diagonal Gaussian base distribution. Each coupling step comprises: (i) ActNorm
 layers with data-dependent initialization, (ii) invertible \(1 \times 1 (\times
 1)\) convolutions parameterized with LU factorization for efficient

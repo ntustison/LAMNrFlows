@@ -79,11 +79,25 @@ strictly within the low-dimensional subspace $r$ [@rasmussen2006gaussian].
 By reformulating the system to solve for a strictly positive-definite $r \times
 r$ matrix ($K = \Lambda^{1/2} U_O^T U_O \Lambda^{1/2} + \sigma^2 I$), we bypass
 problematic numerical cancellations [@higham2002accuracy] and reduce the
-memory footprint to mere megabytes. Samples from this conditional Gaussian
-propagate uncertainty, while the posterior mean provides a calibrated point
-estimate. Applying the inverse flows to these posterior latents yields
-imputations, harmonized representations, and latent edits in the original data
-space, with exact likelihoods available for all configurations.
+memory footprint to mere megabytes. 
+
+Critically, the fidelity of these conditional results is intrinsically linked to
+the inter-view latent alignment established during the initial training phase.
+In the joint Gaussian model, the cross-covariance terms $\Sigma_{UO}$
+encapsulate the statistical coupling between the observed and unobserved
+manifolds. Effective alignment ensures that subject-specific anatomical features
+are mapped to shared latent coordinates, enabling the conditional mean to
+recover missing modalities with high individual specificity. In the absence of
+such alignment (i.e., when $\Sigma_{UO} \approx 0$), the conditional mean
+$\mu_{U|O}$ collapses to the population prior $\mu_U$. In this limit, the
+imputed output reverts to a generic population template, losing the
+subject-matched morphological details. 
+
+Samples from this conditional Gaussian propagate uncertainty, while the
+posterior mean provides a calibrated point estimate. Applying the inverse flows
+to these posterior latents yields imputations, harmonized representations, and
+latent edits in the original data space, with exact likelihoods available for
+all configurations.
 
 <!--
 ### Latent distance as a Riemannian biomarker

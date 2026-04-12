@@ -62,27 +62,44 @@ certain background modes.
 
 ### Tabular-specific Implementation Details
 
-For tabular flows we apply a small additive “jitter” noise to the features,
+For tabular flows, we apply a small additive “jitter” noise to the features,
 treated as dequantization [@ho2019flowpp] rather than biological variation. The
-amplitude is also controlled by a scalar schedule \(\alpha(t)\) (linear, cosine,
-or exponential in training time). In addition, certain views can undergo a
-per-feature marginal transform prior to normalization, such as an elementwise
-\(\operatorname{asinh}(x)\) for heavy-tailed continuous variables or rank-based
-Gaussianization that maps the empirical CDF of each feature to a standard
-normal. These monotone transforms preserve rank information while making
-marginals more Gaussian and reducing extreme tails. Together, marginal
-transforms and jitter regularize the tabular flows and prevent them from
-overfitting to discrete patterns or exact repeated rows in large cohorts.
+amplitude of this jitter is managed by a scalar schedule $\alpha(t)$—supporting
+linear, cosine, or exponential decay—to regularize the flows and prevent
+overfitting to discrete patterns or exact repeated rows in large cohorts. In
+addition, certain views can undergo a per-feature marginal transform prior to
+normalization, such as an elementwise $\operatorname{asinh}(x)$ for heavy-tailed
+continuous variables or rank-based Gaussianization that maps the empirical CDF
+of each feature to a standard normal. These monotone transforms preserve rank
+information while making marginals more Gaussian and reducing extreme tails.
+
+The underlying training architecture, as implemented in
+``train_lamnr_flows_tabular.py``, facilitates a highly modular approach to latent
+alignment and density estimation. Users can choose between a standard
+DiagGaussian base or a GaussianPCA distribution, which acts as a learnable,
+geometrically-informed coordinate system to perform linear whitening of the flow
+latents. This is particularly useful for multiview alignment, as it allows for
+the selection of a common rank $r$ across disparate views. To further refine the
+alignment process, the framework includes an optional pre-training screening
+pass based on Canonical Correlation Analysis (CCA) or HSIC. This screening
+evaluates cross-view dependence to determine if alignment constraints—such as
+VICReg, HSIC, or InfoNCE—should be active for specific view pairs, thereby
+preventing the model from over-constraining the flows and blurring view-specific
+information. Numerical stability across these operations is ensured through
+bounded coupling scales and ActNorm layers, providing a robust foundation for
+identifying shared anatomical signals.
 
 ### Glow-specific Implementation Details
 
-Glow models are initialized with data-dependent ActNorm, and we perform a
-one-time warm-up pass with real images before starting training to stabilize
-statistics. We train with Adamax, mixed precision, and optional exponential
-moving averages of model parameters. Learning rates follow a warm-up plus decay
-schedule with a plateau-based reducer. We monitor exact negative log-likelihood
-in bits-per-dimension, view-wise breakdowns, and alignment loss values, and
-periodically log reconstructions and samples for visual inspection.
+The training interface for imaging views, implemented in
+``train_lamnr_glow_2d.py`` and ``train_lamnr_glow_3d.py``, utilizes a GlowStepWrapper to
+parallelize exact log-likelihood and latent prior computations. Models are
+initialized with data-dependent ActNorm, followed by a one-time warm-up pass
+with real images to stabilize statistics. Optimization is performed using Adamax
+with mixed precision (GradScaler) and a learning rate schedule that includes
+both a warm-up phase and a plateau-based reducer. To improve generative
+stability and sample quality, we also maintain an Exponential Moving Average
+(EMA) of model parameters.
 
 To accommodate training scenarios under constrained VRAM, particularly for 3D
 volumes, we enable gradient accumulation (microbatching). With an accumulation
@@ -117,6 +134,37 @@ subject to preserve alignment targets, and per-view intensity-based transforms
 the amplitude is controlled by a scalar schedule \(\alpha(t)\) (linear, cosine,
 or exponential in training time) (cf Figure \ref{fig:aug-schedule}).
 
+\begin{figure*}[!htb]
+  \centering
+  \captionsetup[subfigure]{justification=centering}
+  \begin{subfigure}[t]{0.32\textwidth}
+    \includegraphics[width=\linewidth]{Figures/dlbs_augmentation_view1.png}
+    \caption{View 1: T1-w}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.32\textwidth}
+    \includegraphics[width=\linewidth]{Figures/dlbs_augmentation_view2.png}
+    \caption{View 2: FLAIR}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.32\textwidth}
+    \includegraphics[width=\linewidth]{Figures/dlbs_augmentation_view3.png}
+    \caption{View 3: FA}
+  \end{subfigure}
+  \caption{Illustration of the coordinated data augmentation across modalities.
+   Shown are augmented mid-axial slices from the DLBS dataset used for model 
+   training at the initial time point of the prescribed image augmentation 
+   training: 
+   \texttt{noise\_std:cos:0.05$\rightarrow$0.015},
+   \texttt{sd\_affine:cos:0.05$\rightarrow$0.01},
+   \texttt{sd\_deformation:linear:12.0$\rightarrow$0.6},
+   \texttt{sd\_simulated\_bias\_field:cos:0.20$\rightarrow$0.03},
+   \texttt{sd\_histogram\_warping:cos:0.04$\rightarrow$0.008}.  Values for each 
+   augmentation type decrease over the course of optimization 
+   according to the prescribed schedule.
+   }
+  \label{fig:aug-schedule}
+\end{figure*}
+
+
 <!--
 The same training loop supports single and multiple views by instantiating one
 flow per view, computing per-view log-likelihoods and latents for each
@@ -128,7 +176,7 @@ operate uniformly across image contrasts and multiview IDP blocks within the
 same methodological framework.
 -->
 
-\begin{figure*}[!htb]
+<!-- \begin{figure*}[!htb]
   \centering
   \captionsetup[subfigure]{justification=centering}
   \begin{subfigure}[t]{0.19\textwidth}
@@ -164,4 +212,4 @@ same methodological framework.
    constructed with ANTsX tools and distributed via ANTsTorch.
    }
   \label{fig:aug-schedule}
-\end{figure*}
+\end{figure*} -->

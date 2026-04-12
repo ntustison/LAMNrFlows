@@ -1,12 +1,31 @@
 %% This BibTeX bibliography file was created using BibDesk.
 %% https://bibdesk.sourceforge.io/
 
-%% Created for Nick Tustison at 2026-04-10 16:15:59 -0700 
+%% Created for Nick Tustison at 2026-04-11 12:19:16 -0700 
 
 
 %% Saved with string encoding Unicode (UTF-8) 
 
 
+
+@article{Koenders:2016aa,
+	abstract = {Cannabis is the most frequently used illicit drug worldwide. Cross-sectional neuroimaging studies suggest that chronic cannabis exposure and the development of cannabis use disorders may affect brain morphology. However, cross-sectional studies cannot make a conclusive distinction between cause and consequence and longitudinal neuroimaging studies are lacking. In this prospective study we investigate whether continued cannabis use and higher levels of cannabis exposure in young adults are associated with grey matter reductions. Heavy cannabis users (N = 20, age baseline M = 20.5, SD = 2.1) and non-cannabis using healthy controls (N = 22, age baseline M = 21.6, SD = 2.45) underwent a comprehensive psychological assessment and a T1- structural MRI scan at baseline and 3 years follow-up. Grey matter volumes (orbitofrontal cortex, anterior cingulate cortex, insula, striatum, thalamus, amygdala, hippocampus and cerebellum) were estimated using the software package SPM (VBM-8 module). Continued cannabis use did not have an effect on GM volume change at follow-up. Cross-sectional analyses at baseline and follow-up revealed consistent negative correlations between cannabis related problems and cannabis use (in grams) and regional GM volume of the left hippocampus, amygdala and superior temporal gyrus. These results suggests that small GM volumes in the medial temporal lobe are a risk factor for heavy cannabis use or that the effect of cannabis on GM reductions is limited to adolescence with no further damage of continued use after early adulthood. Long-term prospective studies starting in early adolescence are needed to reach final conclusions.},
+	author = {Koenders, Laura and Cousijn, Janna and Vingerhoets, Wilhelmina A M and van den Brink, Wim and Wiers, Reinout W and Meijer, Carin J and Machielsen, Marise W J and Veltman, Dick J and Goudriaan, Anneke E and de Haan, Lieuwe},
+	date-added = {2026-04-11 12:18:59 -0700},
+	date-modified = {2026-04-11 12:18:59 -0700},
+	doi = {10.1371/journal.pone.0152482},
+	journal = {PLoS One},
+	journal-full = {PloS one},
+	mesh = {Adult; Cannabis; Female; Gray Matter; Humans; Longitudinal Studies; Magnetic Resonance Imaging; Male; Marijuana Abuse; Young Adult},
+	number = {5},
+	pages = {e0152482},
+	pmc = {PMC4880314},
+	pmid = {27224247},
+	pst = {epublish},
+	title = {Grey Matter Changes Associated with Heavy Cannabis Use: A Longitudinal sMRI Study},
+	volume = {11},
+	year = {2016},
+	bdsk-url-1 = {https://doi.org/10.1371/journal.pone.0152482}}
 
 @article{Avants:2014aa,
 	abstract = {Publicly available scientific resources help establish evaluation standards, provide a platform for teaching and improve reproducibility. Version 4 of the Insight ToolKit (ITK(4)) seeks to establish new standards in publicly available image registration methodology. ITK(4) makes several advances in comparison to previous versions of ITK. ITK(4) supports both multivariate images and objective functions; it also unifies high-dimensional (deformation field) and low-dimensional (affine) transformations with metrics that are reusable across transform types and with composite transforms that allow arbitrary series of geometric mappings to be chained together seamlessly. Metrics and optimizers take advantage of multi-core resources, when available. Furthermore, ITK(4) reduces the parameter optimization burden via principled heuristics that automatically set scaling across disparate parameter types (rotations vs. translations). A related approach also constrains steps sizes for gradient-based optimizers. The result is that tuning for different metrics and/or image pairs is rarely necessary allowing the researcher to more easily focus on design/comparison of registration strategies. In total, the ITK(4) contribution is intended as a structure to support reproducible research practices, will provide a more extensive foundation against which to evaluate new work in image registration and also enable application level programmers a broad suite of tools on which to build. Finally, we contextualize this work with a reference registration evaluation study with application to pediatric brain labeling.},
@@ -1456,26 +1475,37 @@ CONCLUSIONS: Direct optimization within the image domain using convolutional neu
 	year = {2022},
 	bdsk-url-1 = {https://doi.org/10.18112/openneuro.ds004169.v1.0.6}}
 
-@article {Roston2025.08.11.669599,
-	author = {Roston, Rachel A. and Tustison, Nicholas J. and Maga, A. Murat},
-	title = {Anatomy-aware, label-informed approach improves image registration for challenging datasets},
-	elocation-id = {2025.08.11.669599},
-	year = {2025},
-	doi = {10.1101/2025.08.11.669599},
-	publisher = {Cold Spring Harbor Laboratory},
+@article{Roston2025.08.11.669599,
 	abstract = {Image registration-based volumetric morphometrics have emerged as a valuable method for identifying subtle morphological differences in neuroimaging and other biomedical images. However, accurate registration out-of-the-box remains challenging when overt morphological phenotypes{\textemdash}such as those observed in developmental and comparative studies{\textemdash}are present in a dataset. A new label-informed image registration function developed in the ANTsX ecosystem provides an easy to use, generalizable solution for anatomy-aware registration of a wide diversity of morphological variation. In this approach, segmentations (i.e., labels) provide a priori regional correspondences that guide the registration. These labels can be generated by any method{\textendash}manually, using semi-automated tools, or through deep learning-based approaches{\textendash}and allow morphological experts to define regions of correspondence based on biological concepts of homology (e.g., tissue origin, gene expression patterns). Here we demonstrate the utility of this label-informed image registration approach for improving the registration knockout mouse embryos which fail to register to a wildtype (normative) template image by traditional registration methods. E15.5 Gli2-/- mouse embryos show a severe scoliosis and radical topological rearrangement of the internal organs. Compared to traditional, intensity-only registration, the new label-informed image registration improved the correspondence of knockout subjects to the canonical template image, which resulted in increased power and sensitivity of downstream statistical analyses. All in all, label-informed image registration provides a flexible and customizable method to allow image registration in datasets for which registration-based morphometrics were previously unfeasible, unlocking new potential applications of registration-based morphometrics in developmental, comparative, and evolutionary studies.Competing Interest StatementThe authors have declared no competing interest.},
-	URL = {https://www.biorxiv.org/content/early/2025/08/12/2025.08.11.669599},
+	author = {Roston, Rachel A. and Tustison, Nicholas J. and Maga, A. Murat},
+	doi = {10.1101/2025.08.11.669599},
+	elocation-id = {2025.08.11.669599},
 	eprint = {https://www.biorxiv.org/content/early/2025/08/12/2025.08.11.669599.full.pdf},
-	journal = {bioRxiv}
-}
+	journal = {bioRxiv},
+	publisher = {Cold Spring Harbor Laboratory},
+	title = {Anatomy-aware, label-informed approach improves image registration for challenging datasets},
+	url = {https://www.biorxiv.org/content/early/2025/08/12/2025.08.11.669599},
+	year = {2025},
+	bdsk-url-1 = {https://www.biorxiv.org/content/early/2025/08/12/2025.08.11.669599},
+	bdsk-url-2 = {https://doi.org/10.1101/2025.08.11.669599}}
 
-@ARTICLE{dipy2014,
-AUTHOR={Garyfallidis, Eleftherios  and Brett, Matthew  and Amirbekian, Bagrat  and Rokem, Ariel  and Van Der Walt, Stefan  and Descoteaux, Maxime  and Nimmo-Smith, Ian },
-TITLE={Dipy, a library for the analysis of diffusion MRI data},
-JOURNAL={Frontiers in Neuroinformatics},
-VOLUME={Volume 8 - 2014},
-YEAR={2014},
-URL={https://www.frontiersin.org/journals/neuroinformatics/articles/10.3389/fninf.2014.00008},
-DOI={10.3389/fninf.2014.00008},
-ISSN={1662-5196},  
-ABSTRACT={Diffusion Imaging in Python (Dipy) is a free and open source software project<br/>for the analysis of data from diffusion magnetic resonance imaging (dMRI)<br/>experiments. dMRI is an application of MRI that can be used to measure<br/>structural features of brain white matter.  Many methods have been developed to<br/>use dMRI data to model the local configuration of white matter nerve fiber<br/>bundles and infer the trajectory of bundles connecting different parts of the<br/>brain.<br/><br/>Dipy gathers implementations of many different methods in dMRI, including:<br/>diffusion signal pre-processing; reconstruction of diffusion distributions in<br/>individual voxels; fiber tractography and fiber track post-processing, analysis<br/>and visualization. Dipy aims to provide transparent implementations for<br/>all the different steps of dMRI analysis with a uniform programming interface.<br/>We have implemented classical signal reconstruction techniques, such as the<br/>diffusion tensor model and deterministic fiber tractography. In addition,<br/>cutting edge novel reconstruction techniques are implemented, such as<br/>constrained spherical deconvolution and diffusion spectrum imaging with<br/>deconvolution, as well as methods for probabilistic tracking and original<br/>methods for tractography clustering. Many additional utility functions are<br/>provided to calculate various statistics, informative visualizations, as well<br/>as file-handling routines to assist in the development and use of novel<br/>techniques.<br/><br/>In contrast to many other scientific software projects, Dipy is not being<br/>developed by a single research group. Rather, it is an open project that<br/>encourages contributions from any scientist/developer through GitHub and open<br/>discussions on the project mailing list. Consequently, Dipy today has an<br/>international team of contributors, spanning seven different academic institutions<br/>in five countries and three continents, which is still growing.}}
+@article{dipy2014,
+	abstract = {Diffusion Imaging in Python (Dipy) is a free and open source software project<br/>for the analysis of data from diffusion magnetic resonance imaging (dMRI)<br/>experiments. dMRI is an application of MRI that can be used to measure<br/>structural features of brain white matter.  Many methods have been developed to<br/>use dMRI data to model the local configuration of white matter nerve fiber<br/>bundles and infer the trajectory of bundles connecting different parts of the<br/>brain.<br/><br/>Dipy gathers implementations of many different methods in dMRI, including:<br/>diffusion signal pre-processing; reconstruction of diffusion distributions in<br/>individual voxels; fiber tractography and fiber track post-processing, analysis<br/>and visualization. Dipy aims to provide transparent implementations for<br/>all the different steps of dMRI analysis with a uniform programming interface.<br/>We have implemented classical signal reconstruction techniques, such as the<br/>diffusion tensor model and deterministic fiber tractography. In addition,<br/>cutting edge novel reconstruction techniques are implemented, such as<br/>constrained spherical deconvolution and diffusion spectrum imaging with<br/>deconvolution, as well as methods for probabilistic tracking and original<br/>methods for tractography clustering. Many additional utility functions are<br/>provided to calculate various statistics, informative visualizations, as well<br/>as file-handling routines to assist in the development and use of novel<br/>techniques.<br/><br/>In contrast to many other scientific software projects, Dipy is not being<br/>developed by a single research group. Rather, it is an open project that<br/>encourages contributions from any scientist/developer through GitHub and open<br/>discussions on the project mailing list. Consequently, Dipy today has an<br/>international team of contributors, spanning seven different academic institutions<br/>in five countries and three continents, which is still growing.},
+	author = {Garyfallidis, Eleftherios and Brett, Matthew and Amirbekian, Bagrat and Rokem, Ariel and Van Der Walt, Stefan and Descoteaux, Maxime and Nimmo-Smith, Ian},
+	doi = {10.3389/fninf.2014.00008},
+	issn = {1662-5196},
+	journal = {Frontiers in Neuroinformatics},
+	title = {Dipy, a library for the analysis of diffusion MRI data},
+	url = {https://www.frontiersin.org/journals/neuroinformatics/articles/10.3389/fninf.2014.00008},
+	volume = {Volume 8 - 2014},
+	year = {2014},
+	bdsk-url-1 = {https://www.frontiersin.org/journals/neuroinformatics/articles/10.3389/fninf.2014.00008},
+	bdsk-url-2 = {https://doi.org/10.3389/fninf.2014.00008}}
+
+@dataset{ds000174:1.0.1,
+	author = {Laura Koenders AND Janna Cousijn AND Wilhelmina A.M. Vingerhoets AND Wim van den Brink AND Reinout W. Wiers AND Carin J. Meijer AND Marise W. J. Machielsen AND Dick J. Veltman AND Anneke E. Goudriaan AND Lieuwe de Haan},
+	doi = {null},
+	publisher = {OpenNeuro},
+	title = {"T1-weighted structural MRI study of cannabis users at baseline and 3 years follow up"},
+	year = {2019},
+	bdsk-url-1 = {https://doi.org/null}}
