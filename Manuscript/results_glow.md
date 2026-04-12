@@ -152,41 +152,140 @@ approximated by decoding the origin ($z=0$) of the latent space. By passing the
 zero-vector of the isotropic Gaussian prior through the inverse flow, $x =
 f^{-1}_\theta(0)$, we synthesize a canonical representation that captures the
 central morphometric tendency of the cohort without the computational overhead
-of iterative diffeomorphic averaging [@Avants:2010aa].  Figure
+of iterative diffeomorphic averaging [@Avants:2010aa].  See Figure
 \ref{fig:frechet_mean}.
 
  
-\begin{figure}[htbp]
+\begin{figure}[!htbp]
     \centering
+    % Supprime les marges par défaut pour un contrôle précis
+    \setlength{\tabcolsep}{0pt}
+    \renewcommand{\arraystretch}{0} 
 
-    % --- Baseline Row ---
-    \begin{subfigure}{0.45\textwidth}
-        \includegraphics[width=\linewidth]{Figures/PPMI_template0_256x256x256_slice138.png}
-        \caption{ANTsX Template}
-        \label{fig:template_antsx}
-    \end{subfigure}
-    \hspace{0.01\textwidth} % Space to center the three images
-    \begin{subfigure}{0.45\textwidth}
-        \includegraphics[width=\linewidth]{Figures/template_T1_mu_sharpened_256x256.png}
-        \caption{T1: $f^{-1}_{\theta}(0)$}
-        \label{fig:template_flow}
-    \end{subfigure}
+    % On utilise @{\hspace{1mm}} pour insérer exactement 1mm entre les colonnes
+    \begin{tabular}{c@{\hspace{8mm}}c@{\hspace{1mm}}c@{\hspace{1mm}}c}
+        {} & {\bf View 1: T1-w} & {\bf View 2: FLAIR} & {\bf View 3: FA} \\[2mm] % Espace vertical
+        \rotatebox[origin=c]{90}{\textbf{ANTsX}} &
+        \includegraphics[width=0.32\linewidth]{Figures/T_templateT1_slice115.png} &
+        \includegraphics[width=0.32\linewidth]{Figures/T_templateT2Flair_slice115.png} &
+        \includegraphics[width=0.32\linewidth]{Figures/T_templateFA_slice115.png} \\[1mm] % Espace vertical
+        \rotatebox[origin=c]{90}{\textbf{LAMNr Flows}} &
+        \includegraphics[width=0.32\linewidth]{Figures/L_templateT1.png} &
+        \includegraphics[width=0.32\linewidth]{Figures/L_templateT2Flair.png} &
+        \includegraphics[width=0.32\linewidth]{Figures/L_templateFA.png}
+    \end{tabular}
 
-    \caption{Comparison of population Fréchet mean approximations. (a) The standard
-    ANTsX template, constructed via traditional iterative diffeomorphic
+    \caption{Comparison of population Fréchet mean approximations. (Top) The standard
+    multivariate ANTsX template, constructed via traditional iterative diffeomorphic
     registration, representing a geometric spatial average that preserves
-    high-frequency structural details. (b) The generative latent-mean,
+    high-frequency structural details. (Bottom) The generative latent-means,
     $f_\theta^{-1}(0)$, obtained in a single forward pass. The visually smoother
     appearance of the flow-generated template is a direct consequence of
-    high-dimensional probabilistic modeling: as the exact mode of the latent
+    high-dimensional probabilistic modeling. As the exact mode of the latent
     distribution, it averages out idiosyncratic, high-frequency anatomical
     variations (such as specific cortical folding patterns) that do not strictly
-    persist across the cohort. Instead of producing a single typical sample, it
-    successfully isolates the macroscopic central morphological tendency and shared
+    persist across the cohort. Instead of producing a single typical sample from
+    the typical set, it models the macroscopic central morphological tendency and shared
     structural signal of the dataset.}
 
     \label{fig:frechet_mean}
 
+\end{figure}
+
+
+__Generative sampling.__ Sampling in LAMNr flows is performed by drawing a
+latent vector $z$ from the isotropic Gaussian base distribution, $z \sim
+\mathcal{N}(0, \tau^2 I)$, and mapping it back to the image domain via the
+inverse flow, $x = f^{-1}_\theta(z)$. In high-dimensional latent spaces,
+however, the probability mass concentrates within a thin "typical set" located
+on a spherical shell of radius $\sqrt{d}\tau$, rather than near the mode at the
+origin. Adjusting the temperature parameter $\tau$ allows for explicit control
+over this sampling radius: lower temperatures ($\tau < 1$) contract the sampling
+toward the high-density (but low-volume) region near the mean to generate
+high-fidelity, canonical anatomies, while $\tau \approx 1$ ensures that samples
+are drawn from the typical set, capturing the diverse structural variations
+characteristic of the true empirical distribution. Figures \ref{fig:t1_samples}
+and \ref{fig:fa_samples}.
+
+\begin{figure}[htbp]
+    \centering
+
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.10.png}
+        \caption{$\tau = 0.10$}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.25.png}
+        \caption{$\tau = 0.25$}
+    \end{subfigure}
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.50.png}
+        \caption{$\tau = 0.50$}
+    \end{subfigure}
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.75.png}
+        \caption{$\tau = 0.75$}
+    \end{subfigure}
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_1.00.png}
+        \caption{$\tau = 1.00$}
+    \end{subfigure}
+
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_t2flair_temp_0.10.png}
+        \caption{$\tau = 0.10$}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_t2flair_temp_0.25.png}
+        \caption{$\tau = 0.25$}
+    \end{subfigure}
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_t2flair_temp_0.50.png}
+        \caption{$\tau = 0.50$}
+    \end{subfigure}
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_t2flair_temp_0.75.png}
+        \caption{$\tau = 0.75$}
+    \end{subfigure}
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_t2flair_temp_1.00.png}
+        \caption{$\tau = 1.00$}
+    \end{subfigure}
+
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.10.png}
+        \caption{$\tau = 0.10$}
+    \end{subfigure}\hfill
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.25.png}
+        \caption{$\tau = 0.25$}
+    \end{subfigure}
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.50.png}
+        \caption{$\tau = 0.50$}
+    \end{subfigure}
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.75.png}
+        \caption{$\tau = 0.75$}
+    \end{subfigure}
+    \begin{subfigure}{0.195\textwidth}
+        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_1.00.png}
+        \caption{$\tau = 1.00$}
+    \end{subfigure}
+
+   
+    
+    \caption{Samples drawn from the learned LAMNr flow prior for Fractional
+    Anisotropy (FA) maps at varying temperatures ($\tau$). Consistent with the
+    structural MRI samples, lower temperatures ($\tau \le 0.50$) generate coherent
+    and anatomically representative white matter tracts. At higher temperatures
+    (e.g., $\tau = 1.0$), the model samples extreme latent vectors from the prior
+    tails. In highly sensitive quantitative modalities like FA, these extreme latent
+    vectors occasionally map to focal, aberrant voxel intensities. When linearly
+    normalized for visualization (min-max scaling), these isolated outlier values
+    compress the visual contrast of the surrounding valid anatomical structures.}
+
+    \label{fig:fa_samples}
 \end{figure}
 
 
@@ -196,22 +295,6 @@ of iterative diffeomorphic averaging [@Avants:2010aa].  Figure
 
 
 
-
-
-
-* __Generative sampling.__ Sampling in LAMNr flows is performed by drawing a
-  latent vector $z$ from the isotropic Gaussian base distribution, $z \sim
-  \mathcal{N}(0, \tau^2 I)$, and mapping it back to the image domain via the
-  inverse flow, $x = f^{-1}_\theta(z)$. In high-dimensional latent spaces,
-  however, the probability mass concentrates within a thin "typical set" located
-  on a spherical shell of radius $\sqrt{d}\tau$, rather than near the mode at
-  the origin. Adjusting the temperature parameter $\tau$ allows for explicit
-  control over this sampling radius: lower temperatures ($\tau < 1$) contract
-  the sampling toward the high-density (but low-volume) region near the mean to
-  generate high-fidelity, canonical anatomies, while $\tau \approx 1$ ensures
-  that samples are drawn from the typical set, capturing the diverse structural
-  variations characteristic of the true empirical distribution. Figures
-  \ref{fig:t1_samples} and \ref{fig:fa_samples}.
 
 
 * __Latent distances.__ The bijective nature of normalizing flows allows complex
@@ -290,78 +373,6 @@ of iterative diffeomorphic averaging [@Avants:2010aa].  Figure
   \ref{fig:temperature_scaling}.
 
 
-\begin{figure}[htbp]
-    \centering
-
-    \begin{subfigure}{0.475\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.25.png}
-        \caption{$\tau = 0.25$}
-    \end{subfigure}\hfill
-    \begin{subfigure}{0.475\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.50.png}
-        \caption{$\tau = 0.50$}
-    \end{subfigure}
-
-    \vspace{0.2cm} 
-
-    \begin{subfigure}{0.475\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.75.png}
-        \caption{$\tau = 0.75$}
-    \end{subfigure}\hfill
-    \begin{subfigure}{0.475\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_1.00.png}
-        \caption{$\tau = 1.0$}
-    \end{subfigure}
-    
-    \caption{Samples drawn from the learned LAMNr flow prior for T1-weighted
-    structural MRI at varying temperatures ($\tau$). Lower temperatures, such as
-    $\tau = 0.25$ and $\tau = 0.50$, constrain sampling near the mode of the
-    Gaussian prior, generating highly realistic, canonical anatomies with distinct
-    tissue boundaries. As the temperature increases ($\tau = 0.75$ and $\tau =
-    1.0$), sampling extends into the tails of the prior distribution. While this
-    yields greater macroscopic morphological diversity, it also introduces
-    high-frequency variance and slight structural artifacts, reflecting regions of
-    the latent space with lower probability density.}
-
-    \label{fig:t1_samples}
-\end{figure}
-
-
-\begin{figure}[htbp]
-    \centering
-
-    \begin{subfigure}{0.475\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.25.png}
-        \caption{$\tau = 0.25$}
-    \end{subfigure}\hfill
-    \begin{subfigure}{0.475\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.50.png}
-        \caption{$\tau = 0.50$}
-    \end{subfigure}
-
-    \vspace{0.2cm} 
-
-    \begin{subfigure}{0.475\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.75.png}
-        \caption{$\tau = 0.75$}
-    \end{subfigure}\hfill
-    \begin{subfigure}{0.475\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_1.00.png}
-        \caption{$\tau = 1.0$}
-    \end{subfigure}
-    
-    \caption{Samples drawn from the learned LAMNr flow prior for Fractional
-    Anisotropy (FA) maps at varying temperatures ($\tau$). Consistent with the
-    structural MRI samples, lower temperatures ($\tau \le 0.50$) generate coherent
-    and anatomically representative white matter tracts. At higher temperatures
-    (e.g., $\tau = 1.0$), the model samples extreme latent vectors from the prior
-    tails. In highly sensitive quantitative modalities like FA, these extreme latent
-    vectors occasionally map to focal, aberrant voxel intensities. When linearly
-    normalized for visualization (min-max scaling), these isolated outlier values
-    compress the visual contrast of the surrounding valid anatomical structures.}
-
-    \label{fig:fa_samples}
-\end{figure}
 
 
 \begin{figure}[htbp]
