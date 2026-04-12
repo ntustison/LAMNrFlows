@@ -138,15 +138,22 @@ respects the high-probability manifold (``recon-interpolate``). Finally,
 rigorous anomaly detection relative to the cohort mean is provided through the
 calculation of Mahalanobis or Euclidean distances (``calc-distance``).
 
-### LAMNr Flows-based population template
+### Visualizing LAMNr Flows-based Deep Computational Anatomy
 
-In the context of the learned data manifold, the Fréchet mean of the anatomical
-distribution can be efficiently approximated by decoding the origin of the
-latent space. By passing the zero-vector of the isotropic Gaussian prior through
-the inverse flow, $x = f^{-1}_\theta(0)$, we synthesize a canonical
-representation that captures the central morphometric tendency of the cohort
-without the computational overhead of iterative diffeomorphic averaging
-[@Avants:2010aa].  Figure \ref{fig:frechet_mean}.
+Using the 3-view model (2D) trained on the DLBS data, we visually demonstrate
+multiple DCA-based applications of the LAMNr flows framework.  These include
+the population template, generative sampling, latent distance calculations for
+biological inference, cross-modal imputation, and latent-based image 
+interpolation.
+
+__LAMNr Flows-based population template.__ In the context of the learned data
+manifold, the Fréchet mean of the anatomical distribution can be efficiently
+approximated by decoding the origin ($z=0$) of the latent space. By passing the
+zero-vector of the isotropic Gaussian prior through the inverse flow, $x =
+f^{-1}_\theta(0)$, we synthesize a canonical representation that captures the
+central morphometric tendency of the cohort without the computational overhead
+of iterative diffeomorphic averaging [@Avants:2010aa].  Figure
+\ref{fig:frechet_mean}.
 
  
 \begin{figure}[htbp]
