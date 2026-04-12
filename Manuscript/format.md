@@ -23,6 +23,7 @@ header-includes:
   - \newcommand{\pmark}{\(\triangle\)} 
   - \usepackage{longtable}
   - \usepackage{graphicx}
+  - \usepackage{rotating}
   - \usepackage{array}
   - \usepackage{booktabs}
   - \usepackage{textcomp}

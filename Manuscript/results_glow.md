@@ -69,9 +69,34 @@ diffusion-weighted imaging using Dipy [@dipy2014].
 
 ### Trained Models
 
-\begin{figure}[htbp]
+\begin{figure}[!htbp]
     \centering
-    \includegraphics[width=\linewidth]{Figures/training_evolution.pdf}
+    \setlength{\tabcolsep}{0pt}
+    \renewcommand{\arraystretch}{0} 
+
+    % On utilise @{\hspace{1mm}} pour insérer exactement 1mm entre les colonnes
+    \begin{tabular}{c@{\hspace{2mm}}c@{\hspace{1mm}}c@{\hspace{1mm}}c}
+        {} & {\bf View 1: T1-w} & {\bf View 2: FLAIR} & {\bf View 3: FA} \\[2mm] % Espace vertical
+        \rotatebox[origin=c]{90}{\textbf{25000 iterations}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view0_it025000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view1_it025000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view2_it025000_to01.png}} \\
+        \vspace{2mm} \\
+        \rotatebox[origin=c]{90}{\textbf{50000 iterations}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view0_it050000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view1_it050000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view2_it050000_to01.png}} \\
+        \vspace{2mm} \\
+        \rotatebox[origin=c]{90}{\textbf{75000 iterations}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view0_it075000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view1_it075000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view2_it075000_to01.png}} \\
+        \vspace{2mm} \\
+        \rotatebox[origin=c]{90}{\textbf{100000 iterations}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view0_it100000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view1_it100000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view2_it100000_to01.png}} \\
+    \end{tabular}
 
     \caption{Samples drawn from the learned LAMNr flows model for the 3-view model 
     (T1, FLAIR, FA) over the course of optimization.  Samples were drawn at every
@@ -81,6 +106,7 @@ diffusion-weighted imaging using Dipy [@dipy2014].
 
     \label{fig:2d_dlbs_training}
 \end{figure}
+
 
 To demonstrate the versatility of the LAMNr flows framework across different
 dimensionalities and anatomical scales, we trained three primary model
@@ -163,16 +189,17 @@ of iterative diffeomorphic averaging [@Avants:2010aa].  See Figure
     \renewcommand{\arraystretch}{0} 
 
     % On utilise @{\hspace{1mm}} pour insérer exactement 1mm entre les colonnes
-    \begin{tabular}{c@{\hspace{8mm}}c@{\hspace{1mm}}c@{\hspace{1mm}}c}
+    \begin{tabular}{c@{\hspace{2mm}}c@{\hspace{1mm}}c@{\hspace{1mm}}c}
         {} & {\bf View 1: T1-w} & {\bf View 2: FLAIR} & {\bf View 3: FA} \\[2mm] % Espace vertical
         \rotatebox[origin=c]{90}{\textbf{ANTsX}} &
-        \includegraphics[width=0.32\linewidth]{Figures/T_templateT1_slice115.png} &
-        \includegraphics[width=0.32\linewidth]{Figures/T_templateT2Flair_slice115.png} &
-        \includegraphics[width=0.32\linewidth]{Figures/T_templateFA_slice115.png} \\[1mm] % Espace vertical
+        \raisebox{-0.5\height}{\includegraphics[width=0.24\linewidth]{Figures/T_templateT1_slice115.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.24\linewidth]{Figures/T_templateT2Flair_slice115.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.24\linewidth]{Figures/T_templateFA_slice115.png}} \\
+        \vspace{2mm} \\
         \rotatebox[origin=c]{90}{\textbf{LAMNr Flows}} &
-        \includegraphics[width=0.32\linewidth]{Figures/L_templateT1.png} &
-        \includegraphics[width=0.32\linewidth]{Figures/L_templateT2Flair.png} &
-        \includegraphics[width=0.32\linewidth]{Figures/L_templateFA.png}
+        \raisebox{-0.5\height}{\includegraphics[width=0.24\linewidth]{Figures/L_templateT1.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.24\linewidth]{Figures/L_templateT2Flair.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.24\linewidth]{Figures/L_templateFA.png}}
     \end{tabular}
 
     \caption{Comparison of population Fréchet mean approximations. (Top) The standard
@@ -192,7 +219,6 @@ of iterative diffeomorphic averaging [@Avants:2010aa].  See Figure
 
 \end{figure}
 
-
 __Generative sampling.__ Sampling in LAMNr flows is performed by drawing a
 latent vector $z$ from the isotropic Gaussian base distribution, $z \sim
 \mathcal{N}(0, \tau^2 I)$, and mapping it back to the image domain via the
@@ -204,77 +230,38 @@ over this sampling radius: lower temperatures ($\tau < 1$) contract the sampling
 toward the high-density (but low-volume) region near the mean to generate
 high-fidelity, canonical anatomies, while $\tau \approx 1$ ensures that samples
 are drawn from the typical set, capturing the diverse structural variations
-characteristic of the true empirical distribution. Figures \ref{fig:t1_samples}
-and \ref{fig:fa_samples}.
+characteristic of the true empirical distribution. Figures \ref{fig:generative_samples}.
 
-\begin{figure}[htbp]
+\begin{figure}[!htbp]
     \centering
+    \setlength{\tabcolsep}{0pt}
+    \renewcommand{\arraystretch}{0} 
 
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.10.png}
-        \caption{$\tau = 0.10$}
-    \end{subfigure}\hfill
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.25.png}
-        \caption{$\tau = 0.25$}
-    \end{subfigure}
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.50.png}
-        \caption{$\tau = 0.50$}
-    \end{subfigure}
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_0.75.png}
-        \caption{$\tau = 0.75$}
-    \end{subfigure}
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t1_temp_1.00.png}
-        \caption{$\tau = 1.00$}
-    \end{subfigure}
+    % On utilise @{\hspace{1mm}} pour insérer exactement 1mm entre les colonnes
+    \begin{tabular}{c@{\hspace{2mm}}c@{\hspace{1mm}}c@{\hspace{1mm}}c@{\hspace{1mm}}c@{\hspace{1mm}}c}
+        {} & {$\mathbf \tau = 0.1$} & {$\tau = 0.25$} & {$\tau = 0.5$} & {$\tau = 0.75$} & {$\tau = 1.0$} \\[2mm] % Espace vertical
+        \rotatebox[origin=c]{90}{\textbf{View 1: T1-w}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t1_temp_0.10.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t1_temp_0.25.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t1_temp_0.50.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t1_temp_0.75.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t1_temp_1.00.png}} \\
+        \vspace{2mm} \\
+        \rotatebox[origin=c]{90}{\textbf{View 2: FLAIR}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t2flair_temp_0.10.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t2flair_temp_0.25.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t2flair_temp_0.50.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t2flair_temp_0.75.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t2flair_temp_1.00.png}} \\
+        \vspace{2mm} \\
+        \rotatebox[origin=c]{90}{\textbf{View 3: FA}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_fa_temp_0.10.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_fa_temp_0.25.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_fa_temp_0.50.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_fa_temp_0.75.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_fa_temp_1.00.png}} \\
+    \end{tabular}
 
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t2flair_temp_0.10.png}
-        \caption{$\tau = 0.10$}
-    \end{subfigure}\hfill
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t2flair_temp_0.25.png}
-        \caption{$\tau = 0.25$}
-    \end{subfigure}
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t2flair_temp_0.50.png}
-        \caption{$\tau = 0.50$}
-    \end{subfigure}
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t2flair_temp_0.75.png}
-        \caption{$\tau = 0.75$}
-    \end{subfigure}
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_t2flair_temp_1.00.png}
-        \caption{$\tau = 1.00$}
-    \end{subfigure}
-
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.10.png}
-        \caption{$\tau = 0.10$}
-    \end{subfigure}\hfill
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.25.png}
-        \caption{$\tau = 0.25$}
-    \end{subfigure}
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.50.png}
-        \caption{$\tau = 0.50$}
-    \end{subfigure}
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_0.75.png}
-        \caption{$\tau = 0.75$}
-    \end{subfigure}
-    \begin{subfigure}{0.195\textwidth}
-        \includegraphics[width=\linewidth]{Figures/samples_fa_temp_1.00.png}
-        \caption{$\tau = 1.00$}
-    \end{subfigure}
-
-   
-    
     \caption{Samples drawn from the learned LAMNr flow prior for Fractional
     Anisotropy (FA) maps at varying temperatures ($\tau$). Consistent with the
     structural MRI samples, lower temperatures ($\tau \le 0.50$) generate coherent
@@ -285,11 +272,8 @@ and \ref{fig:fa_samples}.
     normalized for visualization (min-max scaling), these isolated outlier values
     compress the visual contrast of the surrounding valid anatomical structures.}
 
-    \label{fig:fa_samples}
+    \label{fig:generative_samples}
 \end{figure}
-
-
-
 
 
 
