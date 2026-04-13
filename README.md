@@ -1,7 +1,7 @@
 
 ## Deep Computational Anatomy via Latent-Aligned Multiview Normalizing Flows
 
-<img align="center" width="50%" src="Manuscript/Figures/lamnr_templates.png"><img align="center" width="45%" src="Manuscript/Figures/lamnr_flows_illustration.png">
+<img align="center" width="50%" src="manuscript/Figures/lamnr_templates.png"><img align="center" width="45%" src="Manuscript/Figures/lamnr_flows_illustration.png">
 
 ----
 
@@ -56,9 +56,9 @@ Latent-aligned multiview normalizing (LAMNr) flows leverage exact-likelihood, bi
 <summary>Single view, uniform --> diagonal Gaussian (toy example)</summary>
 
 <p align="center">
-  <img src="Examples/lamnr_tabular/Test_SimpleUniform/UniformSimulatedData/uniform_10000x4.png" alt="Input" width="75%"><br>
+  <img src="examples/lamnr_tabular/Test_SimpleUniform/UniformSimulatedData/uniform_10000x4.png" alt="Input" width="75%"><br>
   Input<br>        
-  <img src="Examples/lamnr_tabular/Test_SimpleUniform/uniform_z_view0.png" alt="Output" width="75%"><br>
+  <img src="examples/lamnr_tabular/Test_SimpleUniform/uniform_z_view0.png" alt="Output" width="75%"><br>
   Output
 </p>
 
@@ -70,7 +70,7 @@ Latent-aligned multiview normalizing (LAMNr) flows leverage exact-likelihood, bi
 Data from [*Joint representations from multi-view MRI-based learning support cognitive and functional performance domains*](https://www.medrxiv.org/content/10.1101/2025.09.27.25336706v2)
 
 <p align="center">
-  <img src="Manuscript/Figures/clinical_comparison_multipanel2.png" alt="NNHEmbed" width="75%">
+  <img src="manuscript/Figures/clinical_comparison_multipanel2.png" alt="NNHEmbed" width="75%">
 </p>
 
 The forest plot illustrates the correlation uplift ($\Delta r$)
@@ -219,7 +219,7 @@ aug_params="noise_std:cos:0.05->0.015@${iterations},\
             sd_histogram_warping:cos:0.04->0.008@${iterations}"
 ```
 Visualization cycle (~20 seconds)
-<img src="Manuscript/Figures/aug_dlbs.gif" alt="HCP YA T1 aug" width="100%">
+<img src="manuscript/Figures/aug_dlbs.gif" alt="HCP YA T1 aug" width="100%">
 
 </details>
 
@@ -227,8 +227,8 @@ Visualization cycle (~20 seconds)
 <summary>Training LAMNr flows model (2D, 3 views)</summary>
 
 * [OpenNeuro data](https://openneuro.org/datasets/ds004856) 
-* [Command script](https://github.com/ntustison/LAMNrFlows/blob/main/Examples/lamnr_glow_dlbs/command_train_lamnr_glow_2d_t1_t2flair_fa_whole_head.sh)
-* [Trainer](https://github.com/ntustison/LAMNrFlows/blob/main/Examples/lamnr_glow_dlbs/train_lamnr_glow_2d.py)
+* [Command script](https://github.com/ntustison/LAMNrFlows/blob/main/examples/lamnr_glow/command_train_lamnr_glow_2d_t1_t2flair_fa_whole_head.sh)
+* [Trainer](https://github.com/ntustison/LAMNrFlows/blob/main/src/lamnrflows/train_lamnr_glow_2d.py)
 
 <img src="Manuscript/Figures/training_evolution_dlbs_2d_views.gif" alt="training evolution" width="100%">
 
