@@ -35,6 +35,9 @@ header-includes:
   - \usepackage{makecell}
   - \usepackage{pdflscape}
   - \usepackage[misc]{ifsym}
+  - \usepackage{amsmath}
+  - \usepackage{tikz}
+  - \usetikzlibrary{arrows.meta, positioning, calc}
   - \definecolor{listcomment}{rgb}{0.0,0.5,0.0}
   - \definecolor{listkeyword}{rgb}{0.0,0.0,0.5}
   - \definecolor{listnumbers}{gray}{0.65}

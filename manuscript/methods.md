@@ -266,13 +266,14 @@ counterintuitive due to the concentration of measure phenomenon
 as dimensionality increases, probability mass moves away from concentration at
 the origin. Instead, the volume of the space grows exponentially with distance
 from the center, causing the vast majority of the mass to concentrate within a
-narrow spherical shell of radius $\approx \sqrt{d}$ (i.e., the "soap
-bubble" effect[^blogpost]). This region is often referred to as the typical set
-[@vershynin2018high; @blum2020foundations] . Consequently, the latent origin
-$z=0$ is a highly atypical point containing near-zero probability mass. The
-inverse mapping $f^{-1}(0)$ must therefore be understood strictly as a
-barycentric geometric anchor representing a central axis of symmetry for the
-learned bijection, rather than a statistically representative anatomical mode.  
+narrow spherical shell of radius $\approx \sqrt{d}$ (i.e., the "soap bubble"
+effect[^blogpost]), a consequence of the Gaussian Annulus Theorem. This region
+is often referred to as the typical set [@vershynin2018high;
+@blum2020foundations] . Consequently, the latent origin $z=0$ is a highly
+atypical point containing near-zero probability mass. The inverse mapping
+$f^{-1}(0)$ must therefore be understood strictly as a barycentric geometric
+anchor representing a central axis of symmetry for the learned bijection, rather
+than a statistically representative anatomical mode.  
 
 [^blogpost]: https://www.inference.vc/high-dimensional-gaussian-distributions-are-soap-bubble/
 
@@ -297,14 +298,14 @@ anatomy, Euclidean operations must be replaced with distribution-preserving
 mechanisms.
 
 To navigate this geometry appropriately, we replace standard linear
-interpolation with spherical linear interpolation (SLERP) when traversing
+interpolation with spherical linear interpolation when traversing
 the latent space between two generated samples $z_1$ and $z_2$
 [@white2016sampling; @agustsson2018optimaltransportmapsdistribution]. For an
 interpolation parameter $t \in [0, 1]$ and the angle $\theta =
 \arccos\left(\frac{z_1 \cdot z_2}{\|z_1\|_2 \|z_2\|_2}\right)$ between the
-vectors, the SLERP interpolative trajectory is defined as:
+vectors, the Slerp interpolative trajectory is defined as:
 
-\begin{equation}\text{SLERP}(z_1,
+\begin{equation}\text{Slerp}(z_1,
 z_2; t) = \frac{\sin((1-t)\theta)}{\sin(\theta)}z_1 +
 \frac{\sin(t\theta)}{\sin(\theta)}z_2
 \end{equation}

@@ -26,7 +26,7 @@ is the exact mode of the learned distribution, it naturally filters
 idiosyncratic high-frequency noise, yielding a smooth representation of shared
 structural signals. Furthermore, to navigate this space without the variance
 collapse typical of high-dimensional Euclidean operations, we utilize spherical
-linear interpolation (SLERP). This ensures that interpolative trajectories
+linear interpolation. This ensures that interpolative trajectories
 remain strictly on the typical set—the high-probability manifold where realistic
 anatomical instances reside.  Similarly, the metric operations of DCA substitute
 the image registration of CA with algebraic interpolations calculated directly
