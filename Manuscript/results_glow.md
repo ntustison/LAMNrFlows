@@ -230,7 +230,7 @@ over this sampling radius: lower temperatures ($\tau < 1$) contract the sampling
 toward the high-density (but low-volume) region near the mean to generate
 high-fidelity, canonical anatomies, while $\tau \approx 1$ ensures that samples
 are drawn from the typical set, capturing the diverse structural variations
-characteristic of the true empirical distribution. Figures \ref{fig:generative_samples}.
+characteristic of the true empirical distribution. See Figure \ref{fig:generative_samples}.
 
 \begin{figure}[!htbp]
     \centering
