@@ -241,25 +241,25 @@ characteristic of the true empirical distribution. See Figure \ref{fig:generativ
     \begin{tabular}{c@{\hspace{2mm}}c@{\hspace{1mm}}c@{\hspace{1mm}}c@{\hspace{1mm}}c@{\hspace{1mm}}c}
         {} & {$\mathbf \tau = 0.1$} & {$\tau = 0.25$} & {$\tau = 0.5$} & {$\tau = 0.75$} & {$\tau = 1.0$} \\[2mm] % Espace vertical
         \rotatebox[origin=c]{90}{\textbf{View 1: T1-w}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t1_temp_0.10.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t1_temp_0.25.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t1_temp_0.50.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t1_temp_0.75.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t1_temp_1.00.png}} \\
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_t1_temp_0.10.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_t1_temp_0.25.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_t1_temp_0.50.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_t1_temp_0.75.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_t1_temp_1.00.png}} \\
         \vspace{2mm} \\
         \rotatebox[origin=c]{90}{\textbf{View 2: FLAIR}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t2flair_temp_0.10.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t2flair_temp_0.25.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t2flair_temp_0.50.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t2flair_temp_0.75.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_t2flair_temp_1.00.png}} \\
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_t2flair_temp_0.10.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_t2flair_temp_0.25.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_t2flair_temp_0.50.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_t2flair_temp_0.75.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_t2flair_temp_1.00.png}} \\
         \vspace{2mm} \\
         \rotatebox[origin=c]{90}{\textbf{View 3: FA}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_fa_temp_0.10.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_fa_temp_0.25.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_fa_temp_0.50.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_fa_temp_0.75.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/samples_fa_temp_1.00.png}} \\
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_fa_temp_0.10.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_fa_temp_0.25.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_fa_temp_0.50.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_fa_temp_0.75.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.19\linewidth]{Figures/Samples/samples_fa_temp_1.00.png}} \\
     \end{tabular}
 
     \caption{Generative samples drawn from the learned LAMNr flow prior for each
@@ -421,9 +421,194 @@ high-probability manifold.}
 \label{fig:interpolation}
 \end{figure}
 
+__Cross-modal imputation via Conditional Gaussian modeling.__ Missing modalities
+are synthesized by encoding the available observed images to the latent space,
+$z_O = f^{(O)}(X^{(O)})$, and computing the exact conditional expectation of the
+unobserved latent vectors, $\mu_{U|O}$, under the learned joint Gaussian prior.
+Projecting this optimal estimate through the target modalities' inverse flows,
+$\hat{X}^{(U)} = (f^{(U)})^{-1}(\mu_{U|O})$, yields a high-fidelity imputation
+that guarantees mathematical consistency with the population's cross-view
+dependencies. Crucially, because the joint prior models the full multi-view
+latent space simultaneously, this formulation is inherently flexible: it
+supports conditioning on any arbitrary subset of available data, enabling
+complex many-to-many translations (e.g., synthesizing a single FA map from
+combined T1 and T2 inputs, or simultaneously generating T2, FA, and MD from a
+single T1 scan).  Figure \ref{fig:imputation}.
 
+\begin{figure}[!htbp]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[>=latex, node distance=2cm, font=\sffamily]
 
+  % --- CORE FLOW COMPONENTS ---
+  
+  % Input: T1
+  \node (x1) at (0,0) {\textbf{Observed} ($\mathcal{X}$)};
+  
+  % Encoder
+  \node[draw, fill=blue!10, minimum height=1.2cm, minimum width=1.5cm, align=center] (enc) at (2.5,0) {$f_{\theta}$};
+  \node[text=blue, align=center, font=\scriptsize] at (2.5, -0.9) {Bijective\\Flow $\leftrightarrow$};
 
+  % Observed Latent Vector
+  \node[text=blue, font=\bfseries] (zO) at (4.5,0) {$z_O$};
+  
+  % Conditioning Box (Woodbury)
+  \node[draw, rounded corners, fill=gray!10, text width=5.cm, align=center, minimum height=2.5cm, inner sep=10pt] (cond) at (8,0) {
+    \textbf{Latent Gaussian}\\
+    \textbf{Conditioning}\\[0.3cm]
+    $\mu_{U|O} = \mu_U + \Sigma_{UO}\Sigma_{OO}^{-1}(z_O - \mu_O)$\\[0.2cm]
+    \scriptsize\textrm{(via Low-Rank Woodbury Identity)}
+  };
+  
+  % Imputed Latent Vector
+  \node[text=orange, font=\bfseries] (zU) at (11.5,0) {$\tilde{z}_U$};
+  
+  % Decoder
+  \node[draw, fill=orange!10, minimum height=1.2cm, minimum width=1.5cm, align=center] (dec) at (13.5,0) {$f_\theta^{-1}$};
+  \node[text=orange, align=center, font=\scriptsize] at (13.5, -0.9) {Bijective\\Flow $\leftrightarrow$};
+
+  % Output: FA
+  \node (x2) at (16,0) {\textbf{Imputed} ($\hat{\mathcal{X}}$)};
+
+  % --- IMAGE PLACEMENT (OBSERVED & IMPUTED) ---
+
+  % --- PREMIERE RANGÉE ---
+
+  % T1 Observed Images (Left side)
+  \node[inner sep=0pt, below=2.5cm of x1, xshift=-0.8cm] (imgT1_00) 
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_FA_from_T1/000000_T1_input.png}};
+  \node[inner sep=0pt, below=2.5cm of x1, xshift=2.4cm] (imgT1_01) 
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_FA_from_T1/000001_T1_input.png}};
+  \node[inner sep=0pt, below=2.5cm of x1, xshift=5.6cm] (imgT1_02) 
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_FA_from_T1/000002_T1_input.png}};
+  \node[below=0.1cm of imgT1_00, font=\normalsize] {Subject 00};
+  \node[below=0.1cm of imgT1_01, font=\normalsize] {Subject 01};
+  \node[below=0.1cm of imgT1_02, font=\normalsize] {Subject 02};
+  \node[above=0.2cm of imgT1_01, font=\small\bfseries] {Observed T1};
+
+  % FA Imputed Images (Right side)
+  \node[inner sep=0pt, below=2.5cm of x2, xshift=-4.8cm] (imgFA_00) 
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_FA_from_T1/000000_FA.png}};
+  \node[inner sep=0pt, below=2.5cm of x2, xshift=-1.6cm] (imgFA_01) 
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_FA_from_T1/000001_FA.png}};
+  \node[inner sep=0pt, below=2.5cm of x2, xshift=1.6cm] (imgFA_02) 
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_FA_from_T1/000002_FA.png}};
+  \node[below=0.1cm of imgFA_00, font=\normalsize] {Subject 00};
+  \node[below=0.1cm of imgFA_01, font=\normalsize] {Subject 01};
+  \node[below=0.1cm of imgFA_02, font=\normalsize] {Subject 02};
+  \node[above=0.2cm of imgFA_01, font=\normalsize\bfseries] {Imputed FA};
+
+  \draw[thick, gray!30] (-1.0, -8) -- (17.5, -8);
+
+  % --- DEUXIÈME RANGÉE ---
+
+  % FLAIR/FA Observed Images (Left side)
+  \node[inner sep=0pt, below=2.5cm of imgT1_00, xshift=-0.75cm] (imgFlairFA_00) 
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000000_T2Flair_input.png}};
+  \node[inner sep=0pt, below=2.5cm of imgT1_00, xshift=0.75cm] (imgFlairFA_10) 
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000000_FA_input.png}};
+
+  \node[inner sep=0pt, below=2.5cm of imgT1_01, xshift=-0.75cm] (imgFlairFA_01) 
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000001_T2Flair_input.png}};
+  \node[inner sep=0pt, below=2.5cm of imgT1_01, xshift=0.75cm] (imgFlairFA_11) 
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000001_FA_input.png}};
+  
+  \node[inner sep=0pt, below=2.5cm of imgT1_02, xshift=-0.75cm] (imgFlairFA_02) 
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000002_T2Flair_input.png}};
+  \node[inner sep=0pt, below=2.5cm of imgT1_02, xshift=0.75cm] (imgFlairFA_12) 
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000002_FA_input.png}};
+    
+  \node[below=0.1cm of imgFlairFA_00, xshift=0.75cm, font=\normalsize] {Subject 00};
+  \node[below=0.1cm of imgFlairFA_01, xshift=0.75cm, font=\normalsize] {Subject 01};
+  \node[below=0.1cm of imgFlairFA_02, xshift=0.75cm, font=\normalsize] {Subject 02};
+  \node[above=0.2cm of imgFlairFA_01, xshift=0.75cm, font=\small\bfseries] {Observed FLAIR/FA};
+
+  % T1 Imputed Images (Right side)
+  \node[inner sep=0pt, below=2.5cm of imgFA_00, xshift=-0.0cm] (imgT1w_00) 
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000000_T1.png}};
+  \node[inner sep=0pt, below=2.5cm of imgFA_00, xshift=3.2cm] (imgT1w_01) 
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000001_T1.png}};
+  \node[inner sep=0pt, below=2.5cm of imgFA_00, xshift=6.4cm] (imgT1w_02) 
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000002_T1.png}};
+  \node[below=0.1cm of imgT1w_00, font=\normalsize] {Subject 00};
+  \node[below=0.1cm of imgT1w_01, font=\normalsize] {Subject 01};
+  \node[below=0.1cm of imgT1w_02, font=\normalsize] {Subject 02};
+  \node[above=0.2cm of imgT1w_01, font=\normalsize\bfseries] {Imputed T1};
+
+  % --- TROISIÈME RANGÉE ---
+
+  \draw[thick, gray!30] (-1.0, -14.5) -- (17.5, -14.5);
+
+  % T1 Observed Images (Left side)
+  \node[inner sep=0pt, below=4cm of imgFlairFA_00, xshift=0.75cm] (imgT1x_00) 
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000000_T1_input.png}};
+  \node[inner sep=0pt, below=4cm of imgFlairFA_00, xshift=3.95cm] (imgT1x_01) 
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000001_T1_input.png}};
+  \node[inner sep=0pt, below=4cm of imgFlairFA_00, xshift=7.15cm] (imgT1x_02) 
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000002_T1_input.png}};
+  \node[below=0.1cm of imgT1x_00, font=\normalsize] {Subject 00};
+  \node[below=0.1cm of imgT1x_01, font=\normalsize] {Subject 01};
+  \node[below=0.1cm of imgT1x_02, font=\normalsize] {Subject 02};
+  \node[above=0.2cm of imgT1x_01, font=\small\bfseries] {Observed T1};
+
+  % FLAIR/FA Observed Images (Right side)
+  \node[inner sep=0pt, below=2.5cm of imgT1w_00, xshift=-0.75cm] (imgFlairFAx_00) 
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000000_T2Flair.png}};
+  \node[inner sep=0pt, below=2.5cm of imgT1w_00, xshift=0.75cm] (imgFlairFAx_10) 
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000000_FA.png}};
+
+  \node[inner sep=0pt, below=2.5cm of imgT1w_01, xshift=-0.75cm] (imgFlairFAx_01) 
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000001_T2Flair.png}};
+  \node[inner sep=0pt, below=2.5cm of imgT1w_01, xshift=0.75cm] (imgFlairFAx_11) 
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000000_FA.png}};
+  
+  \node[inner sep=0pt, below=2.5cm of imgT1w_02, xshift=-0.75cm] (imgFlairFAx_02) 
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000000_T2Flair.png}};
+  \node[inner sep=0pt, below=2.5cm of imgT1w_02, xshift=0.75cm] (imgFlairFAx_12) 
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000000_FA.png}};
+    
+  \node[below=0.1cm of imgFlairFAx_00, xshift=0.75cm, font=\normalsize] {Subject 00};
+  \node[below=0.1cm of imgFlairFAx_01, xshift=0.75cm, font=\normalsize] {Subject 01};
+  \node[below=0.1cm of imgFlairFAx_02, xshift=0.75cm, font=\normalsize] {Subject 02};
+  \node[above=0.2cm of imgFlairFAx_01, xshift=0.75cm, font=\small\bfseries] {Imputed FLAIR/FA};
+
+  % --- CONNECTIONS & DECORATIONS ---
+
+  % Main flow arrows
+  \draw[->, thick, blue] (x1) -- (enc);
+  \draw[->, thick, blue] (enc) -- (zO);
+  \draw[->, thick, blue] (zO) -- (cond);
+  \draw[->, thick, orange] (cond) -- (zU);
+  \draw[->, thick, orange] (zU) -- (dec);
+  \draw[->, thick, orange] (dec) -- (x2);
+  
+  % Population Priors
+  \node[align=center] (prior) at (8, 3.2) {Population Priors\\($\mu$, Low-Rank $\Sigma$)};
+  \draw[->, dashed, thick, gray] (prior) -- (cond);
+
+  % Connection lines from images to nodes
+  % \draw[dashed, gray!50] (imgT1_00.north) -- (x1.south);
+  % \draw[dashed, gray!50] (imgT1_01.north) -- (x1.south);
+  % \draw[dashed, gray!50] (imgT1_02.north) -- (x1.south);
+  % \draw[dashed, gray!50] (imgFA_00.north) -- (x2.south);
+  % \draw[dashed, gray!50] (imgFA_01.north) -- (x2.south);
+  % \draw[dashed, gray!50] (imgFA_02.north) -- (x2.south);
+
+\end{tikzpicture}
+}
+\caption{Overview of the LAMNr cross-modal imputation framework. An observed
+    source image (e.g., T1-weighted MRI, $X^{(1)}$) is strictly mapped to its
+    latent representation $z_O$ via the learned bijective flow $f^{(1)}$.
+    Leveraging population-level Gaussian priors (mean $\mu$ and low-rank
+    covariance $\Sigma$), the missing latent vector $\tilde{z}_U$ is estimated
+    through the conditional expectation $\mu_{U|O}$. To bypass the memory
+    bottleneck of high-dimensional 3D data, the covariance inversion is
+    efficiently computed in the reduced subspace using the Woodbury matrix
+    identity. Finally, the target image (e.g., Fractional Anisotropy,
+    $\hat{X}^{(2)}$) is synthesized by projecting the imputed latent vector back
+    to the data space via the inverse flow $(f^{(2)})^{-1}$.}
+    \label{fig:imputation}
+\end{figure}
 
 
 
@@ -450,29 +635,6 @@ high-probability manifold.}
   combined metrics yield a rigorous, variance-weighted framework for anomaly
   detection and longitudinal assessment. 
   Figures \ref{fig:latent_space_distances} and \ref{fig:twin_distances}.
-
-* __Cross-modal imputation via Conditional Gaussian modeling.__ Missing
-  modalities are synthesized by encoding the available observed images to the
-  latent space, $z_O = f^{(O)}(X^{(O)})$, and computing the exact conditional
-  expectation of the unobserved latent vectors, $\mu_{U|O}$, under the learned
-  joint Gaussian prior. Projecting this optimal estimate through the target
-  modalities' inverse flows, $\hat{X}^{(U)} = (f^{(U)})^{-1}(\mu_{U|O})$, yields
-  a high-fidelity imputation that guarantees mathematical consistency with the
-  population's cross-view dependencies. Crucially, because the joint prior
-  models the full multi-view latent space simultaneously, this formulation is
-  inherently flexible: it supports conditioning on any arbitrary subset of
-  available data, enabling complex many-to-many translations (e.g., synthesizing
-  a single FA map from combined T1 and T2 inputs, or simultaneously generating
-  T2, FA, and MD from a single T1 scan).  Figure \ref{fig:imputation}.
-
-
-* __Temperature scaling.__ Weighting a latent representation by a scalar factor
-  $\tau < 1.0$ contracts the vector toward the origin of the Gaussian
-  prior. This variance reduction rigorously preserves the topology of the
-  learned manifold, effectively suppressing out-of-distribution pathological
-  anomalies and shifting the subject's anatomy toward the healthy population
-  mean without introducing reconstruction artifacts. Figure
-  \ref{fig:temperature_scaling}.
 
 
 
@@ -556,28 +718,13 @@ high-probability manifold.}
 
 
 
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=\linewidth]{Figures/imputation.pdf}
-    \caption{Overview of the LAMNr cross-modal imputation framework. An observed
-    source image (e.g., T1-weighted MRI, $X^{(1)}$) is strictly mapped to its
-    latent representation $z_O$ via the learned bijective flow $f^{(1)}$.
-    Leveraging population-level Gaussian priors (mean $\mu$ and low-rank
-    covariance $\Sigma$), the missing latent vector $\tilde{z}_U$ is estimated
-    through the conditional expectation $\mu_{U|O}$. To bypass the memory
-    bottleneck of high-dimensional 3D data, the covariance inversion is
-    efficiently computed in the reduced subspace using the Woodbury matrix
-    identity. Finally, the target image (e.g., Fractional Anisotropy,
-    $\hat{X}^{(2)}$) is synthesized by projecting the imputed latent vector back
-    to the data space via the inverse flow $(f^{(2)})^{-1}$.}
-    \label{fig:imputation}
-\end{figure}
-
-
-
-
-
+<!-- * __Temperature scaling.__ Weighting a latent representation by a scalar factor
+  $\tau < 1.0$ contracts the vector toward the origin of the Gaussian
+  prior. This variance reduction rigorously preserves the topology of the
+  learned manifold, effectively suppressing out-of-distribution pathological
+  anomalies and shifting the subject's anatomy toward the healthy population
+  mean without introducing reconstruction artifacts. Figure
+  \ref{fig:temperature_scaling}. 
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\linewidth]{Figures/temperature_scaling.pdf}
@@ -591,7 +738,7 @@ high-probability manifold.}
     pathology.}
     \label{fig:temperature_scaling}
 \end{figure}
-
+-->
 
 
 
