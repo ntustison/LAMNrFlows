@@ -1,0 +1,89 @@
+\documentclass[tikz,border=10pt]{standalone}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usetikzlibrary{arrows.meta, positioning, calc}
+
+\begin{document}
+\begin{tikzpicture}[>=latex, font=\sffamily]
+
+  % --- PARTIE A : Séquence d'Images ---
+  \begin{scope}[shift={(0, 7)}]
+      % Insertion des images (ajustez les dimensions si nécessaire)
+      \node[inner sep=0, draw, thick, blue] (img0) at (0,0) {\includegraphics[width=2.8cm]{Figures/interp0.00.png}};
+      \node[inner sep=0] (img25) at (4,0) {\includegraphics[width=2.8cm]{Figures/interp0.25.png}};
+      \node[inner sep=0] (img50) at (8,0) {\includegraphics[width=2.8cm]{Figures/interp0.50.png}};
+      \node[inner sep=0] (img75) at (12,0) {\includegraphics[width=2.8cm]{Figures/interp0.75.png}};
+      \node[inner sep=0, draw, thick, orange] (img100) at (16,0) {\includegraphics[width=2.8cm]{Figures/interp1.00.png}};
+
+      % Étiquettes de progression
+      \node[below=0.2cm of img0, font=\bfseries, text=blue] {Target ($t=0.0$)};
+      \node[below=0.2cm of img25] {$t=0.25$};
+      \node[below=0.2cm of img50] {$t=0.50$};
+      \node[below=0.2cm of img75] {$t=0.75$};
+      \node[below=0.2cm of img100, font=\bfseries, text=orange] {Source ($t=1.0$)};
+
+      % Flèches de flux
+      \draw[->, thick, gray] (img0) -- (img25);
+      \draw[->, thick, gray] (img25) -- (img50);
+      \draw[->, thick, gray] (img50) -- (img75);
+      \draw[->, thick, gray] (img75) -- (img100);
+  \end{scope}
+
+  % --- PARTIE B : Géométrie Latente (Slerp vs Lerp) ---
+  \begin{scope}[shift={(8, 0)}]
+      % Centre de l'espace (Moyenne Gaussienne)
+      \coordinate (mu) at (0,0);
+      \fill (mu) circle (2.5pt) node[below=0.1cm] {$\mu$ (Population Mean)};
+
+      % Rayon de la sphère latente (Norme / Variance conservée)
+      \def\R{4.5}
+
+      % Angles pour les vecteurs Target et Source
+      \def\angT{145} % Cible à gauche
+      \def\angS{35}  % Source à droite
+
+      % Arc représentant la variété de haute probabilité (Isocontour Gaussien)
+      \draw[dashed, gray!80, thick] (mu) + (20:\R) arc (20:160:\R);
+      \node[gray!80, align=center] at (0, 5.2) {High-Probability Manifold\\[-0.5ex] \small ($\|z - \mu\| \approx \text{const}$)};
+
+      % Définition des coordonnées vectorielles
+      \coordinate (ZT) at (\angT:\R);
+      \coordinate (ZS) at (\angS:\R);
+
+      % Vecteurs
+      \draw[->, thick, blue] (mu) -- (ZT) node[midway, left=0.2cm] {$z_{target}$};
+      \draw[->, thick, orange] (mu) -- (ZS) node[midway, right=0.2cm] {$z_{source}$};
+
+      % Ligne d'interpolation Linéaire (Lerp)
+      \draw[->, thick, red, dotted] (ZT) -- (ZS);
+      \coordinate (L50) at (0, {4.5*sin(35)}); % Point central du Lerp
+      \fill[red] (L50) circle (2pt);
+      \node[red, align=center, below=0.1cm of L50] {Lerp\\ \small (Variance Collapse \\ \& Out-of-Distribution)};
+
+      % Arc d'interpolation Sphérique (Slerp)
+      \draw[->, ultra thick, green!60!black] (mu) + (\angT:\R) arc (\angT:\angS:\R);
+      \node[green!60!black, above=0.3cm] at (0, \R) {\textbf{Slerp (Variance Conserved)}};
+
+      % Calcul des points sur l'arc Slerp
+      \coordinate (P25) at (117.5:\R); % 145 - (110*0.25)
+      \coordinate (P50) at (90:\R);    % 145 - (110*0.5)
+      \coordinate (P75) at (62.5:\R);  % 145 - (110*0.75)
+
+      % Tracé des points
+      \fill[blue] (ZT) circle (3pt);
+      \fill[black] (P25) circle (3pt);
+      \fill[black] (P50) circle (3pt);
+      \fill[black] (P75) circle (3pt);
+      \fill[orange] (ZS) circle (3pt);
+
+      % Lignes de projection entre la géométrie et les IRM
+      \draw[dashed, blue!50, ->] (ZT) to[out=90, in=-90] (-8, 4.3);
+      \draw[dashed, gray!50, ->] (P25) to[out=90, in=-90] (-4, 4.3);
+      \draw[dashed, gray!50, ->] (P50) to[out=90, in=-90] (0, 4.3);
+      \draw[dashed, gray!50, ->] (P75) to[out=90, in=-90] (4, 4.3);
+      \draw[dashed, orange!50, ->] (ZS) to[out=90, in=-90] (8, 4.3);
+
+  \end{scope}
+
+\end{tikzpicture}
+\end{document}
