@@ -179,8 +179,8 @@ zero-vector of the isotropic Gaussian prior through the inverse flow, $x =
 f^{-1}_\theta(0)$, we synthesize a canonical representation that captures the
 central morphometric tendency of the cohort without the computational overhead
 of iterative diffeomorphic averaging [@Avants:2010aa].  See Figure
-\ref{fig:frechet_mean}.
-
+\ref{fig:frechet_mean}.  Also, see ``lamnr_glow_tool_2/3d.py recon-template`` for
+more details.
  
 \begin{figure}[!htbp]
     \centering
@@ -230,7 +230,9 @@ over this sampling radius: lower temperatures ($\tau < 1$) contract the sampling
 toward the high-density (but low-volume) region near the mean to generate
 high-fidelity, canonical anatomies, while $\tau \approx 1$ ensures that samples
 are drawn from the typical set, capturing the diverse structural variations
-characteristic of the true empirical distribution. See Figure \ref{fig:generative_samples}.
+characteristic of the true empirical distribution. See Figure
+\ref{fig:generative_samples}. Also, see ``lamnr_glow_tool_2/3d.py sample`` for more
+details.
 
 \begin{figure}[!htbp]
     \centering
@@ -288,7 +290,9 @@ illustrates the morphological interpolation from larger to smaller ventricles
 and from the presence to absence of white matter hyperintensities. We see
 similar high quality interpolations in a BraTS-Reg subject (Subject 5, post- and
 pre-resection scans).  It is noteworthy that training data did not include
-skull-stripped images.  
+skull-stripped images.  See ``lamnr_glow_tool_2/3d.py recon-interpolate`` for more
+details.
+
 
 \begin{figure}[!htbp]
 \centering
@@ -303,30 +307,30 @@ skull-stripped images.
       % --- RANGÉE DU HAUT : SLERP ---
       % Chaque nœud contient deux images de 1.6cm (Total 3.2cm)
       \node[inner sep=0, draw, thick, blue] (dlbs_img0) at (0,2) 
-        {\includegraphics[width=1.6cm]{Figures/intra_dlbs_wave2_example_t1_t0.00.png}\includegraphics[width=1.6cm]{Figures/intra_dlbs_wave2_example_t2flair_t0.00.png}};
+        {\includegraphics[width=1.6cm]{Figures/interpolation/intra_dlbs_wave2_example_t1_t0.00.png}\includegraphics[width=1.6cm]{Figures/interpolation/intra_dlbs_wave2_example_t2flair_t0.00.png}};
       \node[inner sep=0] (dlbs_img25) at (4,2) 
-        {\includegraphics[width=1.6cm]{Figures/intra_dlbs_wave2_example_t1_t0.25.png}\includegraphics[width=1.6cm]{Figures/intra_dlbs_wave2_example_t2flair_t0.25.png}};
+        {\includegraphics[width=1.6cm]{Figures/interpolation/intra_dlbs_wave2_example_t1_t0.25.png}\includegraphics[width=1.6cm]{Figures/interpolation/intra_dlbs_wave2_example_t2flair_t0.25.png}};
       \node[inner sep=0] (dlbs_img50) at (8,2) 
-        {\includegraphics[width=1.6cm]{Figures/intra_dlbs_wave2_example_t1_t0.50.png}\includegraphics[width=1.6cm]{Figures/intra_dlbs_wave2_example_t2flair_t0.50.png}};
+        {\includegraphics[width=1.6cm]{Figures/interpolation/intra_dlbs_wave2_example_t1_t0.50.png}\includegraphics[width=1.6cm]{Figures/interpolation/intra_dlbs_wave2_example_t2flair_t0.50.png}};
       \node[inner sep=0] (dlbs_img75) at (12,2) 
-        {\includegraphics[width=1.6cm]{Figures/intra_dlbs_wave2_example_t1_t0.75.png}\includegraphics[width=1.6cm]{Figures/intra_dlbs_wave2_example_t2flair_t0.75.png}};
+        {\includegraphics[width=1.6cm]{Figures/interpolation/intra_dlbs_wave2_example_t1_t0.75.png}\includegraphics[width=1.6cm]{Figures/interpolation/intra_dlbs_wave2_example_t2flair_t0.75.png}};
       \node[inner sep=0, draw, thick, orange] (dlbs_img100) at (16,2) 
-        {\includegraphics[width=1.6cm]{Figures/intra_dlbs_wave2_example_t1_t1.00.png}\includegraphics[width=1.6cm]{Figures/intra_dlbs_wave2_example_t2flair_t1.00.png}};
+        {\includegraphics[width=1.6cm]{Figures/interpolation/intra_dlbs_wave2_example_t1_t1.00.png}\includegraphics[width=1.6cm]{Figures/interpolation/intra_dlbs_wave2_example_t2flair_t1.00.png}};
 
       % --- Ligne de séparation ---
       \draw[thick, gray!30] (-3, 0.5) -- (18, 0.5);
 
       % --- RANGÉE DU BAS : Reg-BRATS ---
       \node[inner sep=0, draw, thick, blue] (img0) at (0,-1) 
-        {\includegraphics[width=1.6cm]{Figures/inter_brats_example_t1_t0.00.png}\includegraphics[width=1.6cm]{Figures/inter_brats_example_t2flair_t0.00.png}};
+        {\includegraphics[width=1.6cm]{Figures/interpolation/inter_brats_example_t1_t0.00.png}\includegraphics[width=1.6cm]{Figures/interpolation/inter_brats_example_t2flair_t0.00.png}};
       \node[inner sep=0] (img25) at (4,-1) 
-        {\includegraphics[width=1.6cm]{Figures/inter_brats_example_t1_t0.25.png}\includegraphics[width=1.6cm]{Figures/inter_brats_example_t2flair_t0.25.png}};
+        {\includegraphics[width=1.6cm]{Figures/interpolation/inter_brats_example_t1_t0.25.png}\includegraphics[width=1.6cm]{Figures/interpolation/inter_brats_example_t2flair_t0.25.png}};
       \node[inner sep=0] (img50) at (8,-1) 
-        {\includegraphics[width=1.6cm]{Figures/inter_brats_example_t1_t0.50.png}\includegraphics[width=1.6cm]{Figures/inter_brats_example_t2flair_t0.50.png}};
+        {\includegraphics[width=1.6cm]{Figures/interpolation/inter_brats_example_t1_t0.50.png}\includegraphics[width=1.6cm]{Figures/interpolation/inter_brats_example_t2flair_t0.50.png}};
       \node[inner sep=0] (img75) at (12,-1) 
-        {\includegraphics[width=1.6cm]{Figures/inter_brats_example_t1_t0.75.png}\includegraphics[width=1.6cm]{Figures/inter_brats_example_t2flair_t0.75.png}};
+        {\includegraphics[width=1.6cm]{Figures/interpolation/inter_brats_example_t1_t0.75.png}\includegraphics[width=1.6cm]{Figures/interpolation/inter_brats_example_t2flair_t0.75.png}};
       \node[inner sep=0, draw, thick, orange] (img100) at (16,-1) 
-        {\includegraphics[width=1.6cm]{Figures/inter_brats_example_t1_t1.00.png}\includegraphics[width=1.6cm]{Figures/inter_brats_example_t2flair_t1.00.png}};
+        {\includegraphics[width=1.6cm]{Figures/interpolation/inter_brats_example_t1_t1.00.png}\includegraphics[width=1.6cm]{Figures/interpolation/inter_brats_example_t2flair_t1.00.png}};
 
       % Flèches et étiquettes (inchangées)
       \draw[->, thick, gray] (dlbs_img0) -- (dlbs_img25);
@@ -433,7 +437,8 @@ latent space simultaneously, this formulation is inherently flexible: it
 supports conditioning on any arbitrary subset of available data, enabling
 complex many-to-many translations (e.g., synthesizing a single FA map from
 combined T1 and T2 inputs, or simultaneously generating T2, FA, and MD from a
-single T1 scan).  Figure \ref{fig:imputation}.
+single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
+``lamnr_glow_tool_2/3d.py impute`` for more details.
 
 \begin{figure}[!htbp]
 \centering
@@ -540,11 +545,11 @@ single T1 scan).  Figure \ref{fig:imputation}.
   \draw[thick, gray!30] (-1.0, -14.5) -- (17.5, -14.5);
 
   % T1 Observed Images (Left side)
-  \node[inner sep=0pt, below=4cm of imgFlairFA_00, xshift=0.75cm] (imgT1x_00) 
+  \node[inner sep=0pt, below=4.5cm of imgFlairFA_00, xshift=0.75cm] (imgT1x_00) 
     {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000000_T1_input.png}};
-  \node[inner sep=0pt, below=4cm of imgFlairFA_00, xshift=3.95cm] (imgT1x_01) 
+  \node[inner sep=0pt, below=4.5cm of imgFlairFA_00, xshift=3.95cm] (imgT1x_01) 
     {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000001_T1_input.png}};
-  \node[inner sep=0pt, below=4cm of imgFlairFA_00, xshift=7.15cm] (imgT1x_02) 
+  \node[inner sep=0pt, below=4.5cm of imgFlairFA_00, xshift=7.15cm] (imgT1x_02) 
     {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000002_T1_input.png}};
   \node[below=0.1cm of imgT1x_00, font=\normalsize] {Subject 00};
   \node[below=0.1cm of imgT1x_01, font=\normalsize] {Subject 01};
@@ -596,48 +601,43 @@ single T1 scan).  Figure \ref{fig:imputation}.
 
 \end{tikzpicture}
 }
-\caption{Overview of the LAMNr cross-modal imputation framework. An observed
-    source image (e.g., T1-weighted MRI, $X^{(1)}$) is strictly mapped to its
-    latent representation $z_O$ via the learned bijective flow $f^{(1)}$.
-    Leveraging population-level Gaussian priors (mean $\mu$ and low-rank
-    covariance $\Sigma$), the missing latent vector $\tilde{z}_U$ is estimated
-    through the conditional expectation $\mu_{U|O}$. To bypass the memory
-    bottleneck of high-dimensional 3D data, the covariance inversion is
-    efficiently computed in the reduced subspace using the Woodbury matrix
-    identity. Finally, the target image (e.g., Fractional Anisotropy,
-    $\hat{X}^{(2)}$) is synthesized by projecting the imputed latent vector back
-    to the data space via the inverse flow $(f^{(2)})^{-1}$.}
-    \label{fig:imputation}
+\caption{(Top) Diagrammatic illustration of the Conditional Gaussian modeling
+approach available through the LAMNr flows framework.  
+Observed input features $\mathcal{X}$ are mapped to the latent representation
+$z_O$ through the learned bijective flow $f_\theta$. Imputation of missing
+modalities is performed via latent Gaussian conditioning $\mu_{U|O}$, anchored
+by population-level priors ($\mu$, low-rank $\Sigma$). The covariance inversion
+is efficiently computed in a reduced subspace using the Woodbury matrix identity
+to ensure scalability for large-scale inputs. The target image
+$\hat{\mathcal{X}}$ is synthesized by projecting the imputed latent vector
+$\tilde{z}_U$ back to the data space via the inverse flow $f_\theta^{-1}$.
+(Bottom) Performance is demonstrated across three subjects (denoted as 00, 01,
+02) under varying observational constraints. (Row 1) Synthesis of Fractional
+Anisotropy (FA) maps from observed T1-weighted inputs.  (Row 2) Joint
+reconstruction of T1-weighted scans from observed FLAIR and FA modalities.  (Row
+3) Simultaneous multi-modal imputation of FLAIR and FA from a single observed T1
+input.}
+\label{fig:imputation}
 \end{figure}
 
-
-
-
-
-
-
-
-* __Latent distances.__ The bijective nature of normalizing flows allows complex
-  anatomical deviations to be quantified through a flexible suite of distance
-  metrics in the learned latent space, depending on the analytical
-  objective.Euclidean distance provides a straightforward measure of separation
-  for basic similarity assessments. To account for the natural variance of each
-  latent dimension, we implement a standardized Euclidean (diagonal Mahalanobis)
-  distance, $d = \sqrt{ \sum_i \frac{(z_i - \mu_i)^2}{\sigma_i^2 + \epsilon} }$,
-  which benchmarks a subject against the normative Gaussian mean ($\mu$) without
-  artificially penalizing high-variance anatomical traits.  For point-to-point
-  comparisons between the latents $z_j$ and $z_k$ of specific images, we utilize 
-  geodesic distance derived from
-  cosine similarity, $d = \arccos(\text{clamp}(\text{sim}(z_j, z_k)))$. By
-  measuring the angular displacement on the hypersphere, this metric respects
-  the spherical geometry of the isotropic Gaussian prior, ensuring that
-  anatomical transitions are evaluated along the high-density manifold. These
-  combined metrics yield a rigorous, variance-weighted framework for anomaly
-  detection and longitudinal assessment. 
-  Figures \ref{fig:latent_space_distances} and \ref{fig:twin_distances}.
-
-
-
+__Latent distances.__ The bijective nature of normalizing flows allows complex
+anatomical deviations to be quantified through a flexible suite of distance
+metrics in the learned latent space, depending on the analytical
+objective.Euclidean distance provides a straightforward measure of separation
+for basic similarity assessments. To account for the natural variance of each
+latent dimension, we implement a standardized Euclidean (diagonal Mahalanobis)
+distance, $d = \sqrt{ \sum_i \frac{(z_i - \mu_i)^2}{\sigma_i^2 + \epsilon} }$,
+which benchmarks a subject against the normative Gaussian mean ($\mu$) without
+artificially penalizing high-variance anatomical traits.  For point-to-point
+comparisons between the latents $z_j$ and $z_k$ of specific images, we utilize
+geodesic distance derived from cosine similarity, $d =
+\arccos(\text{clamp}(\text{sim}(z_j, z_k)))$. By measuring the angular
+displacement on the hypersphere, this metric respects the spherical geometry of
+the isotropic Gaussian prior, ensuring that anatomical transitions are evaluated
+along the high-density manifold. These combined metrics yield a rigorous,
+variance-weighted framework for anomaly detection and longitudinal assessment.
+Figures \ref{fig:latent_space_distances}.  Also, see ``lamnr_glow_tool_2/3d.py
+calc-distance`` for more details.
 
 \begin{figure}[htbp]
     \centering
@@ -693,6 +693,14 @@ single T1 scan).  Figure \ref{fig:imputation}.
 \end{figure}
 
 
+
+
+
+
+
+
+
+<!-- 
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.8\linewidth]{Figures/comparaison_rangs_combinee} \\
@@ -715,7 +723,7 @@ single T1 scan).  Figure \ref{fig:imputation}.
     on non-brain-extracted, significantly older PPMI data.}
     \label{fig:twin_distances}
 \end{figure}
-
+ -->
 
 
 <!-- * __Temperature scaling.__ Weighting a latent representation by a scalar factor
