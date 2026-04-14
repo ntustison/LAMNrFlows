@@ -485,7 +485,7 @@ single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
   \node[inner sep=0pt, below=2.5cm of x1, xshift=2.4cm] (imgT1_01) 
     {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_FA_from_T1/000001_T1_input.png}};
   \node[inner sep=0pt, below=2.5cm of x1, xshift=5.6cm] (imgT1_02) 
-    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_FA_from_T1/000002_T1_input.png}};
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_FA_from_T1/000003_T1_input.png}};
   \node[below=0.1cm of imgT1_00, font=\normalsize] {Subject 00};
   \node[below=0.1cm of imgT1_01, font=\normalsize] {Subject 01};
   \node[below=0.1cm of imgT1_02, font=\normalsize] {Subject 02};
@@ -497,7 +497,7 @@ single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
   \node[inner sep=0pt, below=2.5cm of x2, xshift=-1.6cm] (imgFA_01) 
     {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_FA_from_T1/000001_FA.png}};
   \node[inner sep=0pt, below=2.5cm of x2, xshift=1.6cm] (imgFA_02) 
-    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_FA_from_T1/000002_FA.png}};
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_FA_from_T1/000003_FA.png}};
   \node[below=0.1cm of imgFA_00, font=\normalsize] {Subject 00};
   \node[below=0.1cm of imgFA_01, font=\normalsize] {Subject 01};
   \node[below=0.1cm of imgFA_02, font=\normalsize] {Subject 02};
@@ -519,9 +519,9 @@ single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
     {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000001_FA_input.png}};
   
   \node[inner sep=0pt, below=2.5cm of imgT1_02, xshift=-0.75cm] (imgFlairFA_02) 
-    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000002_T2Flair_input.png}};
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000003_T2Flair_input.png}};
   \node[inner sep=0pt, below=2.5cm of imgT1_02, xshift=0.75cm] (imgFlairFA_12) 
-    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000002_FA_input.png}};
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000003_FA_input.png}};
     
   \node[below=0.1cm of imgFlairFA_00, xshift=0.75cm, font=\normalsize] {Subject 00};
   \node[below=0.1cm of imgFlairFA_01, xshift=0.75cm, font=\normalsize] {Subject 01};
@@ -534,7 +534,7 @@ single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
   \node[inner sep=0pt, below=2.5cm of imgFA_00, xshift=3.2cm] (imgT1w_01) 
     {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000001_T1.png}};
   \node[inner sep=0pt, below=2.5cm of imgFA_00, xshift=6.4cm] (imgT1w_02) 
-    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000002_T1.png}};
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T1_from_T2FlairFA/000003_T1.png}};
   \node[below=0.1cm of imgT1w_00, font=\normalsize] {Subject 00};
   \node[below=0.1cm of imgT1w_01, font=\normalsize] {Subject 01};
   \node[below=0.1cm of imgT1w_02, font=\normalsize] {Subject 02};
@@ -550,7 +550,7 @@ single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
   \node[inner sep=0pt, below=4.5cm of imgFlairFA_00, xshift=3.95cm] (imgT1x_01) 
     {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000001_T1_input.png}};
   \node[inner sep=0pt, below=4.5cm of imgFlairFA_00, xshift=7.15cm] (imgT1x_02) 
-    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000002_T1_input.png}};
+    {\includegraphics[width=3cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000003_T1_input.png}};
   \node[below=0.1cm of imgT1x_00, font=\normalsize] {Subject 00};
   \node[below=0.1cm of imgT1x_01, font=\normalsize] {Subject 01};
   \node[below=0.1cm of imgT1x_02, font=\normalsize] {Subject 02};
@@ -565,12 +565,12 @@ single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
   \node[inner sep=0pt, below=2.5cm of imgT1w_01, xshift=-0.75cm] (imgFlairFAx_01) 
     {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000001_T2Flair.png}};
   \node[inner sep=0pt, below=2.5cm of imgT1w_01, xshift=0.75cm] (imgFlairFAx_11) 
-    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000000_FA.png}};
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000001_FA.png}};
   
   \node[inner sep=0pt, below=2.5cm of imgT1w_02, xshift=-0.75cm] (imgFlairFAx_02) 
-    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000000_T2Flair.png}};
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000003_T2Flair.png}};
   \node[inner sep=0pt, below=2.5cm of imgT1w_02, xshift=0.75cm] (imgFlairFAx_12) 
-    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000000_FA.png}};
+    {\includegraphics[width=1.5cm]{Figures/dlbs_wave2_impute_T2FlairFA_from_T1/000003_FA.png}};
     
   \node[below=0.1cm of imgFlairFAx_00, xshift=0.75cm, font=\normalsize] {Subject 00};
   \node[below=0.1cm of imgFlairFAx_01, xshift=0.75cm, font=\normalsize] {Subject 01};
@@ -639,61 +639,73 @@ variance-weighted framework for anomaly detection and longitudinal assessment.
 Figures \ref{fig:latent_space_distances}.  Also, see ``lamnr_glow_tool_2/3d.py
 calc-distance`` for more details.
 
-\begin{figure}[htbp]
-    \centering
 
-    % --- Inliers (Min Distance) ---
-    \begin{subfigure}{0.32\textwidth}
-        \includegraphics[width=\linewidth]{Figures/sub-3859_ses-20120921_r0001_ppmixt1_min_total_t1_distance_to_gaussian_256x256_slice138.png}
-        \caption{Min Distance (Total)}
-        \label{fig:min_total}
-    \end{subfigure}\hfill
-    \begin{subfigure}{0.32\textwidth}
-        \includegraphics[width=\linewidth]{Figures/sub-3327_ses-20170127_r0002_ppmixt1_min_distL0_t1_distance_to_gaussian_256x256_slice138.png}
-        \caption{Min Distance (Level 0)}
-        \label{fig:min_L0}
-    \end{subfigure}\hfill
-    \begin{subfigure}{0.32\textwidth}
-        \includegraphics[width=\linewidth]{Figures/sub-3859_ses-20120921_r0001_ppmixt1_min_distL5_t1_distance_to_gaussian_256x256_slice138.png}
-        \caption{Min Distance (Level 5)}
-        \label{fig:min_L5}
-    \end{subfigure}
+\begin{figure*}[!htbp]
+\centering
+\begin{tikzpicture}[
+    image_node/.style={inner sep=0pt, outer sep=0.5pt, anchor=north west},
+    label_node/.style={font=\small\bfseries, anchor=base}
+]
+
+% 1. Paramètres de dimension
+\def\imgw{2.1}   
+\def\imgh{2.1}   
+\def\hgap{0.08}  % Augmenté légèrement pour la clarté
+\def\vgap{0.3}   
+\def\groupgap{0.5} 
+
+% 2. Header Labels (Calculs de centrage précis)
+% Closest : milieu de l'image 2 (index 1) -> 1.5*imgw + hgap
+\node[label_node] at ({(1.5*\imgw + 1*\hgap)*1cm - 0.25cm}, 0.3cm) {Closest};
+
+% TEMPLATE : milieu de l'image 4 -> pos_template + 0.5*imgw
+% pos_template = 3*(imgw + hgap) + groupgap
+\node[label_node, color=blue!70!black] at ({(3.5*\imgw + 3*\hgap + \groupgap)*1cm - 0.25cm}, 0.3cm) {Template};
+
+% Furthest : milieu de l'image 6 (index 1 du second bloc) -> pos_furthest_start + 1.5*imgw + hgap
+% pos_furthest_start = 4*imgw + 3*hgap + 2*groupgap
+\node[label_node] at ({(5.5*\imgw + 4*\hgap + 2*\groupgap)*1cm - 0.25cm}, 0.3cm) {Furthest};
+
+% 3. Boucle principale
+\foreach \display/\file [count=\r] in {
+    Total/total, 
+    Layer 1/layer_1, 
+    Layer 2/layer_2, 
+    Layer 3/layer_3, 
+    Layer 4/layer_4, 
+    Layer 5/layer_5%
+} {
+    \pgfmathsetmacro{\ypos}{-(\r-1) * (\imgh + \vgap)}
     
-    \vspace{0.5cm} 
+    % Titre de ligne
+    \node[label_node, rotate=90, anchor=center] at (-0.3cm, {\ypos cm - (\imgh/2)*1cm}) {{\display}};
+
+    % --- BLOC GAUCHE : 3 Closest ---
+    \foreach \i in {1, 2, 3} {
+        \pgfmathsetmacro{\xpos}{(\i-1) * (\imgw + \hgap)}
+        \node[image_node] at (\xpos cm, \ypos cm) {
+            \includegraphics[width=\imgw cm, height=\imgh cm, keepaspectratio]{Figures/min_max_distance_images/latent_distance_closest_\file_\i.png}
+        };
+    }
     
-    % --- Outliers (Max Distance) ---
-    \begin{subfigure}{0.32\textwidth}
-        \includegraphics[width=\linewidth]{Figures/sub-3150_ses-20101109_r0001_ppmixt1_max_total_t1_distance_to_gaussian_256x256_slice138.png}
-        \caption{Max Distance (Total)}
-        \label{fig:max_total}
-    \end{subfigure}\hfill
-    \begin{subfigure}{0.32\textwidth}
-        \includegraphics[width=\linewidth]{Figures/sub-3318_ses-20120627_r0001_ppmixt1_max_distL0_t1_distance_to_gaussian_256x256_slice138.png}
-        \caption{Max Distance (Level 0)}
-        \label{fig:max_L0}
-    \end{subfigure}\hfill
-    \begin{subfigure}{0.32\textwidth}
-        \includegraphics[width=\linewidth]{Figures/sub-3586_ses-20160810_r0001_ppmixt1_max_distL5_t1_distance_to_gaussian_256x256_slice138.png}
-        \caption{Max Distance (Level 5)}
-        \label{fig:max_L5}
-    \end{subfigure}
-    
-    \caption{Visualization of the learned latent space across the cohort. The top
-    row compares the standard population template with the mean image generated by
-    the model. The subsequent rows illustrate the distance to the Gaussian prior
-    distribution, identifying the most typical cases (minimum distance) and
-    anomalies (maximum distance). Within the hierarchical Glow architecture,
-    high-frequency details such as tissue texture and noise tend to be encoded in
-    the lower levels whereas low-frequency morphological variations tend to be
-    encoded in the higher levels. Consequently, evaluating distances specifically at
-    $L=0$ isolates intensity and texture anomalies, while evaluating at $L=5$ highlights
-    macroscopic structural deviations.}
+    % --- CENTRE : Le Template ---
+    \pgfmathsetmacro{\xposT}{3 * (\imgw + \hgap) + \groupgap}
+    \node[image_node, draw=blue!30, line width=1pt] at (\xposT cm, \ypos cm) {
+        \includegraphics[width=\imgw cm, height=\imgh cm, keepaspectratio]{Figures/T_templateT1_slice115.png}
+    };
 
-    \label{fig:latent_space_distances}
-\end{figure}
-
-
-
+    % --- BLOC DROIT : 3 Furthest ---
+    \foreach \i in {1, 2, 3} {
+        \pgfmathsetmacro{\xpos}{(\i-1) * (\imgw + \hgap) + (4*\imgw + 3*\hgap) + 2*\groupgap}
+        \node[image_node] at (\xpos cm, \ypos cm) {
+            \includegraphics[width=\imgw cm, height=\imgh cm, keepaspectratio]{Figures/min_max_distance_images/latent_distance_furthest_\file_\i.png}
+        };
+    }
+}
+\end{tikzpicture}
+\caption{Visualisation des distances latentes pour LAMNr-Glow. Le template central (axial slice 115) sert de référence. À gauche, les trois sujets les plus proches ; à droite, les trois sujets les plus éloignés (outliers), illustrant la variance capturée par chaque couche du modèle.}
+\label{fig:latent_distances_centered}
+\end{figure*}
 
 
 
