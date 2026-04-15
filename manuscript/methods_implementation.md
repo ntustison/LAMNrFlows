@@ -64,8 +64,8 @@ certain background modes.
 
 For tabular flows, we apply a small additive “jitter” noise to the features,
 treated as dequantization [@ho2019flowpp] rather than biological variation. The
-amplitude of this jitter is managed by a scalar schedule $\alpha(t)$—supporting
-linear, cosine, or exponential decay—to regularize the flows and prevent
+amplitude of this jitter is managed by a scalar schedule $\alpha(t)$, supporting
+linear, cosine, or exponential decay, to regularize the flows and prevent
 overfitting to discrete patterns or exact repeated rows in large cohorts. In
 addition, certain views can undergo a per-feature marginal transform prior to
 normalization, such as an elementwise $\operatorname{asinh}(x)$ for heavy-tailed
