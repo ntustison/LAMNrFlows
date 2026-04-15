@@ -236,16 +236,25 @@ Training evolution samples (100000 iterations)
 </details>
 
 
-
-<!--
-
 <details>
-<summary>Multimodal brain lifespan data with augmentation</summary>
+<summary>Template comparison</summary>
 
-
+<p align="center">
+  <img src="manuscript/Figures/T_templateT1_slice115.png" alt="ANTsX T1" width="30%">
+  <img src="manuscript/Figures/T_templateT2Flair_slice115.png" alt="ANTsX FLAIR" width="30%">
+  <img src="manuscript/Figures/T_templateFA_slice115.png" alt="ANTsX FA" width="30%"><br>
+  ANTsX multimodal templates
+  <br>
+  <img src="manuscript/Figures/L_templateT1.png" alt="LAMNr flows T1" width="30%">
+  <img src="manuscript/Figures/L_templateT2Flair.png" alt="LAMNr flows FLAIR" width="30%">
+  <img src="manuscript/Figures/L_templateFA.png" alt="LAMNr flows FA" width="30%"><br>
+  LAMNr flows multimodal templates
+</p>
 
 </details>
 
+
+<!--
 
 <details>
 <summary>Output:  Generative sampling</summary>
