@@ -82,8 +82,8 @@ latents. This is particularly useful for multiview alignment, as it allows for
 the selection of a common rank $r$ across disparate views. To further refine the
 alignment process, the framework includes an optional pre-training screening
 pass based on Canonical Correlation Analysis (CCA) or HSIC. This screening
-evaluates cross-view dependence to determine if alignment constraints—such as
-VICReg, HSIC, or InfoNCE—should be active for specific view pairs, thereby
+evaluates cross-view dependence to determine if alignment constraints (e.g.,
+VICReg, HSIC, or InfoNCE) should be active for specific view pairs, thereby
 preventing the model from over-constraining the flows and blurring view-specific
 information. Numerical stability across these operations is ensured through
 bounded coupling scales and ActNorm layers, providing a robust foundation for
