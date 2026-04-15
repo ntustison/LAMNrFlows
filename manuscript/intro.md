@@ -254,6 +254,6 @@ Key contributions of this work include:
    ANTsTorch) for robust data handling and auxiliary functionality.
 
 Evaluations on multimodal MRI and multiview IDP datasets demonstrate that LAMNr
-flows improve calibrated likelihoods and downstream prediction while providing a
+flows improve calibrated likelihoods and prediction while providing a
 single, exact framework for likelihood-calibrated multiview analysis.
 

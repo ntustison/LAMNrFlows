@@ -6,24 +6,24 @@
 
 ### Image Data and Preprocessing
 
+
 Transitioning from tabular to image data within the LAMNr Flows context
-introduces significant computational challenges, particularly with the Glow
-architecture which, unlike standard CNNs, requires storing all intermediate
-activations to compute exact gradients [@Gomez2017RevNet;@kingma2018glow]. This
-requirement quickly saturates the VRAM (Video RAM), or memory, of the graphics
-card. This memory bottleneck is exacerbated when moving from 2D to 3D.  For
+introduces significant computational challenges.  The Glow architecture requires
+storing all intermediate activations to compute exact gradients
+[@kingma2018glow] which quickly saturates the VRAM (Video RAM), or memory, of
+the graphics card. This memory bottleneck is particularly acute in 3D.  For
 instance, while a 2D slice at a standard resolution of $256^2$ contains 65,536
-pixels, a corresponding 3D volume exceeds 16 million voxels, constituting a
-256-fold increase in unit count. On high-capacity hardware (e.g., the NVIDIA RTX
-A6000 48 GB utilized here), processing volumes even at reduced resolutions like
-$48^3$ or $64^3$ necessitates strict architectural compromises, including
-reduced hidden channels and micro-batch sizes, to prevent memory overflow.
-Consequently, we adopt a dual organizational approach which utilizes
-high-resolution 2D slices as a practical sandbox for visualizing the geometric
-properties of the framework, while demonstrating that 3D LAMNr flows remain
-robust and biologically informative even at lower resolutions. These constraints
-are primarily a function of current hardware availability, as the software
-framework is currently designed to scale with future computational resources.
+pixels, a corresponding 3D volume exceeds 16 million voxels. On high-capacity
+hardware (e.g., the NVIDIA RTX A6000 48 GB utilized here), processing volumes
+even at reduced resolutions like $48^3$ or $64^3$ necessitates strict
+architectural compromises, including reduced hidden channels and micro-batch
+sizes, to prevent memory overflow. Consequently, we adopt a dual organizational
+approach which utilizes high-resolution 2D slices as a practical sandbox for
+visualizing the geometric properties of the framework, while demonstrating that
+3D LAMNr flows remain robust and biologically informative even at lower
+resolutions. These constraints are primarily a function of current hardware
+availability, as the software framework is currently designed to scale with
+future computational resources.
 
 We use four data cohorts in the experiments below:  the Dallas Life Brain Study
 [@ds004856:1.3.0;@Park:2025aa], the NIMH Healthy Research Volunteer Dataset
@@ -166,14 +166,14 @@ calculation of Mahalanobis or Euclidean distances (``calc-distance``).
 
 ### Visualizing LAMNr Flows-based Deep Computational Anatomy
 
-Using the 3-view model (2D) trained on the DLBS data, we visually demonstrate
-multiple DCA-based applications of the LAMNr flows framework.  These include
-the population template, generative sampling, latent distance calculations for
-biological inference, cross-modal imputation, and latent-based image 
-interpolation.
+Using the 3-view model (2D) trained on the DLBS data, we demonstrate multiple
+applications of the LAMNr flows framework within the context of Deep
+Computational Anatomy (DCA). LAMNr flows provide a probabilistic,
+likelihood-based alternative to traditional diffeomorphometry (e.g., LDDMM),
+allowing for direct synthesis and manipulation of anatomical manifolds.
 
 __LAMNr Flows-based population template.__ In the context of the learned data
-manifold, the Fréchet mean of the anatomical distribution can be efficiently
+manifold, the Fréchet mean of the anatomical distribution is efficiently
 approximated by decoding the origin ($z=0$) of the latent space. By passing the
 zero-vector of the isotropic Gaussian prior through the inverse flow, $x =
 f^{-1}_\theta(0)$, we synthesize a canonical representation that captures the
@@ -364,8 +364,8 @@ details.
       \def\angS{35}  % Source à droite
 
       % Arc représentant la variété de haute probabilité (Isocontour Gaussien)
-      \draw[dashed, gray!80, thick] (mu) + (20:\R) arc (20:160:\R);
-      \node[gray!80, align=center] at (0, 3.25) {High-Probability Manifold\\[-0.5ex] \small ($\|z - \mu\| \approx \text{const}$)};
+      \draw[dashed, darkgray!80, thick] (mu) + (20:\R) arc (20:160:\R);
+      \node[darkgray!80, align=center] at (0, 3.25) {High-Probability Manifold\\[-0.5ex] \small ($\|z - \mu\| \approx \text{const}$)};
 
       % Définition des coordonnées vectorielles
       \coordinate (ZT) at (\angT:\R);
@@ -379,7 +379,7 @@ details.
       \draw[->, thick, red, dotted] (ZT) -- (ZS);
       \coordinate (L50) at (0, {4.5*sin(35)}); % Point central du Lerp
       \fill[red] (L50) circle (2pt);
-      \node[red, align=center, below=0.1cm of L50] {Lerp\\ \small (Variance Collapse \\ \& Out-of-Distribution)};
+      \node[red, align=center, below=0.1cm of L50] {Lerp\\ \small (Variance Collapse)};
 
       % Arc d'interpolation Sphérique (Slerp)
       \draw[->, ultra thick, green!60!black] (mu) + (\angT:\R) arc (\angT:\angS:\R);
@@ -398,11 +398,11 @@ details.
       \fill[orange] (ZS) circle (3pt);
 
       % Lignes de projection allongées pour s'adapter au nouvel espacement (y=6.8 au lieu de 4.3)
-      \draw[dashed, blue!50, ->] (ZT) to[out=90, in=-90] (-8, 6.5);
-      \draw[dashed, gray!50, ->] (P25) to[out=90, in=-90] (-4, 6.5);
-      \draw[dashed, gray!50, ->] (P50) to[out=90, in=-90] (0, 6.5);
-      \draw[dashed, gray!50, ->] (P75) to[out=90, in=-90] (4, 6.5);
-      \draw[dashed, orange!50, ->] (ZS) to[out=90, in=-90] (8, 6.5);
+      \draw[dashed, thick, blue!50, ->] (ZT) to[out=90, in=-90] (-8, 6.5);
+      \draw[dashed, thick, darkgray!50, ->] (P25) to[out=90, in=-90] (-4, 6.5);
+      \draw[dashed, thick, darkgray!50, ->] (P50) to[out=90, in=-90] (0, 6.5);
+      \draw[dashed, thick, darkgray!50, ->] (P75) to[out=90, in=-90] (4, 6.5);
+      \draw[dashed, thick, orange!50, ->] (ZS) to[out=90, in=-90] (8, 6.5);
 
   \end{scope}  
 \end{tikzpicture}
@@ -412,8 +412,8 @@ cohort (second row).  Model training used only DLBS Wave 1 data (T1-w, FLAIR,
 FA).  (Top) The generated morphological transition between a source image
 ($t=1.0$) and a target ($t=0.0$) multimodal images (T1-w, FLAIR).  Interpolation
 DLBS data (Wave 2) included the source image (Subject 1225, age 93) and target
-image (Subject 612, age 25). BraTS-Reg is demonstrated using pre and post-
-resection T1-w and FLAIR images from Subject 5. (Bottom) A geometric
+image (Subject 612, age 25). BraTS-Reg is demonstrated using pre- and 
+post-resection T1-w and FLAIR images from Subject 5. (Bottom) A geometric
 representation of the joint latent space. The empirical distribution of the
 training cohort is centered around $\mu$. Standard linear interpolation (Lerp,
 dotted red line) cuts through the interior of the latent hypersphere, causing a
@@ -427,10 +427,10 @@ high-probability manifold.}
 
 __Cross-modal imputation via Conditional Gaussian modeling.__ Missing modalities
 are synthesized by encoding the available observed images to the latent space,
-$z_O = f^{(O)}(X^{(O)})$, and computing the exact conditional expectation of the
+$z_O = f^{(O)}(\mathcal{X}^{(O)})$, and computing the exact conditional expectation of the
 unobserved latent vectors, $\mu_{U|O}$, under the learned joint Gaussian prior.
 Projecting this optimal estimate through the target modalities' inverse flows,
-$\hat{X}^{(U)} = (f^{(U)})^{-1}(\mu_{U|O})$, yields a high-fidelity imputation
+$\hat{\mathcal{X}}^{(U)} = (f^{(U)})^{-1}(\mu_{U|O})$, yields a high-fidelity imputation
 that guarantees mathematical consistency with the population's cross-view
 dependencies. Crucially, because the joint prior models the full multi-view
 latent space simultaneously, this formulation is inherently flexible: it
@@ -442,8 +442,8 @@ single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
 
 \begin{figure}[!htbp]
 \centering
-\resizebox{\linewidth}{!}{%
-\begin{tikzpicture}[>=latex, node distance=2cm, font=\sffamily]
+\resizebox{0.9\linewidth}{!}{%
+\begin{tikzpicture}[>=latex, node distance=2cm]
 
   % --- CORE FLOW COMPONENTS ---
   
@@ -451,13 +451,13 @@ single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
   \node (x1) at (0,0) {\textbf{Observed} ($\mathcal{X}$)};
   
   % Encoder
-  \node[draw, fill=blue!10, minimum height=1.2cm, minimum width=1.5cm, align=center] (enc) at (2.5,0) {$f_{\theta}$};
+  \node[draw, fill=blue!10, minimum height=1.2cm, minimum width=1.5cm, align=center] (enc) at (2.5,0) {$f^{(O)}_{\theta}$};
   \node[text=blue, align=center, font=\scriptsize] at (2.5, -0.9) {Bijective\\Flow $\leftrightarrow$};
 
   % Observed Latent Vector
   \node[text=blue, font=\bfseries] (zO) at (4.5,0) {$z_O$};
   
-  % Conditioning Box (Woodbury)
+  % Conditioning Box
   \node[draw, rounded corners, fill=gray!10, text width=5.cm, align=center, minimum height=2.5cm, inner sep=10pt] (cond) at (8,0) {
     \textbf{Latent Gaussian}\\
     \textbf{Conditioning}\\[0.3cm]
@@ -466,11 +466,11 @@ single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
   };
   
   % Imputed Latent Vector
-  \node[text=orange, font=\bfseries] (zU) at (11.5,0) {$\tilde{z}_U$};
+  \node[text=red, font=\bfseries] (zU) at (11.5,0) {$\tilde{z}_U$};
   
   % Decoder
-  \node[draw, fill=orange!10, minimum height=1.2cm, minimum width=1.5cm, align=center] (dec) at (13.5,0) {$f_\theta^{-1}$};
-  \node[text=orange, align=center, font=\scriptsize] at (13.5, -0.9) {Bijective\\Flow $\leftrightarrow$};
+  \node[draw, fill=red!10, minimum height=1.2cm, minimum width=1.5cm, align=center] (dec) at (13.5,0) {$(f^{(U)}_\theta)^{-1}$};
+  \node[text=red, align=center, font=\scriptsize] at (13.5, -0.9) {Bijective\\Flow $\leftrightarrow$};
 
   % Output: FA
   \node (x2) at (16,0) {\textbf{Imputed} ($\hat{\mathcal{X}}$)};
@@ -588,7 +588,7 @@ single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
   \draw[->, thick, orange] (dec) -- (x2);
   
   % Population Priors
-  \node[align=center] (prior) at (8, 3.2) {Population Priors\\($\mu$, Low-Rank $\Sigma$)};
+  \node[align=center] (prior) at (8, 3.2) {āopulation Priors\\($\mu$, Low-Rank $\Sigma$)};
   \draw[->, dashed, thick, gray] (prior) -- (cond);
 
   % Connection lines from images to nodes
@@ -605,16 +605,13 @@ single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
 approach available through the LAMNr flows framework.  
 Observed input features $\mathcal{X}$ are mapped to the latent representation
 $z_O$ through the learned bijective flow $f_\theta$. Imputation of missing
-modalities is performed via latent Gaussian conditioning $\mu_{U|O}$, anchored
-by population-level priors ($\mu$, low-rank $\Sigma$). The covariance inversion
-is efficiently computed in a reduced subspace using the Woodbury matrix identity
-to ensure scalability for large-scale inputs. The target image
-$\hat{\mathcal{X}}$ is synthesized by projecting the imputed latent vector
+modalities is performed via latent Gaussian conditioning modeling. The target
+image $\hat{\mathcal{X}}$ is synthesized by projecting the imputed latent vector
 $\tilde{z}_U$ back to the data space via the inverse flow $f_\theta^{-1}$.
-(Bottom) Performance is demonstrated across three subjects (denoted as 00, 01,
-02) under varying observational constraints. (Row 1) Synthesis of Fractional
-Anisotropy (FA) maps from observed T1-weighted inputs.  (Row 2) Joint
-reconstruction of T1-weighted scans from observed FLAIR and FA modalities.  (Row
+(Bottom) Performance is demonstrated across three subjects under varying
+observational constraints. (Row 1) Synthesis of Fractional Anisotropy (FA) maps
+from observed T1-weighted inputs.  (Row 2) Joint reconstruction of T1-weighted
+scans from observed FLAIR and FA modalities.  (Row
 3) Simultaneous multi-modal imputation of FLAIR and FA from a single observed T1
 input.}
 \label{fig:imputation}
@@ -636,7 +633,7 @@ displacement on the hypersphere, this metric respects the spherical geometry of
 the isotropic Gaussian prior, ensuring that anatomical transitions are evaluated
 along the high-density manifold. These combined metrics yield a rigorous,
 variance-weighted framework for anomaly detection and longitudinal assessment.
-Figures \ref{fig:latent_space_distances}.  Also, see ``lamnr_glow_tool_2/3d.py
+See Figure \ref{fig:latent_space_distances}.  Also, see ``lamnr_glow_tool_2/3d.py
 calc-distance`` for more details.
 
 
@@ -703,8 +700,13 @@ calc-distance`` for more details.
     }
 }
 \end{tikzpicture}
-\caption{Visualisation des distances latentes pour LAMNr-Glow. Le template central (axial slice 115) sert de référence. À gauche, les trois sujets les plus proches ; à droite, les trois sujets les plus éloignés (outliers), illustrant la variance capturée par chaque couche du modèle.}
-\label{fig:latent_distances_centered}
+\caption{Visualization of latent space distance (cf Equation \ref{eq:geo_dist})
+across the DLBS Wave 2 cohort with respect to the ANTsX T1-w template (cf Figure
+\ref{fig:frechet_mean}).  We calculate the total latent space distance and the
+distance for each hierarchical Glow layer and render the closest images (left) 
+and the furthest images (right) centralizing the template as a visual reference
+point.}
+\label{fig:latent_space_distances}
 \end{figure*}
 
 

@@ -267,13 +267,13 @@ as dimensionality increases, probability mass moves away from concentration at
 the origin. Instead, the volume of the space grows exponentially with distance
 from the center, causing the vast majority of the mass to concentrate within a
 narrow spherical shell of radius $\approx \sqrt{d}$ (i.e., the "soap bubble"
-effect[^blogpost]), a consequence of the Gaussian Annulus Theorem. This region
-is often referred to as the typical set [@vershynin2018high;
-@blum2020foundations] . Consequently, the latent origin $z=0$ is a highly
-atypical point containing near-zero probability mass. The inverse mapping
-$f^{-1}(0)$ must therefore be understood strictly as a barycentric geometric
-anchor representing a central axis of symmetry for the learned bijection, rather
-than a statistically representative anatomical mode.  
+effect[^blogpost]), a consequence of the Gaussian Annulus Theorem
+[@blum2020foundations], often referred to as the typical set
+[@vershynin2018high; @blum2020foundations] . Consequently, the latent origin
+$z=0$ is a highly atypical point containing near-zero probability mass. The
+inverse mapping $f^{-1}(0)$ must therefore be understood strictly as a
+barycentric geometric anchor representing a central axis of symmetry for the
+learned bijection, rather than a statistically representative anatomical mode.  
 
 [^blogpost]: https://www.inference.vc/high-dimensional-gaussian-distributions-are-soap-bubble/
 
@@ -319,6 +319,7 @@ The geodesic distance effectively isolates the directional components of the
 vectors:
 
 \begin{equation}
+\label{eq:geo_dist}
 d_{geo}(z_1, z_2) = \arccos\left( \frac{z_1 \cdot z_2}{|z_1|_2|z_2|_2} \right)
 \end{equation}
 

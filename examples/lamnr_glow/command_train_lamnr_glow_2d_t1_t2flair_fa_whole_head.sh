@@ -26,14 +26,14 @@ LR_DECAY_GAMMA=0.5
 LR_DECAY_STEPS=80000
 
 # --- CONFIG MULTI-GPU ROBUSTE ---
-BATCH=25             
-GRAD_ACCUM=5         # Batch effectif = 128
+BATCH=20           
+GRAD_ACCUM=6         
 NUM_WORKERS=4        
-DEVICES="cuda:1"
+DEVICES="cuda:0"
 PRECISION="float"    
 # --------------------------------
 
-OUTDIR="runs2d/dlbs_t1_t2flair_fa_${H}x${W}_K${K}_L${L}_HC${hidden}"
+OUTDIR="runs2d/dlbs_t1_t2flair_fa_${H}x${W}_K${K}_L${L}_HC${hidden}_Round2"
 
 PLATEAU_FACTOR=0.999999
 PLATEAU_PATIENCE=100000
@@ -42,20 +42,20 @@ PLATEAU_COOLDOWN=5
 
 # alignment + screening (AJUSTÉ POUR 3 MODALITÉS)
 ALIGN="vicreg"
-ALIGN_WEIGHT=0.01
-ALIGN_VICREG_INV=25.0
-ALIGN_VICREG_VAR=25.0
-ALIGN_VICREG_GAMMA="1.0 2.0 1.0"
-ALIGN_VICREG_COV=10.0
+ALIGN_WEIGHT=0.005
+ALIGN_VICREG_INV=10.0
+ALIGN_VICREG_VAR=10.0
+ALIGN_VICREG_GAMMA="1.0 1.0 1.0"
+ALIGN_VICREG_COV=5.0
 
 ALIGN_WARMUP=500
 
 SCREEN_METHOD="cca"
-SCREEN_FRAC=0.2       # Réduit pour 3 vues (anciennement 0.5)
+SCREEN_FRAC=0.5
 SCREEN_WARMUP=1000
 SCREEN_REFRESH=5000
 CCA_RIDGE=1e-3
-PREFILTER_FRAC=0.3    # Réduit pour 3 vues (anciennement 0.5)
+PREFILTER_FRAC=0.5
 
 # sampling / eval
 SAMPLE_TEMP=0.8

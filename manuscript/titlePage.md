@@ -39,7 +39,7 @@ $^\dagger$ J.C.G. and J.R.S. are co-senior authors.
 \vspace{0.2 cm}
 
 \Letter$\,$ Corresponding author: \
-Nicholas J. Tustison, DSc \
+Nick Tustison, DSc \
 Department of Radiology and Medical Imaging \
 University of Virginia \
 ntustison@virginia.edu 
