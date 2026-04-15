@@ -224,6 +224,7 @@ Visualization cycle (~20 seconds)
 </details>
 
 <details>
+Training evolution samples (100000 iterations)
 <summary>Training LAMNr flows model (2D, 3 views)</summary>
 
 * [OpenNeuro data](https://openneuro.org/datasets/ds004856) 
