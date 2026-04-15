@@ -588,7 +588,7 @@ single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
   \draw[->, thick, orange] (dec) -- (x2);
   
   % Population Priors
-  \node[align=center] (prior) at (8, 3.2) {āopulation Priors\\($\mu$, Low-Rank $\Sigma$)};
+  \node[align=center] (prior) at (8, 3.2) {Population Priors\\($\mu$, Low-Rank $\Sigma$)};
   \draw[->, dashed, thick, gray] (prior) -- (cond);
 
   % Connection lines from images to nodes
