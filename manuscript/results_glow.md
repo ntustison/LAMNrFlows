@@ -78,24 +78,24 @@ diffusion-weighted imaging using Dipy [@dipy2014].
     \begin{tabular}{c@{\hspace{2mm}}c@{\hspace{1mm}}c@{\hspace{1mm}}c}
         {} & {\bf View 1: T1-w} & {\bf View 2: FLAIR} & {\bf View 3: FA} \\[2mm] % Espace vertical
         \rotatebox[origin=c]{90}{\textbf{25000 iterations}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view0_it025000_to01.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view1_it025000_to01.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view2_it025000_to01.png}} \\
+        \raisebox{-0.5\height}{\includegraphics[width=0.25\linewidth]{Figures/samples_view0_it025000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.25\linewidth]{Figures/samples_view1_it025000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.25\linewidth]{Figures/samples_view2_it025000_to01.png}} \\
         \vspace{2mm} \\
         \rotatebox[origin=c]{90}{\textbf{50000 iterations}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view0_it050000_to01.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view1_it050000_to01.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view2_it050000_to01.png}} \\
+        \raisebox{-0.5\height}{\includegraphics[width=0.25\linewidth]{Figures/samples_view0_it050000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.25\linewidth]{Figures/samples_view1_it050000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.25\linewidth]{Figures/samples_view2_it050000_to01.png}} \\
         \vspace{2mm} \\
         \rotatebox[origin=c]{90}{\textbf{75000 iterations}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view0_it075000_to01.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view1_it075000_to01.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view2_it075000_to01.png}} \\
+        \raisebox{-0.5\height}{\includegraphics[width=0.25\linewidth]{Figures/samples_view0_it075000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.25\linewidth]{Figures/samples_view1_it075000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.25\linewidth]{Figures/samples_view2_it075000_to01.png}} \\
         \vspace{2mm} \\
         \rotatebox[origin=c]{90}{\textbf{100000 iterations}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view0_it100000_to01.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view1_it100000_to01.png}} &
-        \raisebox{-0.5\height}{\includegraphics[width=0.31\linewidth]{Figures/samples_view2_it100000_to01.png}} \\
+        \raisebox{-0.5\height}{\includegraphics[width=0.25\linewidth]{Figures/samples_view0_it100000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.25\linewidth]{Figures/samples_view1_it100000_to01.png}} &
+        \raisebox{-0.5\height}{\includegraphics[width=0.25\linewidth]{Figures/samples_view2_it100000_to01.png}} \\
     \end{tabular}
 
     \caption{Generative samples drawn from the learned LAMNr flows model for the 3-view model 
@@ -203,7 +203,7 @@ more details.
     \end{tabular}
 
     \caption{Comparison of population Fréchet mean approximations. (Top) The standard
-    multivariate ANTsX template, constructed via traditional iterative diffeomorphic
+    multimodal ANTsX template, constructed via traditional iterative diffeomorphic
     registration, representing a geometric spatial average that preserves
     high-frequency structural details. (Bottom) The generative latent-means,
     $f_\theta^{-1}(0)$, obtained in a single forward pass. The visually smoother
