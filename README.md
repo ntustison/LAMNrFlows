@@ -243,13 +243,25 @@ Training evolution samples (100000 iterations)
   <img src="manuscript/Figures/T_templateT1_slice115.png" alt="ANTsX T1" width="30%">
   <img src="manuscript/Figures/T_templateT2Flair_slice115.png" alt="ANTsX FLAIR" width="30%">
   <img src="manuscript/Figures/T_templateFA_slice115.png" alt="ANTsX FA" width="30%"><br>
-  ANTsX multimodal templates
+  ANTsX multimodal template
   <br>
   <img src="manuscript/Figures/L_templateT1.png" alt="LAMNr flows T1" width="30%">
   <img src="manuscript/Figures/L_templateT2Flair.png" alt="LAMNr flows FLAIR" width="30%">
   <img src="manuscript/Figures/L_templateFA.png" alt="LAMNr flows FA" width="30%"><br>
-  LAMNr flows multimodal templates
+  LAMNr flows multimodal template
 </p>
+Comparison of population Fréchet mean approximations. (Top) The standard
+    multimodal ANTsX template, constructed via traditional iterative diffeomorphic
+    registration, representing a geometric spatial average that preserves
+    high-frequency structural details. (Bottom) The generative latent-means,
+    $f_\theta^{-1}(0)$, obtained in a single forward pass. The visually smoother
+    appearance of the flow-generated template is a direct consequence of
+    high-dimensional probabilistic modeling. As the exact mode of the latent
+    distribution, it averages out idiosyncratic, high-frequency anatomical
+    variations (such as specific cortical folding patterns) that do not strictly
+    persist across the cohort. Instead of producing a single typical sample from
+    the typical set, it models the macroscopic central morphological tendency and shared
+    structural signal of the dataset.
 
 </details>
 
