@@ -256,7 +256,7 @@ def _read_image_3d(path: Path, target_hwd: Optional[Tuple[int, int, int]] = None
                    img.spacing[1] / resize_factor,
                    img.spacing[2] / resize_factor)   
         
-        img = ants.resample_image(img, spacing, use_voxels=False, interp_type=1)
+        img = ants.resample_image(img, spacing, use_voxels=False, interp_type=0)
         img = ants.pad_or_crop_image_to_size(img, (H, W, D))
     
     # 3. Conversion Numpy -> PyTorch Tensor

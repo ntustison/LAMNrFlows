@@ -239,7 +239,7 @@ def resample_with_ants_spacing(x: torch.Tensor,
             except Exception:
                 img.spacing = (float(native_spacing[0]), float(native_spacing[1]))
             img_r = ants.resample_image(img, (float(target_spacing[0]), float(target_spacing[1])),
-                                        use_voxels=False, interp_type=1)
+                                        use_voxels=False, interp_type=0)
             xs.append(torch.from_numpy(img_r.numpy()).to(device=device, dtype=dtype))
         outs.append(torch.stack(xs, dim=0))
     y = torch.stack(outs, dim=1)  # (N,C,h,w)

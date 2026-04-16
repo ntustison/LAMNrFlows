@@ -1125,7 +1125,7 @@ def build_loaders_from_globs_3d(
         spacing = (img.spacing[0] / resize_factor, 
                    img.spacing[1] / resize_factor,
                    img.spacing[2] / resize_factor)   
-        img = ants.resample_image(img, spacing, use_voxels=False, interp_type=1)
+        img = ants.resample_image(img, spacing, use_voxels=False, interp_type=0)
         img = ants.pad_or_crop_image_to_size(img, (H, W, D))
         return img
 
