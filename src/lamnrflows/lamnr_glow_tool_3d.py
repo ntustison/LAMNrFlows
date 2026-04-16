@@ -256,7 +256,7 @@ def _read_image_3d(path: Path, target_hwd: Optional[Tuple[int, int, int]] = None
                    img.spacing[1] / resize_factor,
                    img.spacing[2] / resize_factor)   
         
-        img = ants.resample_image(img, spacing, use_voxels=False, interp_type=0)
+        img = ants.resample_image(img, spacing, use_voxels=False, interp_type=1)
         img = ants.pad_or_crop_image_to_size(img, (H, W, D))
     
     # 3. Conversion Numpy -> PyTorch Tensor
@@ -269,10 +269,9 @@ def _read_image_3d(path: Path, target_hwd: Optional[Tuple[int, int, int]] = None
         arr = np.transpose(arr, (3, 0, 1, 2)) # (C, H, W, D)
         
     t = torch.from_numpy(arr).float()
-    t = t.unsqueeze(0) # Ajout de la dimension Batch -> (1, C, H, W, D)
+    # Ajout de la dimension Batch -> (1, C, H, W, D)
+    t = to01(t.unsqueeze(0), eps=1e-5, winsorize=False)
 
-    t = (t - t.min()) / (t.max() - t.min() + 1e-8)
-    
     return t
 
 def save_mid_slice_png(x: torch.Tensor, out_path: Path, slice_axis: int = 2):
@@ -1155,7 +1154,7 @@ def main_recon_temperature(argv=None):
 
 def main_calc_distance(argv=None):
     """
-    Calcule la distance Euclidienne (L2) Standardisée entre les latents d'une image 3D et une référence.
+    Calcule la distance Euclidienne, geodesique, ou Mahalanobis.
     Référence par défaut : Moyenne Gaussienne (Mu) extraite du modèle .npz.
     Référence optionnelle : Une image cible (--target-image).
     """

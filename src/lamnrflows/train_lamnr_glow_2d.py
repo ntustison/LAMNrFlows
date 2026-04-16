@@ -895,7 +895,7 @@ def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch
                                 float(W)/float(slc.shape[1]))
             spacing = (slc.spacing[0] / resize_factor, 
                        slc.spacing[1] / resize_factor)   
-            slc = ants.resample_image(slc, spacing, use_voxels=False, interp_type=0)
+            slc = ants.resample_image(slc, spacing, use_voxels=False, interp_type=1)
             slc = ants.pad_or_crop_image_to_size(slc, (H, W))
             return slc
         
