@@ -276,7 +276,7 @@ Training evolution samples (100000 iterations)
 
 <p align="center">
 <img src="manuscript/Figures/training_evolution_hippo_views.gif" alt="training evolution" width="75%">
-<\p>
+</p>
 
 </details>
 
