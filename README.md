@@ -10,7 +10,7 @@ Latent-aligned multiview normalizing (LAMNr) flows leverage exact-likelihood, bi
 
 ***
 
-### RealNVP-based LAMNr flows 
+### RealNVP-based (tabulaire) LAMNr flows 
 
 <details>
 <summary>Network architecture</summary>
@@ -90,7 +90,7 @@ indicated by intervals that do not cross the zero-reference line.
 
 ***
 
-### Glow-based LAMNr flows
+### Glow-based (image) LAMNr flows
 
 <details>
 <summary>Network architecture/configuration</summary>
@@ -264,52 +264,6 @@ Comparison of population Fréchet mean approximations. (Top) The standard
     structural signal of the dataset.
 
 </details>
-
-
-<!--
-
-<details>
-<summary>Output:  Generative sampling</summary>
-
-  
-</details>
-
-<details>
-<summary>Output:  Fréchet mean approximation</summary>
-
-  
-</details>
-
-<details>
-<summary>Output:  Cohort template</summary>
-
-  
-</details>
-
-<details>
-<summary>Output:  Latent distances for biological assesment</summary>
-
-  
-</details>
-
-<details>
-<summary>Output:  Cross-modal imputation via Conditional Gaussian modeling.</summary>
-
-  
-</details>
-
-<details>
-<summary>Output:  Pairwise image interpolation.</summary>
-
-  
-</details>
-
-<details>
-<summary>Output:  Temperature scaling.</summary>
-
-  
-</details>
--->
 
 ***
 
