@@ -228,20 +228,16 @@ Visualization cycle (~20 seconds)
 </details>
 
 <details>
-Training evolution samples (100000 iterations)
-<summary>Training LAMNr flows model (2D, 3 views)</summary>
+<summary>LAMNr flows: whole head, 2D, axial, 3 views--T1/FLAIR/FA</summary>
 
 * [OpenNeuro data](https://openneuro.org/datasets/ds004856) 
 * [Command script](https://github.com/ntustison/LAMNrFlows/blob/main/examples/lamnr_glow/2D/command_train_lamnr_glow_2d_t1_t2flair_fa_whole_head.sh)
 * [Trainer](https://github.com/ntustison/LAMNrFlows/blob/main/src/lamnrflows/train_lamnr_glow_2d.py)
 
+Training evolution samples (100000 iterations)
 <img src="manuscript/Figures/training_evolution_dlbs_2d_views.gif" alt="training evolution" width="100%">
 
-</details>
-
-
-<details>
-<summary>Template comparison</summary>
+Template comparison
 
 <p align="center">
   <img src="manuscript/Figures/T_templateT1_slice115.png" alt="ANTsX T1" width="25%">
@@ -268,6 +264,18 @@ Comparison of population Fréchet mean approximations. (Top) The standard
     structural signal of the dataset.
 
 </details>
+
+
+<details>
+<summary>LAMNr flows: MTL, 3D, 2 views--T1/T2</summary>
+
+Training evolution samples (54000 iterations (so far))
+<p align="center">
+<img src="manuscript/Figures/training_evolution_hippo_views.gif" alt="training evolution" width="75%">
+</p>
+
+</details>
+
 
 ***
 
