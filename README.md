@@ -57,7 +57,7 @@ Latent-aligned multiview normalizing (LAMNr) flows leverage exact-likelihood, bi
 </details>
 
 <details>
-<summary>Single view, uniform --> diagonal Gaussian (toy example)</summary>
+<summary>Model:  single view, uniform --> diagonal Gaussian (toy example)</summary>
 
 <p align="center">
   <img src="examples/lamnr_tabular/Test_SimpleUniform/UniformSimulatedData/uniform_10000x4.png" alt="Input" width="75%"><br>
@@ -69,7 +69,7 @@ Latent-aligned multiview normalizing (LAMNr) flows leverage exact-likelihood, bi
 </details>
 
 <details>
-<summary>Multi-view NNHEmbed</summary>
+<summary>Model:  multi-view NNHEmbed</summary>
   
 Data from [*Joint representations from multi-view MRI-based learning support cognitive and functional performance domains*](https://www.medrxiv.org/content/10.1101/2025.09.27.25336706v2)
 
@@ -228,7 +228,7 @@ Visualization cycle (~20 seconds)
 </details>
 
 <details>
-<summary>LAMNr flows: whole head, 2D, axial, 3 views--T1/FLAIR/FA</summary>
+<summary>Model: whole head, 2D, axial, 3 views--T1/FLAIR/FA</summary>
 
 * [OpenNeuro data](https://openneuro.org/datasets/ds004856) 
 * [Command script](https://github.com/ntustison/LAMNrFlows/blob/main/examples/lamnr_glow/2D/command_train_lamnr_glow_2d_t1_t2flair_fa_whole_head.sh)
@@ -267,7 +267,7 @@ Comparison of population Fréchet mean approximations. (Top) The standard
 
 
 <details>
-<summary>LAMNr flows: MTL, 3D, 2 views--T1/T2</summary>
+<summary>Model: MTL, 3D, 2 views--T1/T2</summary>
 
 Training evolution samples (54000 iterations (so far))
 <p align="center">
