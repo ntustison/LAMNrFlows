@@ -1707,19 +1707,38 @@ def _lowrank_from_Xc(Xc: np.ndarray, rank: int, sigma2: float | str, extra_ridge
     N, D = Xc.shape
     rmax = min(D, max(1, N - 1))
     r = int(max(1, min(rank, rmax)))
-    Ux, Svals, Vt = np.linalg.svd(Xc, full_matrices=False)
-    eigs_all = (Svals ** 2) / max(1, (N - 1))
-    eig_r = eigs_all[:r].copy()
-    U = Vt[:r, :].T.copy()
+    
+    # 1. SVD Randomisée via PyTorch (Extrêmement rapide)
+    # Convertir en tenseur PyTorch
+    Xc_tensor = torch.tensor(Xc, dtype=torch.float32)
+    
+    # q=r force l'algorithme à ne chercher que les 'r' premières composantes (ici 256)
+    _, S_tensor, V_tensor = torch.svd_lowrank(Xc_tensor, q=r)
+    
+    Svals = S_tensor.numpy()
+    # torch.svd_lowrank retourne V avec la dimension (D, r)
+    # Cela correspond directement à la forme transposée dont nous avons besoin pour U_cov
+    U_cov = V_tensor.numpy().copy() 
+    
+    # 2. Calcul des valeurs propres pour les composantes principales
+    eig_r = (Svals ** 2) / max(1, (N - 1))
+    
+    # 3. Estimation du bruit résiduel (sigma2)
     if isinstance(sigma2, str) and sigma2.lower() == "auto":
-        if eigs_all.shape[0] > r:
-            sigma2_val = float(np.maximum(np.mean(eigs_all[r:]), 0.0))
-        else:
-            sigma2_val = 0.0
+        # Variance totale = somme des carrés des éléments de Xc divisée par (N-1)
+        total_variance = np.sum(Xc ** 2) / max(1, (N - 1))
+        explained_variance = np.sum(eig_r)
+        
+        # Le reste de la variance est attribué au bruit
+        residual_variance = max(0.0, total_variance - explained_variance)
+        num_remaining_eigs = min(N, D) - r
+        
+        sigma2_val = float(residual_variance / num_remaining_eigs) if num_remaining_eigs > 0 else 0.0
     else:
         sigma2_val = float(sigma2)
-    sigma2_val = float(max(0.0, sigma2_val)) + float(max(0.0, extra_ridge))
-    return {"type":"lowrank", "U": U, "eig": eig_r, "sigma2": sigma2_val}
+        
+    sigma2_val += extra_ridge
+    return {"type": "lowrank", "U": U_cov, "eig": eig_r, "sigma2": sigma2_val}
 
 def _lowrank_stats(sig: dict) -> dict:
     eig = np.asarray(sig.get("eig", []), dtype=float)
