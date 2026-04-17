@@ -12,24 +12,24 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # Total steps
 ITERATIONS=100000
 
-# Model / Data (3D)
-H=40; W=40; D=64               
-L=3; K=32; HIDDEN=128
+# Model / Data (3D T1)
+H=64; W=80; D=64               
+L=4; K=32; HIDDEN=96
 
 # --- CONFIG MULTI-GPU & VRAM ROBUSTE ---
-BATCH=8
+BATCH=5
 GRAD_ACCUM=8        # Batch effectif stable à 128
 NUM_WORKERS=4
 VAL_SAMPLES=32       # Évite le pic OOM lors de l'évaluation
-DEVICES="cuda:1"
+DEVICES="cuda:0"
 PRECISION="float"    
 # ---------------------------------------
 
-OUTDIR="runs3d/nimh_t1_t2_hippo_${H}x${W}x${D}_K${K}_L${L}_HC${HIDDEN}"
+OUTDIR="runs3d/dlbs_t1_${H}x${W}x${D}_K${K}_L${L}_HC${HIDDEN}"
 
 # Optimization
 LR=2.5e-5
-WARMUP=15000
+WARMUP=5000
 LR_DECAY_GAMMA=0.5
 LR_DECAY_STEPS=120000
 
@@ -38,30 +38,23 @@ PLATEAU_PATIENCE=100000
 PLATEAU_THRESHOLD=1e-3
 PLATEAU_COOLDOWN=5
 
-# Alignment + Screening (Ajusté pour 2 modalités)
+# Alignment (Désactivé car 1 seule vue T1)
 ALIGN="vicreg"
-ALIGN_WEIGHT=1.0
+ALIGN_WEIGHT=0.0
 ALIGN_VICREG_INV=25.0
 ALIGN_VICREG_VAR=25.0
 ALIGN_VICREG_GAMMA=1.0
 ALIGN_VICREG_COV=1.0
-
-SCREEN_METHOD="cca"
-SCREEN_FRAC=0.5  
-SCREEN_WARMUP=1000
-SCREEN_REFRESH=5000
-CCA_RIDGE=1e-3
-PREFILTER_FRAC=0.5 
 
 # Sampling / Eval
 SAMPLE_TEMP=1.0
 EVAL_INTERVAL=1000
 PLOT_INTERVAL=1000
 
-GRAD_CLIP=0.2
+GRAD_CLIP=1.0
 
 # Base distribution / Scale config
-SCALE_CAP=0.5
+SCALE_CAP=1.0
 GLOWBASE_MIN_LOG=-5.0
 GLOWBASE_MAX_LOG=5.0
 SCALE_MAP="tanh"
@@ -71,24 +64,21 @@ GLOWBASE_LOGSCALE_FACTOR=1.0
 
 AUG_STOP_STEP=$(( ITERATIONS * 4 / 5 ))
 
-AUG_PARAMS="noise_std:cos:0.05->0.02@${AUG_STOP_STEP},\
-sd_affine:cos:0.00->0.00@${AUG_STOP_STEP},\
-sd_deformation:linear:6.0->0.2@${AUG_STOP_STEP},\
+AUG_PARAMS="noise_std:cos:0.05->0.002@${AUG_STOP_STEP},\
+sd_affine:cos:0.05->0.005@${AUG_STOP_STEP},\
+sd_deformation:linear:12.0->0.2@${AUG_STOP_STEP},\
 sd_simulated_bias_field:cos:0.20->0.01@${AUG_STOP_STEP},\
 sd_histogram_warping:cos:0.04->0.002@${AUG_STOP_STEP}"
 
-DATA_ROOT="/home/ntustison/Data/ds005752/BIDSAlignedToTemplate/"
+DLBS_ROOT="/home/ntustison/Data/ds004856/BIDSAlignedToTemplate/"
 TRAINER="/home/ntustison/Pkg/LAMNrFlows/src/lamnrflows/train_lamnr_glow_3d.py"
 
-mapfile -t T1 < <(ls -1 ${DATA_ROOT}/sub-*/ses-*/anat/*T1w*left*.nii.gz | sort)
-mapfile -t T2 < <(ls -1 ${DATA_ROOT}/sub-*/ses-*/anat/*T2w*left*.nii.gz | sort)
+mapfile -t T1 < <(ls -1 ${DLBS_ROOT}/sub-*/ses-wave1/anat/*T1w.nii.gz | sort)
 
 echo "T1 Volumes trouvés: ${#T1[@]}"
-echo "T2 Volumes trouvés: ${#T2[@]}"
 
 python "${TRAINER}" \
   --view "${T1[@]}" \
-  --view "${T2[@]}" \
   --auto-resume \
   --H ${H} --W ${W} --D ${D} \
   --spatial-dims 3 \
@@ -115,9 +105,6 @@ python "${TRAINER}" \
   --vicreg-var "${ALIGN_VICREG_VAR}" \
   --vicreg-cov "${ALIGN_VICREG_COV}" \
   --vicreg-gamma "${ALIGN_VICREG_GAMMA}" \
-  --screen "${SCREEN_METHOD}" \
-  --screen-warmup "${SCREEN_WARMUP}" --screen-refresh "${SCREEN_REFRESH}" --screen-frac "${SCREEN_FRAC}" \
-  --cca-ridge "${CCA_RIDGE}" --prefilter-frac "${PREFILTER_FRAC}" \
   --scale-cap ${SCALE_CAP} \
   --glowbase-max-log ${GLOWBASE_MAX_LOG} --glowbase-min-log ${GLOWBASE_MIN_LOG} \
   --out-dir "${OUTDIR}" \
