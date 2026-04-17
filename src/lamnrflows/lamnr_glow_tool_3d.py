@@ -212,17 +212,22 @@ def to01(x: torch.Tensor, eps: float = 1e-8, winsorize: bool = True) -> torch.Te
     norm = (x - x_min) / (x_max - x_min + eps)
     return torch.clamp(norm, eps, 1.0 - eps)
 
-def _coerce_5d(x, target_hwd: Tuple[int,int,int]=None):
-    if not torch.is_tensor(x):
-        if isinstance(x, (list, tuple)): x = x[0]
-        else: raise RuntimeError(f"Unexpected output type: {type(x)}")
-    if x.ndim == 4: x = x.unsqueeze(0)
+def _coerce_5d(x, target_hwd=None):
+    """Garantit que la sortie est un tenseur 5D (B, C, H, W, D) float32."""
+    if isinstance(x, (list, tuple)):
+        x = x[-1] # Prendre la sortie finale du flux
+        
+    if x.ndim == 4:
+        x = x.unsqueeze(0) # Ajouter batch si manquant
+        
     x = x.float()
+    
     if target_hwd is not None:
-        ht, wt, dt = target_hwd
-        h0, w0, d0 = x.shape[-3], x.shape[-2], x.shape[-1]
-        if (h0, w0, d0) != (ht, wt, dt):
-            x = F.interpolate(x, size=(ht, wt, dt), mode="trilinear", align_corners=False)
+        Hc, Wc, Dc = target_hwd
+        # Vérifie les 3 dernières dimensions (spatiales)
+        if x.shape[-3:] != (Hc, Wc, Dc):
+            x = F.interpolate(x, size=(Hc, Wc, Dc), mode="trilinear", align_corners=False)
+
     return x
 
 def save_nifti(x: torch.Tensor, out_path: Path, spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0)):
@@ -289,6 +294,422 @@ def save_mid_slice_png(x: torch.Tensor, out_path: Path, slice_axis: int = 2):
     else: 
         raise ValueError(f"Invalid slice_axis {slice_axis}. Must be 0, 1, or 2.")    
     plt.imsave(str(out_path), slice_2d, cmap="gray", vmin=0.0, vmax=1.0)
+
+def _encode_latents(model, xb: torch.Tensor) -> List[torch.Tensor]:
+    """
+    Pousse un lot de volumes (5D) vers les latents multi-échelles z_list.
+    Input: xb (B, 1, D, H, W)
+    Output: Liste de tenseurs per-level
+    """
+    # S'assurer que le tenseur est au bon format pour la 3D
+    if xb.ndim != 5:
+        raise RuntimeError(f"Encodage 3D attend 5 dimensions, reçu {xb.ndim}")
+        
+    device_type = xb.device.type
+    # Désactiver l'autocast pour garantir la précision numérique des flows
+    with torch.no_grad(), torch.amp.autocast(device_type=device_type, enabled=False):
+        if hasattr(model, "inverse_and_log_det"):
+            z, _ = model.inverse_and_log_det(xb)
+        elif hasattr(model, "inverse"):
+            z, _ = model.inverse(xb)
+        else:
+            raise RuntimeError("Le modèle manque de mapping inverse (inverse_and_log_det).")
+            
+    return z if isinstance(z, (list, tuple)) else [z]
+
+def _decode_latents(model, z_list: List[torch.Tensor], target_hwd: Tuple[int, int, int]) -> torch.Tensor:
+    """Décode une liste de latents multi-échelles vers l'espace image 3D."""
+    if not isinstance(z_list, (list, tuple)):
+        z_list = [z_list]
+        
+    device = z_list[0].device
+    with torch.no_grad(), torch.amp.autocast(device_type=device.type, enabled=False):
+        if hasattr(model, "forward_and_log_det"):
+            xh, _ = model.forward_and_log_det(z_list)
+        else:
+            raise RuntimeError("Le modèle n'expose pas forward_and_log_det; décodage impossible.")
+            
+    return _coerce_5d(xh, target_hwd=target_hwd)
+
+def _edit_latents_to_mean_for_view_3d(
+    z_list: List[torch.Tensor],
+    gauss_blob: Dict[str, Any],
+    view_name: str,
+    levels_to_edit: List[int],
+    mode: str = "mean",
+    pc_index: int = 0,
+    pc_scale: float = 2.0,
+    pc_center: str = "sample",
+    pc_k: int = 64,
+    pc_beta: float = 0.0
+) -> List[torch.Tensor]:
+    import numpy as np
+
+    if not levels_to_edit:
+        return z_list
+
+    views, dims_tbl, shapes_by_view, L = _validate_gauss_blob(gauss_blob)
+
+    try:
+        v_idx = views.index(view_name)
+    except ValueError:
+        raise RuntimeError(f"[recon] View '{view_name}' not found in Gaussian header {views}.")
+
+    mu_list = gauss_blob["mu"]
+    Sigma_list = gauss_blob.get("Sigma", None)
+
+    raw_slices = gauss_blob.get("level_view_slices", None)
+    level_view_slices: List[Dict[int, Tuple[int, int]]] = []
+    V = len(views)
+    if raw_slices is not None:
+        for l in range(L):
+            row = raw_slices[l]
+            if isinstance(row, dict):
+                row_int = {int(k): tuple(v) for k, v in row.items()}
+            else:
+                row_int = {vi: tuple(row[vi]) for vi in range(V)}
+            level_view_slices.append(row_int)
+    else:
+        for l in range(L):
+            off = 0
+            row_int = {}
+            for vi in range(V):
+                d = int(np.asarray(dims_tbl[vi][l]).item())
+                row_int[vi] = (off, off + d)
+                off += d
+            level_view_slices.append(row_int)
+
+    levels_set = {int(l) for l in levels_to_edit}
+    z_out: List[torch.Tensor] = []
+
+    for l, z_l in enumerate(z_list):
+        if l not in levels_set:
+            z_out.append(z_l)
+            continue
+
+        if z_l.ndim != 5:
+            raise RuntimeError(f"[recon] Expected 5D latent at level {l}, got shape {tuple(z_l.shape)}.")
+
+        # L'ordre spatial du modèle est H, W, D
+        B, C, H_z, W_z, D_z = z_l.shape 
+        # La forme sauvegardée par gauss-fit respecte l'ordre du modèle
+        Cg, Hg, Wg, Dg = shapes_by_view[v_idx][l]
+
+        a, b = level_view_slices[l][v_idx]
+
+        mu_level = np.asarray(mu_list[l], dtype=np.float64).ravel()
+        mu_view_flat = mu_level[a:b]
+        
+        # Adaptation 3D : (1, C, H, W, D)
+        mu_view = torch.as_tensor(mu_view_flat, dtype=z_l.dtype, device=z_l.device).view(1, C, H_z, W_z, D_z)
+
+        if mode == "mean":
+            z_l_edit = mu_view.expand(B, C, H_z, W_z, D_z)
+
+        elif mode == "zero":
+            z_l_edit = torch.zeros_like(z_l)
+
+        elif mode == "pc":
+            Sigma_l = Sigma_list[l] if isinstance(Sigma_list, (list, tuple)) else Sigma_list
+            Dv = C * H_z * W_z * D_z
+            
+            if isinstance(Sigma_l, dict) and Sigma_l.get("type") == "lowrank":
+                U = np.asarray(Sigma_l["U"], dtype=np.float64)
+                eig = np.asarray(Sigma_l["eig"], dtype=np.float64)
+                sigma2 = float(Sigma_l.get("sigma2", 0.0))
+                U_v = U[a:b, :]
+                Sv = (U_v * eig[np.newaxis, :]) @ U_v.T
+                if sigma2 > 0.0:
+                    Sv = Sv + sigma2 * np.eye(Dv, dtype=np.float64)
+            else:
+                S = np.asarray(Sigma_l, dtype=np.float64)
+                if S.ndim == 1:
+                    Sv = np.diag(S[a:b])
+                else:
+                    Sv = S[a:b, a:b]
+
+            Sv = 0.5 * (Sv + Sv.T)
+            w, V_mat = np.linalg.eigh(Sv)
+
+            k = int(pc_index)
+            col = -1 - k
+            direction_np = V_mat[:, col]
+            lam = float(max(w[col], 0.0))
+            step = float(pc_scale) * (lam ** 0.5 if lam > 0.0 else 0.0)
+
+            # Adaptation 3D
+            direction_t = torch.from_numpy(direction_np.astype(np.float32)).view(1, C, H_z, W_z, D_z).to(z_l.device, z_l.dtype)
+
+            if pc_center.lower() == "mean":
+                base = mu_view.expand(B, C, H_z, W_z, D_z)
+            else:
+                base = z_l
+
+            z_l_edit = base + step * direction_t
+            print(f"[recon] level {l}, view '{view_name}': PC{pc_index} lambda={lam:.3e}, step={step:.3e}, center={pc_center}")
+
+        elif mode == "pc_denoise":
+            Sigma_l = Sigma_list[l] if isinstance(Sigma_list, (list, tuple)) else Sigma_list
+            Dv = C * H_z * W_z * D_z
+            
+            if isinstance(Sigma_l, dict) and Sigma_l.get("type") == "lowrank":
+                U = np.asarray(Sigma_l["U"], dtype=np.float64)
+                eig = np.asarray(Sigma_l["eig"], dtype=np.float64)
+                sigma2 = float(Sigma_l.get("sigma2", 0.0))
+                U_v = U[a:b, :]
+                Sv = (U_v * eig[np.newaxis, :]) @ U_v.T
+                if sigma2 > 0.0:
+                    Sv = Sv + sigma2 * np.eye(Dv, dtype=np.float64)
+            else:
+                S = np.asarray(Sigma_l, dtype=np.float64)
+                if S.ndim == 1:
+                    Sv = np.diag(S[a:b])
+                else:
+                    Sv = S[a:b, a:b]
+
+            Sv = 0.5 * (Sv + Sv.T)
+            w, V_mat = np.linalg.eigh(Sv)
+
+            V_desc = V_mat[:, ::-1]
+            k_keep = min(max(int(pc_k), 0), V_desc.shape[1])
+            V_t = torch.from_numpy(V_desc.astype(np.float32)).to(z_l.device, z_l.dtype)
+
+            z_flat = z_l.view(B, -1)
+            mu_flat = mu_view.view(1, -1)
+            y = torch.matmul(z_flat - mu_flat, V_t)
+
+            if k_keep < V_t.shape[1]:
+                tail = y[:, k_keep:]
+                if float(pc_beta) == 0.0:
+                    y[:, k_keep:] = 0.0
+                else:
+                    y[:, k_keep:] = float(pc_beta) * tail
+
+            z_flat_edit = mu_flat + torch.matmul(y, V_t.T)
+            z_l_edit = z_flat_edit.view(B, C, H_z, W_z, D_z) # Adaptation 3D
+
+            print(f"[recon] level {l}, view '{view_name}': pc_denoise k_keep={k_keep}, tail_beta={pc_beta:.3f}")
+
+        else:
+            raise ValueError(f"[recon] Unknown edit mode '{mode}'.")
+
+        z_out.append(z_l_edit)
+
+    return z_out
+
+def _validate_gauss_blob(g: dict):
+    """
+    Validate required fields in the serialized Gaussian blob from gauss-fit.
+    Returns (views, dims_tbl, shapes_by_view, L) if valid, else raises RuntimeError
+    with a detailed, actionable message.
+    """
+    import numpy as _np
+
+    def _shape_of(x):
+        try:
+            return f"{len(x)}" if hasattr(x, "__len__") else "n/a"
+        except Exception:
+            return "n/a"
+
+    def _prod_all(t):
+        try:
+            # Fonction générique pour calculer le produit de toutes les dimensions
+            import math
+            return math.prod(int(v) for v in t)
+        except Exception:
+            return None
+
+    errors = []
+    views = g.get("views", None)
+    dims_tbl = g.get("dims_per_level_per_view", None)  # V × L
+    shapes_by_view = g.get("shapes_by_view", None)     # V × L × (C,D,H,W) ou (C,H,W)
+    L_raw = g.get("L", None)
+
+    # 1) Presence / types
+    if not isinstance(views, (list, tuple)) or len(views) == 0 or not all(isinstance(v, str) for v in views):
+        errors.append(f"- 'views' missing or invalid; expected non-empty list[str], got: {type(views).__name__} with len={_shape_of(views)}")
+
+    if dims_tbl is None or not isinstance(dims_tbl, (list, tuple)):
+        errors.append(f"- 'dims_per_level_per_view' missing or invalid; expected list[list[int]], got: {type(dims_tbl).__name__}")
+    if shapes_by_view is None or not isinstance(shapes_by_view, (list, tuple)):
+        errors.append(f"- 'shapes_by_view' missing or invalid; expected list[list[tuple]], got: {type(shapes_by_view).__name__}")
+
+    # L must be a positive integer
+    try:
+        L = int(L_raw)
+        if L <= 0:
+            errors.append(f"- 'L' present but non-positive; expected integer > 0, got: {L_raw!r}")
+    except Exception:
+        errors.append(f"- 'L' missing or not an int; got: {L_raw!r}")
+
+    # If any structural errors so far, raise early with context
+    if errors:
+        raise RuntimeError(
+            "[gauss] Invalid gaussian file structure:\n"
+            + "\n".join(errors)
+        )
+
+    # 2) Dimensions across views
+    V = len(views)
+    if len(dims_tbl) != V:
+        errors.append(f"- dims_per_level_per_view has V={len(dims_tbl)} rows but views has V={V}")
+    if len(shapes_by_view) != V:
+        errors.append(f"- shapes_by_view has V={len(shapes_by_view)} rows but views has V={V}")
+
+    # Ensure each view has L entries
+    bad_dims_rows = [vi for vi in range(V) if not isinstance(dims_tbl[vi], (list, tuple)) or len(dims_tbl[vi]) != L]
+    bad_shapes_rows = [vi for vi in range(V) if not isinstance(shapes_by_view[vi], (list, tuple)) or len(shapes_by_view[vi]) != L]
+    if bad_dims_rows:
+        errors.append(f"- dims_per_level_per_view rows with wrong length L={L}: {bad_dims_rows[:10]} (showing first 10)")
+    if bad_shapes_rows:
+        errors.append(f"- shapes_by_view rows with wrong length L={L}: {bad_shapes_rows[:10]} (showing first 10)")
+
+    # 3) Per-level consistency: dims_tbl[v][ℓ] == prod(shapes_by_view[v][ℓ])
+    mismatches = []
+    for vi in range(V):
+        if vi in bad_dims_rows or vi in bad_shapes_rows:
+            continue
+        for l in range(L):
+            try:
+                d_tbl = int(_np.asarray(dims_tbl[vi][l]).item() if hasattr(dims_tbl[vi][l], "item") else dims_tbl[vi][l])
+            except Exception:
+                d_tbl = None
+            d_shp = _prod_all(shapes_by_view[vi][l])
+            if d_tbl is None or d_shp is None or d_tbl != d_shp:
+                mismatches.append((vi, l, d_tbl, d_shp))
+                if len(mismatches) >= 20:
+                    break
+        if len(mismatches) >= 20:
+            break
+    if mismatches:
+        msg = "\n".join([f"  - view[{vi}]='{views[vi]}', level {l}: dims_tbl={dt} vs Prod(shape)={ds}"
+                        for (vi, l, dt, ds) in mismatches])
+        errors.append(f"- dims_per_level_per_view does not match shapes_by_view for some entries (showing up to 20):\n{msg}")
+
+    if errors:
+        # Helpful footer with quick hints
+        footer = (
+            "\nHints:\n"
+            "  • Re-run gauss-fit to regenerate the file if you changed model config (H/W/D, K, levels).\n"
+            "  • Ensure --views in gauss-fit matches the manifest header order you expect to use in imputation.\n"
+            "  • Verify that your serialized file includes the new fields written by the updated gauss-fit."
+        )
+        raise RuntimeError("[gauss] Inconsistent gaussian metadata:\n" + "\n".join(errors) + footer)
+
+    # Normalize dims_tbl to pure Python ints
+    dims_tbl_py = [[int(_np.asarray(d).item() if hasattr(d, "item") else d) for d in row] for row in dims_tbl]
+
+    return views, dims_tbl_py, shapes_by_view, L
+
+
+def _load_gaussian_model(gauss_path: Path) -> Dict[str, Any]:
+    """
+    Load Gaussian model saved by gauss-fit (.pt or .npz).
+    Returns a dict with keys:
+    - mode: "perlevel" or "merged"
+    - estimator: "full"|"diag"|"lw"|"oas"|"lowrank"
+    - views: list[str]
+    - N, H, W, L: ints (and potentially D for 3D)
+    - dims_per_level_per_view: V x L list of ints
+    - shapes_by_view: optional V x L list of tuples
+    - level_view_slices: optional L x V list of (start,end) in level-flat space
+    - mu: list[(D_l,)] if perlevel else (D_total,)
+    - Sigma: list[np.ndarray or dict] if perlevel else np.ndarray or dict
+    """
+    gauss_path = Path(gauss_path)
+    if not gauss_path.exists():
+        raise FileNotFoundError(f"Gaussian file not found: {gauss_path}")
+
+    if str(gauss_path).endswith(".pt"):
+        try:
+            blob = torch.load(gauss_path, map_location="cpu", weights_only=True)
+        except Exception as e:
+            print(f"[warn] weights_only load failed ({e.__class__.__name__}: {e}); retrying without weights_only")
+            blob = torch.load(gauss_path, map_location="cpu")
+        return blob
+
+    npz = np.load(str(gauss_path), allow_pickle=True)
+    keys = set(npz.files)
+    blob: Dict[str, Any] = {}
+
+    def _scalar(k, cast=int, default=None):
+        if k in keys:
+            try:
+                return cast(np.array(npz[k]).ravel()[0])
+            except Exception:
+                try:
+                    return cast(npz[k].tolist())
+                except Exception:
+                    return cast(npz[k])
+        return default
+
+    blob["mode"] = (np.array(npz["mode"]).tolist() if "mode" in keys else "perlevel")
+    blob["estimator"] = (np.array(npz["estimator"]).tolist() if "estimator" in keys else "full")
+    blob["N"] = _scalar("N", int, None)
+    blob["H"] = _scalar("H", int, None)
+    blob["W"] = _scalar("W", int, None)
+    # Ligne ajoutée pour supporter la 3D sans casser la rétrocompatibilité 2D
+    blob["D"] = _scalar("D", int, None) 
+    blob["L"] = _scalar("L", int, None)
+
+    if "views" in keys:
+        vv = np.array(npz["views"]).tolist()
+        blob["views"] = [str(x) for x in (vv if isinstance(vv, list) else [vv])]
+
+    # dims and stats may be JSON strings inside NPZ
+    if "dims_json" in keys:
+        blob["dims_per_level_per_view"] = json.loads(str(np.array(npz["dims_json"]).tolist()))
+    if "stats_json" in keys:
+        blob["stats"] = json.loads(str(np.array(npz["stats_json"]).tolist()))
+
+    # shapes and slices (optional)
+    if "shapes_json" in keys:
+        blob["shapes_by_view"] = json.loads(str(np.array(npz["shapes_json"]).tolist()))
+    if "slices_json" in keys:
+        blob["level_view_slices"] = json.loads(str(np.array(npz["slices_json"]).tolist()))
+
+    # per-level preferred path
+    L = int(blob.get("L", 0) or 0)
+    if any(f.startswith("mu_") for f in keys):
+        mu_list, Sig_list = [], []
+        for i in range(L):
+            mu_list.append(np.array(npz[f"mu_{i}"]))
+            if f"Sigma_{i}_type" in keys and str(np.array(npz[f"Sigma_{i}_type"]).tolist()) == "lowrank":
+                Sig_list.append({
+                    "type": "lowrank",
+                    "U": np.array(npz[f"Sigma_{i}_U"]),
+                    "eig": np.array(npz[f"Sigma_{i}_eig"]),
+                    "sigma2": float(np.array(npz[f"Sigma_{i}_sigma2"]).ravel()[0]),
+                })
+            else:
+                Sig_list.append(np.array(npz.get(f"Sigma_{i}")))
+        blob["mu"] = mu_list
+        blob["Sigma"] = Sig_list
+        blob["mode"] = "perlevel"
+        return blob
+
+    # merged fallback
+    if "mu" in keys:
+        blob["mu"] = np.array(npz["mu"])
+        if "Sigma_type" in keys and str(np.array(npz["Sigma_type"]).tolist()) == "lowrank":
+            blob["Sigma"] = {
+                "type": "lowrank",
+                "U": np.array(npz["Sigma_U"]),
+                "eig": np.array(npz["Sigma_eig"]),
+                "sigma2": float(np.array(npz["Sigma_sigma2"]).ravel()[0]),
+            }
+        elif "Sigma" in keys:
+            blob["Sigma"] = np.array(npz["Sigma"])
+        return blob
+
+    # legacy object arrays
+    if "mu" in keys and np.array(npz["mu"]).dtype == object:
+        blob["mu"] = np.array(npz["mu"]).tolist()
+        if "Sigma" in keys:
+            blob["Sigma"] = np.array(npz["Sigma"]).tolist()
+        return blob
+
+    raise RuntimeError(f"Unrecognized NPZ contents in {gauss_path}; keys={sorted(keys)}")
 
 # ---------------------- Model Builders ----------------------
 
@@ -474,173 +895,613 @@ def _cond_mean_block_lowrank(U: np.ndarray, eig: np.ndarray, sigma2: float,
     
     return zU.T 
 
+def _flatten_latents_by_level(z_list) -> List:
+    """
+    Input: list of tensors or a single tensor; each tensor shape (B, C, H, W) or (B, D).
+    Output: list of (B, D_l) 2-D tensors per level.
+    """
+    if not isinstance(z_list, (list, tuple)):
+        z_list = [z_list]
+    outs = []
+    for z in z_list:
+        if z.ndim == 4:
+            B, C, H, W = z.shape
+            outs.append(z.reshape(B, C * H * W))
+        elif z.ndim == 2:
+            outs.append(z)
+        else:
+            raise RuntimeError(f"Unexpected latent shape: {tuple(z.shape)}")
+    return outs
+
+def _concat_views_per_level(z_per_view_per_level: List[List]) -> List:
+    """
+    z_per_view_per_level: list over views (V) of list over levels (L) of (N, D_lv)
+    Returns: list over levels (L) of (N, sum_v D_lv)
+    """
+    V = len(z_per_view_per_level)
+    L = len(z_per_view_per_level[0])
+    outs = []
+    for l in range(L):
+        cols = [z_per_view_per_level[v][l] for v in range(V)]
+        outs.append(torch.cat(cols, dim=1))
+    return outs
+
+def _np_stats(mat) -> Dict[str, float]:
+    # mat is 2D or 1D vector of eigenvalues
+    if isinstance(mat, dict) and mat.get('type') == 'lowrank':
+        return _lowrank_stats(mat)
+    if mat.ndim == 2:
+        vals = np.linalg.eigvalsh(mat)
+    else:
+        vals = np.asarray(mat).ravel()
+    vmin = float(vals.min(initial=np.inf))
+    vmax = float(vals.max(initial=0.0))
+    cond = float(vmax / (vmin + 1e-12)) if vmax > 0 else float("inf")
+    return {"lambda_min": vmin, "lambda_max": vmax, "cond": cond}
+
+def _cov_full(X: np.ndarray, ridge: float) -> np.ndarray:
+    # X: (N, D), zero-mean assumed? We'll subtract mean outside.
+    N = X.shape[0]
+    S = (X.T @ X) / max(1, (N - 1))
+    if ridge and ridge > 0.0:
+        S = S + float(ridge) * np.eye(S.shape[0], dtype=S.dtype)
+    return S
+
+def _cov_diag(X: np.ndarray, ridge: float) -> np.ndarray:
+    var = X.var(axis=0, ddof=1)
+    if ridge and ridge > 0.0:
+        var = var + float(ridge)
+    return var  # 1D
+
+def _cov_oas(X: np.ndarray, extra_ridge: float) -> np.ndarray:
+    """
+    Oracle Approximating Shrinkage toward scaled identity: (1-a)S + a*(tr(S)/p)I
+    Uses Chen et al. 2010 closed form.
+    """
+    N, p = X.shape
+    S = (X.T @ X) / max(1, (N - 1))
+    mu = np.trace(S) / p
+    # Frobenius norm of S
+    trS2 = float(np.sum(S * S))
+    trS = float(np.trace(S))
+    # OAS shrinkage factor
+    # guard for tiny denominators
+    denom = (N + 1 - 2.0 / p) * (trS2 - (trS * trS) / p)
+    if denom <= 0:
+        a = 1.0
+    else:
+        a = ((1.0 - 2.0 / p) * trS2 + (trS * trS)) / denom
+        a = max(0.0, min(1.0, a))
+    S_shrunk = (1.0 - a) * S + a * mu * np.eye(p, dtype=S.dtype)
+    if extra_ridge and extra_ridge > 0.0:
+        S_shrunk = S_shrunk + float(extra_ridge) * np.eye(p, dtype=S.dtype)
+    return S_shrunk
+
+def _lowrank_stats(sig: dict) -> dict:
+    eig = np.asarray(sig.get("eig", []), dtype=float)
+    sigma2 = float(sig.get("sigma2", 0.0))
+    lam_min = float(sigma2)
+    lam_max = float((eig.max() if eig.size > 0 else 0.0) + sigma2)
+    cond = float(lam_max / (lam_min + 1e-12)) if lam_max > 0 else float("inf")
+    return {"lambda_min": lam_min, "lambda_max": lam_max, "cond": cond}
+
+def _fit_gaussian_blocks(X_blocks: List[np.ndarray], estimator: str, shrinkage: float, cov_lam: float) -> Tuple[np.ndarray, np.ndarray, Dict]:
+    """
+    Fit Gaussian to concatenated blocks (per level). Returns (mu, Sigma, meta).
+    For 'diag', Sigma is 1D vector of variances.
+    """
+    X = np.concatenate(X_blocks, axis=1) if len(X_blocks) > 1 else X_blocks[0]
+    mu = X.mean(axis=0)
+    Xc = X - mu
+    est = estimator.lower()
+    if est == "full":
+        Sigma = _cov_full(Xc, ridge=float(shrinkage) + float(cov_lam))
+    elif est == "diag":
+        Sigma = _cov_diag(Xc, ridge=float(shrinkage) + float(cov_lam))
+    elif est in ("oas", "lw", "ledoitwolf"):
+        # Treat lw as oas for now; both shrink toward scaled identity; OAS has closed form
+        Sigma = _cov_oas(Xc, extra_ridge=float(cov_lam))
+    else:
+        raise RuntimeError(f"Unknown --cov-estimator: {estimator}")
+    stats = _np_stats(Sigma if Sigma.ndim == 2 else Sigma)
+    return mu, Sigma, stats
+
+def _ckpt_fingerprint(ckpt_path: Path) -> str:
+    try:
+        h = hashlib.sha1()
+        h.update(ckpt_path.read_bytes()[:1024*1024])  # first 1MB
+        h.update(str(ckpt_path.stat().st_size).encode())
+        h.update(str(int(ckpt_path.stat().st_mtime)).encode())
+        return h.hexdigest()
+    except Exception:
+        return "unknown"
+
+
+def _save_gauss_npz(blob: Dict[str, Any], out_path: Path):
+    import json
+    pack = {
+        "mode": blob["mode"],
+        "estimator": blob["estimator"],
+        "N": np.int64(blob["N"]),
+        "H": np.int64(blob["H"]),
+        "W": np.int64(blob["W"]),
+        "L": np.int64(blob["L"]),
+        "views": np.array(blob["views"], dtype=object),
+        "dims_json": json.dumps(blob["dims_per_level_per_view"]),
+        "shapes_json": json.dumps(blob["shapes_by_view"]),
+        "slices_json": json.dumps(blob["level_view_slices"]),
+        "stats_json": json.dumps(blob["stats"]),
+    }
+    if blob["mode"] == "perlevel":
+        for i, mu in enumerate(blob["mu"]):
+            pack[f"mu_{i}"] = np.asarray(mu)
+            S = blob["Sigma"][i]
+            if isinstance(S, dict) and S.get("type") == "lowrank":
+                pack[f"Sigma_{i}_type"] = "lowrank"
+                pack[f"Sigma_{i}_U"] = np.asarray(S["U"])
+                pack[f"Sigma_{i}_eig"] = np.asarray(S["eig"])
+                pack[f"Sigma_{i}_sigma2"] = np.asarray([S["sigma2"]], dtype=np.float64)
+            else:
+                pack[f"Sigma_{i}"] = np.asarray(S)
+    else:
+        pack["mu"] = np.asarray(blob["mu"])
+        S = blob["Sigma"]
+        if isinstance(S, dict) and S.get("type") == "lowrank":
+            pack["Sigma_type"] = "lowrank"
+            pack["Sigma_U"] = np.asarray(S["U"])
+            pack["Sigma_eig"] = np.asarray(S["eig"])
+            pack["Sigma_sigma2"] = np.asarray([S["sigma2"]], dtype=np.float64)
+        else:
+            pack["Sigma"] = np.asarray(S)
+
+    np.savez_compressed(out_path, **pack)
+
+
 # ---------------------- Main Commands ----------------------
 
 def main_recon(argv=None):
-    ap = argparse.ArgumentParser("LAM‑Flow 3D reconstruction and latent editing tool (recon)")
-    ap.add_argument("--ckpt", type=str, required=True)
-    ap.add_argument("--manifest", type=str, required=True)
-    ap.add_argument("--views", type=str, required=True)
-    ap.add_argument("--view-index", type=int, default=0)
-    ap.add_argument("--volume-size", type=parse_hwd, default="64x64x64")
-    ap.add_argument("--batch", type=int, default=1)
+    ap = argparse.ArgumentParser("LAM‑Flow 3D reconstruction tool (recon)")
+    ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint")
+    ap.add_argument("--manifest", type=str, required=True, help="CSV with per-view file paths")
+    ap.add_argument("--views", type=str, required=True, help="Comma list of views (e.g., T1,FA)")
+    ap.add_argument("--view-index", type=int, default=0, help="Which view to load (0-based)")
+    ap.add_argument("--volume-size", type=str, required=True, help="Size format HxWxD (e.g., 64x80x64)")
+    ap.add_argument("--batch", type=int, default=1, help="Batch size (keep low for 3D)")
     ap.add_argument("--devices", type=str, default="cuda:0")
-    ap.add_argument("--out-dir", type=str, required=True)
-    ap.add_argument("--gauss", type=str, default=None)
-    ap.add_argument("--edit-levels", type=str, default="none")
-    ap.add_argument("--edit-what", type=str, choices=["mean", "zero", "pc"], default="mean")
+    ap.add_argument("--outdir", type=str, required=True, help="Output directory for NIfTI volumes")
+    
+    # Options d'Édition Gaussienne
+    ap.add_argument("--gauss", type=str, default=None, help="Gaussian model for latent editing.")
+    ap.add_argument("--edit-levels", type=str, default="none", help="Levels to project (e.g. '0,1,2', 'all')")
+    ap.add_argument("--edit-what", type=str, choices=["mean", "zero", "pc", "pc_denoise"], default="mean")
     ap.add_argument("--edit-pc-index", type=int, default=0)
     ap.add_argument("--edit-pc-scale", type=float, default=2.0)
     ap.add_argument("--edit-pc-center", type=str, choices=["sample", "mean"], default="sample")
+    ap.add_argument("--edit-pc-k", type=int, default=64)
+    ap.add_argument("--edit-pc-beta", type=float, default=0.0)
     args = ap.parse_args(argv)
 
     device = torch.device(args.devices)
-    blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
+    ckpt_path = resolve_ckpt_path(Path(args.ckpt))
+    
+    try:
+        blob = torch.load(ckpt_path, map_location=device, weights_only=True)
+    except TypeError:
+        blob = torch.load(ckpt_path, map_location=device)
+
     cfg = blob.get("config", {})
-    
-    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
-    all_views = [v.strip() for v in args.views.split(",") if v.strip()]
-    vname = all_views[int(args.view_index)]
-    
-    Hc, Wc, Dc = args.volume_size
-    _prime_if_needed(model, Hc, Wc, Dc, device)
-    
-    ok, note = load_weights_into_model(model, blob, int(args.view_index))
+    try:
+        Hc, Wc, Dc = [int(x) for x in args.volume_size.split("x")]
+    except:
+        raise ValueError(f"Invalid --volume-size {args.volume_size}. Expected HxWxD.")
+
+    model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc, "D": Dc}, device=device, target_dhw=(Hc, Wc, Dc))
+    model.eval()
+
+    manifest_path = Path(args.manifest)
+    with open(manifest_path, "r") as f:
+        header = [h.strip() for h in f.readline().strip().split(",")]
+        all_views = [v.strip() for v in args.views.split(",") if v.strip()]
+        v_idx_map = {v: header.index(v) for v in all_views}
+        rows = []
+        for line in f:
+            parts = [s.strip() for s in line.strip().split(",")]
+            if not parts or all(p == "" for p in parts): continue
+            rows.append([Path(parts[v_idx_map[v]]) for v in all_views])
+
+    vname = all_views[args.view_index]
+    vcol = [r[all_views.index(vname)] for r in rows]
+
+    ok, note = load_weights_into_model(model, blob, view_idx=all_views.index(vname), prefer_ema=True, view_name=vname, cfg_views=all_views)
     if not ok: raise RuntimeError(f"Failed to load weights: {note}")
 
-    cols = _read_manifest_csv(Path(args.manifest))
-    vcol = cols[vname]
-    out_dir = Path(args.out_dir)
+    out_dir = Path(args.outdir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    npz = np.load(args.gauss, allow_pickle=True) if args.gauss else None
-    L_gauss = int(npz["L"]) if npz else 0
-
     bs = max(1, int(args.batch))
-    for i, pth in enumerate(vcol[:bs]):
-        xi = _read_image_3d(pth, target_hwd=args.volume_size).to(device)
-        with torch.no_grad():
-            z_raw, _ = model.inverse_and_log_det(xi)
-            if not isinstance(z_raw, list): z_raw = [z_raw]
-            xh_base, _ = model.forward_and_log_det(z_raw)
-            xh_base = to01(_coerce_5d(xh_base, args.volume_size), winsorize=True)
-            diff_base = to01(torch.abs(xi - xh_base), winsorize=True)
-            
-        base_name = Path(pth).name.split('.')[0]
-        prefix = out_dir / f"recon_{i:03d}_{base_name}"
-        save_nifti(xi, Path(f"{prefix}_orig.nii.gz"))
-        save_nifti(xh_base, Path(f"{prefix}_recon.nii.gz"))
-        save_nifti(diff_base, Path(f"{prefix}_diff.nii.gz"))
-        save_mid_slice_png(xh_base, Path(f"{prefix}_recon_midslice.png"))
+    
+    # Traitement par lots pour la 3D
+    for batch_idx in range(0, min(bs, len(vcol))):
+        pth = vcol[batch_idx]
+        xi = _read_image_3d(pth, target_dhw=(Hc, Wc, Dc)) # Doit retourner (1, H, W)
+        xb = xi.unsqueeze(0).to(device=device, dtype=torch.float32) # (1, 1, H, W, D)
 
-    print(f"[ok] Outputs in {out_dir}")
+        # Base reconstruction
+        z_list = _encode_latents(model, xb)
+        xh = _decode_latents(model, z_list, target_hwd=(Hc, Wc, Dc))
+
+        xh_edit = None
+        if args.gauss and args.edit_levels.lower() != "none":
+            gauss_blob = _load_gaussian_model(Path(args.gauss))
+            _, _, _, L = _validate_gauss_blob(gauss_blob)
+
+            spec = args.edit_levels.strip().lower()
+            levels = list(range(L)) if spec == "all" else [int(p) for p in spec.split(",") if p.strip()]
+            levels = sorted({l for l in levels if 0 <= l < L})
+
+            if levels:
+                z_list_edit = _edit_latents_to_mean_for_view_3d(
+                    z_list, gauss_blob, vname, levels_to_edit=levels,
+                    mode=args.edit_what, pc_index=args.edit_pc_index,
+                    pc_scale=args.edit_pc_scale, pc_center=args.edit_pc_center,
+                    pc_k=args.edit_pc_k, pc_beta=args.edit_pc_beta
+                )
+                xh_edit = _decode_latents(model, z_list_edit, target_hwd=(Hc, Wc, Dc))
+
+        # Sauvegarde 3D
+        diff = torch.abs(xb - xh)
+        base_name = f"subj_{batch_idx:04d}_{vname}"
+        
+        save_nifti(xb, out_dir / f"{base_name}_orig.nii.gz")
+        save_nifti(xh, out_dir / f"{base_name}_recon.nii.gz")
+        save_nifti(diff, out_dir / f"{base_name}_diff.nii.gz")
+        
+        print(f"[{batch_idx}] max |x - x_hat| = {float(diff.max().item()):.6f}")
+
+        if xh_edit is not None:
+            diff_edit = torch.abs(xb - xh_edit)
+            save_nifti(xh_edit, out_dir / f"{base_name}_edit.nii.gz")
+            save_nifti(diff_edit, out_dir / f"{base_name}_diff_edit.nii.gz")
+            print(f"[{batch_idx}] max |x - x_hat_edit| = {float(diff_edit.max().item()):.6f}")
+
+    print(f"[recon] Volumes written to {out_dir}")
     return 0
 
-def main_gauss_fit(argv=None):
-    ap = argparse.ArgumentParser("gauss-fit")
-    ap.add_argument("--ckpt", required=True)
-    ap.add_argument("--manifest", required=True)
-    ap.add_argument("--views", required=True)
-    ap.add_argument("--gauss-out", required=True)
-    ap.add_argument("--volume-size", type=parse_hwd, default="64x64x64")
-    ap.add_argument("--batch", type=int, default=2)
-    ap.add_argument("--devices", default="cuda:0")
-    ap.add_argument("--cov-estimator", choices=["lowrank", "diag"], default="lowrank")
-    ap.add_argument("--rank", type=int, default=128)
-    ap.add_argument("--sigma2", default="auto")
-    ap.add_argument("--cov-lam", type=float, default=1e-5)
+def main_gauss_fit(argv: List[str] | None = None):
+
+    try:
+        from tqdm import tqdm
+    except ImportError:
+        print("[info] tqdm not found. Install with `pip install tqdm` for progress bars.")
+        tqdm = lambda x, **kwargs: x
+
+    def _sanitize_latents_array(X, cap_quantile=99.9, hard_cap=None):
+        X = np.asarray(X, dtype=np.float64)
+        stats = {}
+        nf = ~np.isfinite(X)
+        nf_count = int(nf.sum())
+        if nf_count:
+            X[nf] = 0.0
+        stats["nonfinite"] = nf_count
+
+        if hard_cap is None:
+            q = np.percentile(np.abs(X), [50, 90, 99, cap_quantile])
+            cap = float(q[-1] + 1e-12)
+            stats["abs_quantiles"] = {"p50": float(q[0]), "p90": float(q[1]), "p99": float(q[2]), f"p{cap_quantile}": float(q[3])}
+        else:
+            cap = float(hard_cap)
+            stats["abs_quantiles"] = None
+
+        pre = X.copy()
+        np.clip(X, -cap, cap, out=X)
+        clipped = int(np.sum(pre != X))
+        stats["cap"] = cap
+        stats["clipped"] = clipped
+        return X, stats
+
+    def _cov_stats(Sd):
+        Sd = 0.5 * (Sd + Sd.T)
+        w = np.linalg.eigvalsh(Sd)
+        lam_min = float(np.min(w))
+        lam_max = float(np.max(w))
+        cond = float(lam_max / max(lam_min, 1e-300))
+        tr = float(np.trace(Sd))
+        diag_mean = float(np.mean(np.diag(Sd)))
+        return lam_min, lam_max, cond, tr, diag_mean
+
+    def _dense_from_cov(Sigma, D):
+        if isinstance(Sigma, dict) and Sigma.get("type") == "lowrank":
+            U = np.asarray(Sigma["U"], dtype=np.float64)
+            eig = np.asarray(Sigma["eig"], dtype=np.float64)
+            sigma2 = float(Sigma.get("sigma2", 0.0))
+            return U @ (np.diag(eig) @ U.T) + sigma2 * np.eye(U.shape[0])
+        S = np.asarray(Sigma, dtype=np.float64)
+        if S.ndim == 1:
+            return np.diag(S)
+        return S
+
+    def _scrub_row_outliers(z_per_view_per_level, per_view_paths, view_names, thresh=1e6):
+        N = z_per_view_per_level[0][0].shape[0]
+        bad = set()
+        bad_paths = []
+        for v_idx, vname in enumerate(view_names):
+            for li, Z in enumerate(z_per_view_per_level[v_idx]):
+                row_max = Z.detach().abs().amax(dim=1)
+                bad_idx = torch.nonzero(row_max > thresh, as_tuple=False).view(-1).cpu().tolist()
+                if bad_idx:
+                    print(f"[scrub] {vname} L{li}: {len(bad_idx)} outliers > {thresh:g}: {bad_idx[:8]}")
+                    bad.update(bad_idx)
+            for bi in sorted(set(bad)):
+                if bi < len(per_view_paths[v_idx]):
+                    bad_paths.append({"view": vname, "idx": int(bi), "path": str(per_view_paths[v_idx][bi])})
+        if not bad:
+            return z_per_view_per_level, per_view_paths, list(range(N)), []
+        keep = sorted(set(range(N)) - bad)
+        kt = torch.tensor(keep, dtype=torch.long)
+        z_clean = [[Z.index_select(0, kt) for Z in z_per_view_per_level[v]] for v in range(len(view_names))]
+        per_paths_clean = [[plist[i] for i in keep] for plist in per_view_paths]
+        print(f"[scrub] dropped {len(bad)} subjects; new N={len(keep)}")
+        return z_clean, per_paths_clean, keep, bad_paths
+
+    ap = argparse.ArgumentParser("LAM-Flow conditional Gaussian fitter (gauss-fit) 3D")
+    ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint.")
+    ap.add_argument("--manifest", type=str, required=True, help="CSV manifest.")
+    ap.add_argument("--views", type=str, default=None, help="Views to include (e.g., T1,FA).")
+    ap.add_argument("--volume-size", type=str, required=True, help="Size format HxWxD (e.g., 64x80x64)")
+    ap.add_argument("--batch", type=int, default=1, help="Batch size (keep low for 3D).")
+    ap.add_argument("--devices", type=str, default="cuda:0")
+
+    # Gaussian options
+    ap.add_argument("--cov-mode", type=str, choices=["perlevel","merged"], default="perlevel")
+    ap.add_argument("--cov-estimator", type=str, choices=["full","diag","oas","lw","lowrank"], default="lowrank")
+    ap.add_argument("--rank", type=int, default=128, help="Matrix rank for 'lowrank'.")
+    ap.add_argument("--sigma2", type=str, default="auto")
+    ap.add_argument("--shrinkage", type=str, default="1e-6")
+    ap.add_argument("--cov-lam", type=float, default=1e-6)
+    ap.add_argument("--jitter", type=float, default=1e-4)
+
+    # Outputs
+    ap.add_argument("--gauss-out", type=str, required=True, help="Output path (.npz).")
+    ap.add_argument("--gauss-summary", type=str, default="", help="JSON summary path.")
+    ap.add_argument("--save-fp", type=int, default=64)
     args = ap.parse_args(argv)
 
-    device = torch.device(args.devices)
-    blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
-    cfg = blob.get("config", {})
+    @torch.no_grad()
+    def _probe_latent_shapes_for_view(model, state_blob, view_idx, Hc, Wc, Dc, device):
+        ok, note = load_weights_into_model(model, state_blob, view_idx=view_idx, prefer_ema=True)
+        if not ok:
+            raise RuntimeError(f"load_weights_into_model failed for view {view_idx}: {note}")
+        # Adaptation 3D
+        x0 = torch.zeros(1, 1, int(Hc), int(Wc), int(Dc), device=device, dtype=torch.float32)
+        if hasattr(model, "inverse_and_log_det"):
+            z, _ = model.inverse_and_log_det(x0)
+        elif hasattr(model, "inverse"):
+            z, _ = model.inverse(x0)
+        else:
+            raise RuntimeError("Model lacks inverse mapping")
+        z_list = z if isinstance(z, (list, tuple)) else [z]
+        # Adaptation 3D : retourne (C, H, W, D)
+        return [(int(t.shape[1]), int(t.shape[2]), int(t.shape[3]), int(t.shape[4])) for t in z_list]
 
-    cols = _read_manifest_csv(Path(args.manifest))
-    view_names, paths_per_view = _resolve_views(cols, Path(args.manifest).parent, args.views)
-    N = len(paths_per_view[0])
-    print(f"[info] Fitting 3D Gaussian on {N} subjects. Estimator: {args.cov_estimator}")
-
-    Z_levels = [] 
+    device = torch.device("cpu") if args.devices.lower() == "cpu" else torch.device(args.devices.split(",")[0])
+    ckpt_path = resolve_ckpt_path(Path(args.ckpt))
+    manifest_path = Path(args.manifest).resolve()
+    manifest_dir = manifest_path.parent
     
+    try:
+        Hc, Wc, Dc = [int(x) for x in args.volume_size.split("x")]
+    except:
+        raise ValueError(f"Invalid --volume-size {args.volume_size}. Expected HxWxD.")
+
+    try:
+        state_blob = torch.load(ckpt_path, map_location=device, weights_only=True)
+    except TypeError:
+        state_blob = torch.load(ckpt_path, map_location=device)
+        
+    cfg = state_blob.get("config", {})
+    cfg_views = list(cfg.get("views", [])) if isinstance(cfg.get("views"), (list, tuple)) else None
+
+    # model instantiation needs H, W, D
+    model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc, "D": Dc}, device=device)
+    model.eval()
+
+    cols = _read_manifest_csv(manifest_path)
+    view_names, per_view_paths = _resolve_views(cols, manifest_dir, args.views)
+    V = len(view_names)
+    N = len(per_view_paths[0])
+    N_original = int(N)
+    print(f"[info] views: {view_names} (V={V}); subjects: N={N}")
+
+    z_per_view_per_level: List[List[torch.Tensor]] = [None] * V
+
     for v_idx, vname in enumerate(view_names):
-        model_view = build_model_from_config(cfg, device, target_dhw=args.volume_size)
-        
-        _prime_if_needed(model_view, *args.volume_size, device)
-        ok, note = load_weights_into_model(model_view, blob, v_idx)
-        if not ok: raise RuntimeError(f"Weights failed for {vname}: {note}")
-        
-        latents_for_view = [] 
-        paths = paths_per_view[v_idx]
-        
-        for i in tqdm(range(0, N, args.batch), desc=f"Encoding {vname}", unit="batch"):
-            batch_p = paths[i:i+args.batch]
-            batch_x = []
-            for p in batch_p:
-                batch_x.append(_read_image_3d(p, args.volume_size).squeeze(0))
-            xb = torch.stack(batch_x).to(device)
-            
-            with torch.no_grad():
-                z_raw, _ = model_view.inverse_and_log_det(xb)
-                if not isinstance(z_raw, list): z_raw = [z_raw]
-                
-                # CORRECTION ICI: On construit la liste directement
-                z_flat = []
-                for t in z_raw:
-                    t_safe = torch.clamp(t, min=-20.0, max=20.0)
-                    z_flat.append(t_safe.view(t.shape[0], -1).cpu())
+        model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc, "D": Dc}, device=device)
+        model.eval()
 
-                if not latents_for_view: latents_for_view = [[] for _ in z_flat]
-                for l, t in enumerate(z_flat): latents_for_view[l].append(t)
+        ok, note = load_weights_into_model(
+            model, state_blob, view_idx=v_idx, prefer_ema=True,
+            view_name=vname, cfg_views=cfg_views
+        )
+        if not ok:
+            raise RuntimeError(f"Failed to load weights for view {v_idx} ({vname}): {note}")
 
-        z_view_concat = [torch.cat(batches, dim=0) for batches in latents_for_view]
-        if not Z_levels: Z_levels = z_view_concat
-        else: Z_levels = [torch.cat([Z_levels[l], z_view_concat[l]], dim=1) for l in range(len(Z_levels))]
+        paths = per_view_paths[v_idx]
+        bs = max(1, int(args.batch))
 
-    mu_list = []
-    Sigma_list = []
-    
-    for l, Z in enumerate(Z_levels):
-        X = Z.numpy().astype(np.float64)
-        if not np.isfinite(X).all():
-            X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-            
-        cap = np.percentile(np.abs(X), 99.9) + 1e-6
-        X = np.clip(X, -cap, cap)
-        
-        mu = np.mean(X, axis=0)
-        Xc = X - mu
+        latents_per_level_list: List[List[torch.Tensor]] | None = None
 
-        if args.cov_estimator == "lowrank":
-            sig = _lowrank_from_Xc(Xc, args.rank, args.sigma2, args.cov_lam)
-        else:
-            sig = np.var(Xc, axis=0) + args.cov_lam 
-            
-        mu_list.append(mu)
-        Sigma_list.append(sig)
+        def _flush_batch(xlist: List[torch.Tensor]):
+            nonlocal latents_per_level_list
+            xb = torch.stack(xlist, dim=0).to(device=device, dtype=torch.float32)
+            with torch.no_grad(), torch.amp.autocast(device.type, enabled=False):
+                if hasattr(model, "inverse_and_log_det"):
+                    z, _ = model.inverse_and_log_det(xb) 
+                elif hasattr(model, "inverse"):
+                    z, _ = model.inverse(xb)
+                else:
+                    raise RuntimeError("Model lacks inverse mapping")
+            zl = _flatten_latents_by_level(z) # Fonction inchangée (aplatit le (B,C,H,W,D) en (B,D_l))
+            if latents_per_level_list is None:
+                latents_per_level_list = [[] for _ in range(len(zl))]
+            for li, arr in enumerate(zl):
+                latents_per_level_list[li].append(arr.detach().cpu())
 
-    pack = {
-        "mode": "perlevel",
-        "estimator": args.cov_estimator,
+        batch = []
+        for pth in tqdm(paths, desc=f"Encoding {vname}", unit="vol"):
+            # Adaptation 3D : Utilisation de _read_image_3d
+            xi = _read_image_3d(pth, target_hwd=(Hc, Wc, Dc)) 
+            batch.append(xi)
+            if len(batch) >= bs:
+                _flush_batch(batch); batch = []
+        if batch:
+            _flush_batch(batch)
+
+        if latents_per_level_list is None:
+            raise RuntimeError(f"No latents collected for view {v_idx} ({vname}).")
+        z_per_view_per_level[v_idx] = [torch.cat(chunks, dim=0) for chunks in latents_per_level_list]
+
+    z_per_view_per_level, per_view_paths, keep_idx, bad_paths = _scrub_row_outliers(
+        z_per_view_per_level, per_view_paths, view_names, thresh=1e6
+    )
+    N = len(keep_idx)
+
+    Z_levels = _concat_views_per_level(z_per_view_per_level)
+    L = len(Z_levels)
+    dims_per_level_per_view = [[int(t.shape[1]) for t in vlist] for vlist in z_per_view_per_level]
+
+    # Adaptation 3D pour la forme (C, H, W, D)
+    shapes_by_view: List[List[Tuple[int,int,int,int]]] = []
+    for v_idx in range(V):
+        shp = _probe_latent_shapes_for_view(model, state_blob, v_idx, Hc, Wc, Dc, device)
+        shapes_by_view.append(shp)
+
+    level_view_slices: List[Dict[int, Tuple[int,int]]] = []
+    for l in range(L):
+        off = 0
+        row_dict = {}
+        for v_idx in range(V):
+            d = int(dims_per_level_per_view[v_idx][l])
+            row_dict[v_idx] = (off, off + d)
+            off += d
+        level_view_slices.append(row_dict)
+
+    estimator = args.cov_estimator.lower()
+    shrink = args.shrinkage
+    try:
+        shrink_val = float(shrink)
+    except Exception:
+        shrink_val = 0.0
+
+    out_blob: Dict[str, Any] = {
+        "mode": args.cov_mode,
+        "estimator": estimator,
+        "shrinkage": shrink,
+        "cov_lam": float(args.cov_lam),
+        "jitter": float(args.jitter),
         "views": view_names,
-        "N": N, "L": len(Z_levels),
-        "D": args.volume_size[0], "H": args.volume_size[1], "W": args.volume_size[2],
-        "dims_per_view_L0": [Z.shape[1] // len(view_names) for Z in Z_levels] 
+        "N": int(N),             
+        "H": int(Hc),
+        "W": int(Wc),
+        "D": int(Dc), # Ajout 3D
+        "L": int(L),
+        "dims_per_level_per_view": dims_per_level_per_view,
+        "shapes_by_view": shapes_by_view,
+        "level_view_slices": level_view_slices,
+        "config": cfg,
+        "ckpt_path": str(ckpt_path),
+        "ckpt_fingerprint": _ckpt_fingerprint(ckpt_path),
+        "created_utc": int(time.time()),
     }
-    
-    for i, (m, s) in enumerate(zip(mu_list, Sigma_list)):
-        pack[f"mu_{i}"] = m
-        if isinstance(s, dict):
-            pack[f"Sigma_{i}_type"] = "lowrank"
-            pack[f"Sigma_{i}_U"] = s["U"]
-            pack[f"Sigma_{i}_eig"] = s["eig"]
-            pack[f"Sigma_{i}_sigma2"] = s["sigma2"]
-        else:
-            pack[f"Sigma_{i}"] = s
 
-    out_path = Path(args.gauss_out)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out_path, **pack)
-    print(f"[ok] Saved {out_path}")
+    stats_list = []
+    if args.cov_mode == "perlevel":
+        mu_list, Sigma_list = [], []
+        cap_quant = 99.9         
+        hard_cap = None          
+
+        for l, Zl in enumerate(Z_levels):
+            X = Zl.detach().cpu().numpy().astype("float64")
+            mu = X.mean(axis=0)
+            Xc = X - mu
+
+            Xc_clean, sstats = _sanitize_latents_array(Xc, cap_quantile=cap_quant, hard_cap=hard_cap)
+            D_l = Xc_clean.shape[1]
+            
+            if estimator == "lowrank":
+                Sigma = _lowrank_from_Xc(
+                    Xc_clean, rank=int(args.rank),
+                    sigma2=args.sigma2, extra_ridge=float(args.cov_lam)
+                )
+                if isinstance(Sigma, dict) and Sigma.get("type") == "lowrank":
+                    print(f"[lowrank L{l}] eff_rank={Sigma['U'].shape[1]}  sigma2={Sigma['sigma2']:.3g}")
+            else:
+                _mu_unused, Sigma, _stats_unused = _fit_gaussian_blocks(
+                    [Xc_clean], estimator=estimator, shrinkage=shrink_val, cov_lam=float(args.cov_lam)
+                )
+
+            Sd = _dense_from_cov(Sigma, D_l)
+            lam_min, lam_max, cond, tr, diag_mean = _cov_stats(Sd)
+            stats = {
+                "lambda_min": lam_min, "lambda_max": lam_max, "cond": cond, 
+                "trace": tr, "diag_mean": diag_mean,
+                "winsor_cap": float(sstats.get("cap", 0.0)),
+                "winsor_clipped": int(sstats.get("clipped", 0)),
+                "winsor_nonfinite": int(sstats.get("nonfinite", 0)),
+            }
+
+            row_dims = [int(dims_per_level_per_view[v][l]) for v in range(V)]
+            offs = [0]
+            for d in row_dims: offs.append(offs[-1] + d)
+            blk_tr = [float(np.trace(Sd[a:b, a:b])) for a, b in zip(offs[:-1], offs[1:])]
+            print("[fit Σ L{} by view] ".format(l) + " ".join("v{}:{:.3e}".format(vi, t) for vi, t in enumerate(blk_tr)))
+
+            mu_list.append(mu); Sigma_list.append(Sigma); stats_list.append(stats)
+
+        out_blob["mu"] = mu_list
+        out_blob["Sigma"] = Sigma_list
+        out_blob["stats"] = stats_list
+
+    if args.save_fp == 32:
+        def _cast_fp32_inplace(ob):
+            def cast(x): return x.astype(np.float32) if isinstance(x, np.ndarray) and x.dtype == np.float64 else x
+            if isinstance(ob.get("mu"), list):
+                ob["mu"] = [cast(m) for m in ob["mu"]]
+                newS = []
+                for S in ob["Sigma"]:
+                    if isinstance(S, dict) and S.get("type") == "lowrank":
+                        U = S.get("U"); eig = S.get("eig"); sigma2 = float(S.get("sigma2", 0.0))
+                        S = {"type":"lowrank", "U": (cast(U)), "eig": (cast(eig)), "sigma2": float(sigma2)}
+                    else:
+                        S = cast(S)
+                    newS.append(S)
+                ob["Sigma"] = newS
+        _cast_fp32_inplace(out_blob)
+
+    out_path = Path(args.gauss_out); out_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if str(out_path).endswith(".pt"):
+            torch.save(out_blob, out_path, pickle_protocol=5)
+        elif str(out_path).endswith(".npz"):
+            _save_gauss_npz(out_blob, out_path) 
+        print(f"[ok] wrote Gaussian model: {out_path}")
+    except Exception as e:
+        raise RuntimeError(f"Failed to save --gauss-out: {e}")
+
+    if args.gauss_summary:
+        js = {
+            "mode": out_blob["mode"], "estimator": out_blob["estimator"],
+            "views": out_blob["views"],
+            "N": out_blob["N"], "H": out_blob["H"], "W": out_blob["W"], "D": out_blob["D"], "L": out_blob["L"],
+            "dims_per_level_per_view": out_blob["dims_per_level_per_view"],
+            "stats": out_blob["stats"],
+        }
+        js["dropped_subjects"] = {
+           "count": int(N_original - N), "original_N": int(N_original), "kept_N": int(N), "details": bad_paths
+        }
+        js_path = Path(args.gauss_summary); js_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(js_path, "w") as f:
+            json.dump(js, f, indent=2)
+        print(f"[ok] wrote summary JSON: {js_path}")
 
 def main_gauss_impute(argv=None):
     ap = argparse.ArgumentParser("gauss-impute")
