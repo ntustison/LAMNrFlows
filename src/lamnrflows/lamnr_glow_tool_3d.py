@@ -242,43 +242,38 @@ def save_nifti(x: torch.Tensor, out_path: Path, spacing: Tuple[float, float, flo
     except: pass
     ants.image_write(img, str(out_path))
 
-def _read_image_3d(path: Path, target_hwd: Optional[Tuple[int, int, int]] = None) -> torch.Tensor:
-
+def _read_image_3d(path: Path, target_hwd: tuple[int, int, int]) -> torch.Tensor:
+    import ants
     path = Path(path)
     if not path.exists(): raise FileNotFoundError(f"{path}")
     
-    # 1. Lecture ANTs (Identique au trainer)
     img = ants.image_read(str(path))
+    H, W, D = target_hwd
     
-    # 2. Redimensionnement géométrique physique
-    if target_hwd is not None:
-        H, W, D = target_hwd
-        resize_factor = min(float(H)/float(img.shape[0]), 
-                            float(W)/float(img.shape[1]),
-                            float(D)/float(img.shape[2]))
-        
-        spacing = (img.spacing[0] / resize_factor, 
-                   img.spacing[1] / resize_factor,
-                   img.spacing[2] / resize_factor)   
-        
-        img = ants.resample_image(img, spacing, use_voxels=False, interp_type=0)
-        img = ants.pad_or_crop_image_to_size(img, (H, W, D))
+    resize_factor = min(float(H)/float(img.shape[0]), 
+                        float(W)/float(img.shape[1]),
+                        float(D)/float(img.shape[2]))
     
-    # 3. Conversion Numpy -> PyTorch Tensor
+    spacing = (img.spacing[0] / resize_factor, 
+               img.spacing[1] / resize_factor,
+               img.spacing[2] / resize_factor)   
+    
+    img = ants.resample_image(img, spacing, use_voxels=False, interp_type=0)
+    img = ants.pad_or_crop_image_to_size(img, (H, W, D))
+    
     arr = img.numpy()
-    
-    # Ajustement des dimensions pour Glow (Batch, Canal, Spatial1, Spatial2, Spatial3)
     if arr.ndim == 3: 
-        arr = arr[np.newaxis, ...] # Ajout de la dimension Canal -> (1, H, W, D)
-    elif arr.ndim == 4: 
-        arr = np.transpose(arr, (3, 0, 1, 2)) # (C, H, W, D)
+        arr = arr[np.newaxis, ...] # (1, H, W, D)
         
     t = torch.from_numpy(arr).float()
-    # Ajout de la dimension Batch -> (1, C, H, W, D)
-    t = to01(t.unsqueeze(0), eps=1e-5, winsorize=False)
-
-    return t
-
+    
+    # Normalisation Min-Max robuste pour l'inférence
+    x_min = t.amin(dim=(1, 2, 3), keepdim=True)
+    x_max = t.amax(dim=(1, 2, 3), keepdim=True)
+    t = (t - x_min) / (x_max - x_min + 1e-8)
+    
+    return t # Retourne (1, H, W, D)
+    
 def save_mid_slice_png(x: torch.Tensor, out_path: Path, slice_axis: int = 2):
     import matplotlib.pyplot as plt
     x_np = x.detach().cpu()
@@ -713,9 +708,9 @@ def _load_gaussian_model(gauss_path: Path) -> Dict[str, Any]:
 
 # ---------------------- Model Builders ----------------------
 
-def build_model_from_config(cfg: dict, device: torch.device, target_dhw: Tuple[int, int, int] = None):
-    if target_dhw is not None:
-        H, W, D = int(target_dhw[0]), int(target_dhw[1]), int(target_dhw[2])
+def build_model_from_config(cfg: dict, device: torch.device, target_hwd: Tuple[int, int, int] = None):
+    if target_hwd is not None:
+        H, W, D = int(target_hwd[0]), int(target_hwd[1]), int(target_hwd[2])
     else:
         H = int(cfg.get("H", 64))
         W = int(cfg.get("W", 64))
@@ -728,16 +723,22 @@ def build_model_from_config(cfg: dict, device: torch.device, target_dhw: Tuple[i
     m = create_glow_normalizing_flow_model_3d(
         input_shape=input_shape,
         L=int(cfg.get("L", 3)),
-        K=int(cfg.get("K", 16)),
-        hidden_channels=int(cfg.get("hidden", 64)),
+        K=int(cfg.get("K", 32)),
+        hidden_channels=int(cfg.get("hidden", 128)),
         base=str(cfg.get("base", "glow")),
-        glowbase_logscale_factor=float(cfg.get("glowbase_logscale_factor", 3.0)),
+        glowbase_logscale_factor=float(cfg.get("glowbase_logscale_factor", 1.0)),
+        glowbase_min_log=float(cfg.get("glowbase_min_log", -5.0)),
+        glowbase_max_log=float(cfg.get("glowbase_max_log", 5.0)),
         split_mode="channel",
         scale=True,
         scale_map=str(cfg.get("scale_map", "tanh")),
-        net_actnorm=bool(cfg.get("net_actnorm", False))
+        leaky=0.0,
+        net_actnorm=bool(cfg.get("net_actnorm", False)),
+        scale_cap=float(cfg.get("scale_cap", 0.5)),
     ).to(device).float().eval()
-    m.input_shape = input_shape
+    
+    if not hasattr(m, "input_shape"):
+        m.input_shape = input_shape
     return m
 
 def resolve_ckpt_path(p: Path) -> Path:
@@ -748,7 +749,18 @@ def resolve_ckpt_path(p: Path) -> Path:
     if not p.exists(): raise FileNotFoundError(f"Checkpoint not found: {p}")
     return p
 
-def load_weights_into_model(model, blob, view_idx: int, prefer_ema: bool = True):
+def load_weights_into_model(model, blob, view_idx: int, prefer_ema: bool = True,
+                            view_name: str | None = None, cfg_views: list[str] | None = None):
+    """
+    Robustly load weights for a given view into `model`.
+
+    Selection order:
+      (a) if prefer_ema: blob["ema"][slot]
+      (b) blob["models"][slot]
+      (c) blob["state_dict"]
+      (d) raw dict of param tensors
+    The `slot` comes from `cfg_views` name mapping if available, else `view_idx`.
+    """
     def try_load(sd):
         try:
             model.load_state_dict(sd, strict=True)
@@ -767,46 +779,42 @@ def load_weights_into_model(model, blob, view_idx: int, prefer_ema: bool = True)
             return candidate
         return None
 
-    target_idx = int(view_idx)
+    # map manifest name -> checkpoint slot if we know the training order
+    vidx_eff = int(view_idx)
+    if cfg_views and view_name in cfg_views:
+        vidx_eff = cfg_views.index(view_name)
 
-    if prefer_ema and isinstance(blob.get("ema"), list) and len(blob["ema"]) > 0:
-        max_idx = len(blob["ema"]) - 1
-        k = max(0, min(target_idx, max_idx))
+    # (a) EMA list
+    if prefer_ema and isinstance(blob.get("ema"), (list, tuple)) and len(blob["ema"]) > 0:
+        k = max(0, min(vidx_eff, len(blob["ema"]) - 1))
         sd = extract_sd(blob["ema"][k])
         if sd is not None:
             ok, note = try_load(sd)
             if ok:
-                if target_idx > max_idx:
-                    print(f"\n[AVERTISSEMENT CRITIQUE] L'index de vue {target_idx} n'existe pas dans le checkpoint (ema).")
-                    print(f"-> Repli forcé sur les poids de l'index {k}.")
-                    print(f"-> Attention : Les latents générés pour cette modalité seront hors distribution (Out-Of-Distribution) !\n")
-                return True, f"ema slot={k} ({note})"
-            
-    if isinstance(blob.get("models"), list) and len(blob["models"]) > 0:
-        max_idx = len(blob["models"]) - 1
-        k = max(0, min(target_idx, max_idx))
+                return True, ("ema", f"slot={k}")
+
+    # (b) models list
+    if isinstance(blob.get("models"), (list, tuple)) and len(blob["models"]) > 0:
+        k = max(0, min(vidx_eff, len(blob["models"]) - 1))
         sd = extract_sd(blob["models"][k])
         if sd is not None:
             ok, note = try_load(sd)
             if ok:
-                if target_idx > max_idx:
-                    print(f"\n[AVERTISSEMENT CRITIQUE] L'index de vue {target_idx} n'existe pas dans le checkpoint (models).")
-                    print(f"-> Repli forcé sur les poids de l'index {k}.")
-                    print(f"-> Attention : Les latents générés pour cette modalité seront hors distribution (Out-Of-Distribution) !\n")
-                return True, f"models slot={k} ({note})"
-            
-    if "state_dict" in blob:
+                return True, ("models", f"slot={k}")
+
+    # (c) single state_dict
+    if isinstance(blob.get("state_dict"), dict):
         ok, note = try_load(blob["state_dict"])
         if ok:
-            if target_idx > 0:
-                 print(f"\n[AVERTISSEMENT CRITIQUE] Checkpoint unique (state_dict) détecté. Repli forcé de la vue {target_idx} sur l'unique vue disponible.\n")
-            return True, f"state_dict ({note})"
-            
+            return True, ("state_dict", None)
+
+    # (d) raw dict with param keys
     if isinstance(blob, dict) and all(isinstance(k, str) for k in blob.keys()) and any("." in k for k in blob.keys()):
         ok, note = try_load(blob)
-        if ok: return True, f"raw ({note})"
+        if ok:
+            return True, ("raw", None)
 
-    return False, "no valid weights found"
+    return False, ("none", "no recognizable weights in blob")
 
 
 def _prime_if_needed(model, H, W, D, device):
@@ -897,14 +905,17 @@ def _cond_mean_block_lowrank(U: np.ndarray, eig: np.ndarray, sigma2: float,
 
 def _flatten_latents_by_level(z_list) -> List:
     """
-    Input: list of tensors or a single tensor; each tensor shape (B, C, H, W) or (B, D).
+    Input: list of tensors or a single tensor; each tensor shape (B, C, H, W, D), (B, C, H, W) or (B, D).
     Output: list of (B, D_l) 2-D tensors per level.
     """
     if not isinstance(z_list, (list, tuple)):
         z_list = [z_list]
     outs = []
     for z in z_list:
-        if z.ndim == 4:
+        if z.ndim == 5:  # <-- Prise en charge de la 3D
+            B, C, H, W, D = z.shape
+            outs.append(z.reshape(B, C * H * W * D))
+        elif z.ndim == 4: # Gardé par rétrocompatibilité ou architectures mixtes
             B, C, H, W = z.shape
             outs.append(z.reshape(B, C * H * W))
         elif z.ndim == 2:
@@ -1095,7 +1106,7 @@ def main_recon(argv=None):
     except:
         raise ValueError(f"Invalid --volume-size {args.volume_size}. Expected HxWxD.")
 
-    model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc, "D": Dc}, device=device, target_dhw=(Hc, Wc, Dc))
+    model = build_model_from_config(cfg if cfg else {"H": Hc, "W": Wc, "D": Dc}, device=device, target_hwd=(Hc, Wc, Dc))
     model.eval()
 
     manifest_path = Path(args.manifest)
@@ -1123,7 +1134,7 @@ def main_recon(argv=None):
     # Traitement par lots pour la 3D
     for batch_idx in range(0, min(bs, len(vcol))):
         pth = vcol[batch_idx]
-        xi = _read_image_3d(pth, target_dhw=(Hc, Wc, Dc)) # Doit retourner (1, H, W)
+        xi = _read_image_3d(pth, target_hwd=(Hc, Wc, Dc)) # Doit retourner (1, H, W)
         xb = xi.unsqueeze(0).to(device=device, dtype=torch.float32) # (1, 1, H, W, D)
 
         # Base reconstruction
@@ -1555,7 +1566,7 @@ def main_gauss_impute(argv=None):
         z_shapes = {} # Dictionnaire pour capturer dynamiquement les formes 5D réelles
         
         for v_idx, v_name in enumerate(obs_views):
-            mdl_obs = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+            mdl_obs = build_model_from_config(cfg, device, target_hwd=args.volume_size)
             global_idx = all_views.index(v_name)
             
             ok, note = load_weights_into_model(mdl_obs, blob, global_idx)
@@ -1609,7 +1620,7 @@ def main_gauss_impute(argv=None):
             z_pred_levels.append(z_t_tensor.to(device))
 
         tgt_global_idx = all_views.index(tgt_views[0])
-        mdl_tgt = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+        mdl_tgt = build_model_from_config(cfg, device, target_hwd=args.volume_size)
         
         ok, note = load_weights_into_model(mdl_tgt, blob, tgt_global_idx)
         if not ok: raise RuntimeError(f"Weights failed for {tgt_views[0]}: {note}")
@@ -1669,7 +1680,7 @@ def main_recon_template(argv=None):
     # 1. Chargement Modèle
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
     cfg = blob.get("config", {})
-    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+    model = build_model_from_config(cfg, device, target_hwd=args.volume_size)
     _prime_if_needed(model, *args.volume_size, device)
     
     ok, note = load_weights_into_model(model, blob, int(args.view_index))
@@ -1852,7 +1863,7 @@ def main_recon_cohort_template(argv=None):
     ckpt_path = resolve_ckpt_path(Path(args.ckpt))
     blob = torch.load(ckpt_path, map_location=device, weights_only=False)
     cfg = blob.get("config", {})
-    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+    model = build_model_from_config(cfg, device, target_hwd=args.volume_size)
     model.eval()
 
     # 2. Chargement Manifeste
@@ -1961,7 +1972,7 @@ def main_recon_temperature(argv=None):
     blob = torch.load(ckpt_path, map_location=device, weights_only=False)
     cfg = blob.get("config", {})
     
-    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+    model = build_model_from_config(cfg, device, target_hwd=args.volume_size)
     model.eval()
 
     # 2. Chargement Manifeste & Poids
@@ -2066,7 +2077,7 @@ def main_calc_distance(argv=None):
     # 1. Chargement du modèle
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
     cfg = blob.get("config", {})
-    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+    model = build_model_from_config(cfg, device, target_hwd=args.volume_size)
     
     _prime_if_needed(model, *args.volume_size, device)
     ok, note = load_weights_into_model(model, blob, int(args.view_index))
@@ -2353,7 +2364,7 @@ def main_recon_interpolate(argv=None):
     # 1. Chargement Modèle (EMA désactivé par sécurité d'inférence)
     blob = torch.load(resolve_ckpt_path(Path(args.ckpt)), map_location=device, weights_only=False)
     cfg = blob.get("config", {})
-    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+    model = build_model_from_config(cfg, device, target_hwd=args.volume_size)
     _prime_if_needed(model, *args.volume_size, device)
     
     ok, note = load_weights_into_model(model, blob, int(args.view_index), prefer_ema=False)
@@ -2496,7 +2507,7 @@ def main_sample(argv=None):
     blob = torch.load(ckpt_path, map_location=device, weights_only=False)
     cfg = blob.get("config", {})
     
-    model = build_model_from_config(cfg, device, target_dhw=args.volume_size)
+    model = build_model_from_config(cfg, device, target_hwd=args.volume_size)
     
     Hc, Wc, Dc = args.volume_size
     _prime_if_needed(model, Hc, Wc, Dc, device)
