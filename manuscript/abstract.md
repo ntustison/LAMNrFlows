@@ -14,7 +14,7 @@ topologically unfolding the sampled data manifold into a continuous vector
 space. In the context of biological imaging, this transformation establishes a
 potential basis for a deep learning interpretation of foundational computational
 anatomy concepts, such as the population template, latent distances, and
-geodesic pairwise image interpolation. Consequently, the proposed framework
+geodesic pairwise image interpolation. Additionally, the proposed framework
 enables closed-form conditional modeling for exact cross-view imputation and
 other latent space manipulations. Evaluations and illustrations on both
 imaging-derived phenotypes (IDPs) and multimodal MRI demonstrate the proposed

@@ -66,9 +66,9 @@ framework for likelihood-calibrated multiview modeling.
 
 ## Multiview Learning with LAMNr Flows
 
-Multiview learning operates on two complementary principles: first, that each
+Multiview learning operates on two complementary principles: 1) each
 distinct acquisition or feature space ("view") contributes unique, view-specific
-information, and second, that shared information across views can be transformed
+information and 2) shared information across views can be transformed
 via projections (often to lower-dimensional space) to improve calibration and
 cross-cohort comparability. Traditionally, these shared projections have been
 estimated using classical correlation-based methods, such as Canonical
@@ -106,7 +106,13 @@ coordinates, the framework recovers the interpretability of a shared/private
 decomposition within a nonlinear, invertible space. Crucially, by modeling the
 joint latents with a Gaussian distribution, LAMNr flows enable closed-form
 conditional reconstructions. This allows the shared subspace to function as a
-geometrically-informed coordinate system. 
+geometrically-informed coordinate system. Recent efforts have explored
+multiview-enriched normalizing flows for complex density estimation
+[@kruse2025multiflowmultiviewenrichednormalizingflows] using standard RealNVP
+architectures. LAMNr flows specifically extend this logic by integrating a
+latent shared/private decomposition that enables geometrically-informed
+coordinate systems for multimodal alignment.  In addition, LAMNr flows extend to
+both RealNVP and to the image-specific Glow architecture.  
 
 Additionally, the development of LAMNr flows provides a practical strategy in
 ensuring topological integrity within neural density estimators. Historically,
