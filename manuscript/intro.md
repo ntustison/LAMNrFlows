@@ -111,8 +111,8 @@ multiview-enriched normalizing flows for complex density estimation
 [@kruse2025multiflowmultiviewenrichednormalizingflows] using standard RealNVP
 architectures. LAMNr flows specifically extend this logic by integrating a
 latent shared/private decomposition that enables geometrically-informed
-coordinate systems for multimodal alignment.  In addition, LAMNr flows extend to
-both RealNVP and to the image-specific Glow architecture.  
+coordinate systems for multimodal alignment while also including image-specific 
+Glow architectures.  
 
 Additionally, the development of LAMNr flows provides a practical strategy in
 ensuring topological integrity within neural density estimators. Historically,
