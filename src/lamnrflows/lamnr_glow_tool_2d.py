@@ -3428,7 +3428,12 @@ def main_gauss_fit(argv: List[str] | None = None):
             blk_tr = [float(np.trace(Sd[a:b, a:b])) for a, b in zip(offs[:-1], offs[1:])]
             print("[fit Σ L{} by view] ".format(l) + " ".join("v{}:{:.3e}".format(vi, t) for vi, t in enumerate(blk_tr)))
 
-            mu_list.append(mu); Sigma_list.append(Sigma); stats_list.append(stats)
+            mu_list.append(mu); 
+            Sigma_list.append(Sigma); 
+            stats_list.append(stats)
+            import gc
+            del X, Xc, Xc_clean, Sd
+            gc.collect()
 
         out_blob["mu"] = mu_list
         out_blob["Sigma"] = Sigma_list
