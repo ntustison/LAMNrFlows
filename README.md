@@ -228,7 +228,7 @@ Visualization cycle (~20 seconds)
 </details>
 
 <details>
-<summary>Model: whole head, 2D, axial, 3 views--T1/FLAIR/FA</summary>
+<summary>Model: whole head, 2D, axial, 3 views (T1/FLAIR/FA)</summary>
 
 * [OpenNeuro data](https://openneuro.org/datasets/ds004856) 
 * [Command script](https://github.com/ntustison/LAMNrFlows/blob/main/examples/lamnr_glow/2D/command_train_lamnr_glow_2d_t1_t2flair_fa_whole_head.sh)
@@ -267,7 +267,7 @@ Comparison of population Fréchet mean approximations. (Top) The standard
 
 
 <details>
-<summary>Model: MTL, 3D, 2 views--T1/T2</summary>
+<summary>Model: MTL, 3D, 2 views (T1/T2)</summary>
 
 Training evolution samples (100000 iterations)
 <p align="center">
