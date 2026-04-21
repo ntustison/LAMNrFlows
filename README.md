@@ -212,7 +212,7 @@ __Latent-aligned multiview__
 </details>
 
 <details>
-<summary>Data augmentation:  (HCP-YA T1w template example)</summary>
+<summary>Data augmentation:  HCP-YA T1w template example</summary>
 
 ```bash
 iterations=100000
