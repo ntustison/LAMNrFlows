@@ -274,7 +274,6 @@ def resample_with_ants_size(x: torch.Tensor,
     y = torch.stack(outs, dim=1)  # (N,C,h,w)
     return y
 
-
 @torch.no_grad()
 def sample_with_temperature(model, n: int, temp: float):
     """
@@ -628,9 +627,6 @@ def build_model_from_config(cfg: dict, device: torch.device):
         m.input_shape = input_shape
     return m
 
-
-# ---------------------- reconstruction sanity check ----------------------
-
 # ---------------------- reconstruction sanity check ----------------------
 @torch.no_grad()
 def reconstruct_batch(model, xb: torch.Tensor):
@@ -682,8 +678,6 @@ def make_recon_panel(x: torch.Tensor, xh: torch.Tensor) -> torch.Tensor:
         panels.append(diff[i:i+1])
 
     return torch.cat(panels, dim=0)
-
-
 
 def _encode_latents(model, xb: torch.Tensor) -> List[torch.Tensor]:
     """

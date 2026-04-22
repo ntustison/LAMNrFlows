@@ -165,6 +165,15 @@ def parse_hwd_float(spec: str) -> Tuple[float, float, float]:
     except Exception:
         raise argparse.ArgumentTypeError(f"Invalid spacing spec '{spec}'. Expected like '1.0x1.0x1.0'.")
 
+def parse_mn(spec: str) -> Tuple[int, int]:
+    try:
+        m, n = spec.lower().split("x")
+        M, N = int(m), int(n)
+        assert M > 0 and N > 0
+        return M, N
+    except Exception:
+        raise argparse.ArgumentTypeError(f"Invalid --grid-size '{spec}'. Expected like '6x8' (rows×cols).")
+
 def set_deterministic(seed: int):
     torch.manual_seed(seed)
     try:
@@ -230,17 +239,165 @@ def _coerce_5d(x, target_hwd=None):
 
     return x
 
-def save_nifti(x: torch.Tensor, out_path: Path, spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0)):
+from typing import Tuple, Optional
+import torch
+import numpy as np
+import ants
+
+@torch.no_grad()
+def resample_with_ants_spacing_3d(x: torch.Tensor,
+                                  native_spacing: Tuple[float, float, float],
+                                  target_spacing: Tuple[float, float, float]) -> torch.Tensor:
+    """
+    Resample 5D tensor (N, C, D, H, W) to a target physical spacing using ANTsPy (use_voxels=False).
+    If C>1, channels are resampled independently and stacked back.
+    """
+    device, dtype = x.device, x.dtype
+    N, C = x.shape[0], x.shape[1]
+    outs = []
+    
+    for c in range(C):
+        xs = []
+        for i in range(N):
+            arr = x[i, c].detach().cpu().numpy()
+            img = ants.from_numpy(arr)
+            
+            # Application de l'espacement 3D natif
+            try:
+                img.set_spacing((float(native_spacing[0]), float(native_spacing[1]), float(native_spacing[2])))
+            except Exception:
+                img.spacing = (float(native_spacing[0]), float(native_spacing[1]), float(native_spacing[2]))
+                
+            # Rééchantillonnage physique 3D
+            img_r = ants.resample_image(img, 
+                                        (float(target_spacing[0]), float(target_spacing[1]), float(target_spacing[2])),
+                                        use_voxels=False, 
+                                        interp_type=0)
+            
+            xs.append(torch.from_numpy(img_r.numpy()).to(device=device, dtype=dtype))
+        outs.append(torch.stack(xs, dim=0))
+        
+    y = torch.stack(outs, dim=1)  # (N, C, d, h, w)
+    return y
+
+@torch.no_grad()
+def resample_with_ants_size_3d(x: torch.Tensor,
+                               target_size: Tuple[int, int, int],
+                               native_spacing: Optional[Tuple[float, float, float]] = None) -> torch.Tensor:
+    """
+    Resample 5D tensor (N, C, D, H, W) to a target voxel size (D, H, W) using ANTsPy (use_voxels=True).
+    """
+    device, dtype = x.device, x.dtype
+    N, C = x.shape[0], x.shape[1]
+    outs = []
+    
+    for c in range(C):
+        xs = []
+        for i in range(N):
+            arr = x[i, c].detach().cpu().numpy()
+            img = ants.from_numpy(arr)
+            
+            if native_spacing is not None:
+                try:
+                    img.set_spacing((float(native_spacing[0]), float(native_spacing[1]), float(native_spacing[2])))
+                except Exception:
+                    img.spacing = (float(native_spacing[0]), float(native_spacing[1]), float(native_spacing[2]))
+                    
+            # Rééchantillonnage par nombre de voxels 3D
+            img_r = ants.resample_image(img, 
+                                        (int(target_size[0]), int(target_size[1]), int(target_size[2])),
+                                        use_voxels=True, 
+                                        interp_type=0)
+            
+            xs.append(torch.from_numpy(img_r.numpy()).to(device=device, dtype=dtype))
+        outs.append(torch.stack(xs, dim=0))
+        
+    y = torch.stack(outs, dim=1)  # (N, C, d, h, w)
+    return y
+
+import numpy as np
+import torch
+import ants
+from pathlib import Path
+
+def save_nifti(x: torch.Tensor, out_path: Path | str, reference_image: ants.ANTsImage | None = None):
+    """
+    Sauvegarde un tenseur 3D au format NIfTI.
+    Utilise from_numpy_like pour hériter de la géométrie exacte si une référence est fournie.
+    """
     x = x.detach().cpu()
-    if x.ndim == 5: x = x.squeeze(0) 
+    
+    # Nettoyage des dimensions (retrait du batch si présent)
+    if x.ndim == 5: 
+        x = x.squeeze(0) 
+        
     arr = x.numpy()
-    if arr.shape[0] == 1: arr = arr[0] 
-    else: arr = np.transpose(arr, (1, 2, 3, 0))
-    img = ants.from_numpy(arr)
-    sp = tuple(float(s) for s in spacing)
-    try: img.set_spacing(sp)
-    except: pass
+    
+    # Gestion des canaux (C, D, H, W) -> (D, H, W, C) pour ANTs multi-canaux
+    if arr.shape[0] == 1: 
+        arr = arr[0] 
+    else: 
+        arr = np.transpose(arr, (1, 2, 3, 0))
+        
+    # Création de l'image ANTs
+    if reference_image is not None:
+        img = ants.from_numpy_like(arr, reference_image)
+    else:
+        img = ants.from_numpy(arr)
+        # Fallback de sécurité (1 mm isotropique)
+        try:
+            img.set_spacing((1.0, 1.0, 1.0))
+        except Exception:
+            pass
+            
     ants.image_write(img, str(out_path))
+
+import torchvision as tv
+import torch
+from pathlib import Path
+
+def save_grid_2d_slice(x: torch.Tensor, out_path: Path | str, nrow: int, slice_axis: int = 2, winsorize: bool = True):
+    """
+    Extrait une coupe 2D du milieu de chaque volume 3D dans un lot (batch) 
+    et sauvegarde le tout sous forme de grille d'images (PNG/JPG).
+    
+    Input attendu : Tenseur 5D de forme (B, C, Dim1, Dim2, Dim3)
+    """
+    # 1. Préparation du tenseur (CPU et float32)
+    x = x.detach().cpu().float()
+    
+    # Sécurité : S'assurer d'avoir 5 dimensions
+    if x.ndim == 4:
+        x = x.unsqueeze(0)
+        
+    # 2. Normalisation globale sur le volume 3D
+    # (Utilise la fonction to01 déjà présente dans votre script)
+    x = to01(x, winsorize=winsorize)
+    
+    # 3. Détermination de la dimension à couper 
+    # (+2 pour ignorer les dimensions Batch et Channel)
+    dim_to_slice = slice_axis + 2
+    
+    # Trouver l'indice de la coupe centrale
+    mid_idx = x.shape[dim_to_slice] // 2
+    
+    # 4. Extraction de la coupe pour tout le lot simultanément
+    if slice_axis == 0:
+        x_2d = x[:, :, mid_idx, :, :]
+    elif slice_axis == 1:
+        x_2d = x[:, :, :, mid_idx, :]
+    elif slice_axis == 2:
+        x_2d = x[:, :, :, :, mid_idx]
+    else:
+        raise ValueError(f"slice_axis invalide ({slice_axis}). Doit être 0, 1 ou 2.")
+        
+    # x_2d est maintenant de forme (B, C, H, W)
+    
+    # 5. Création du dossier cible et sauvegarde
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    tv.utils.save_image(x_2d, str(out_path), nrow=int(nrow))
 
 def _read_image_3d(path: Path, target_hwd: tuple[int, int, int]) -> torch.Tensor:
     import ants
@@ -708,6 +865,51 @@ def _load_gaussian_model(gauss_path: Path) -> Dict[str, Any]:
 
 # ---------------------- Model Builders ----------------------
 
+def _gather_val_paths(val_list: Optional[list[str]], limit: int) -> list[Path]:
+    """
+    Unified input method: accept one or more tokens that may be
+      - a glob pattern (quote in shell to avoid pre-expansion OR pass many expanded files),
+      - a text file listing one path per line,
+      - a direct image path.
+    Returns up to `limit` unique, existing Paths.
+    """
+    from glob import glob
+    import os
+    paths: list[Path] = []
+    tokens = val_list or []
+    for tok in tokens:
+        tok = os.path.expandvars(os.path.expanduser(tok))
+        p = Path(tok)
+        if p.exists() and p.is_file():
+            # If it's a text file, read lines; else treat as a direct image path
+            if p.suffix.lower() in (".txt", ".lst", ".csv"):
+                try:
+                    with open(p, "r") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line:
+                                paths.append(Path(os.path.expandvars(os.path.expanduser(line))))
+                except Exception:
+                    pass
+            else:
+                paths.append(p)
+        else:
+            # Treat as glob pattern
+            for g in sorted(glob(tok, recursive=True)):
+                gp = Path(g)
+                if gp.exists() and gp.is_file():
+                    paths.append(gp)
+    # unique / preserve order
+    seen = set()
+    uniq: list[Path] = []
+    for p in paths:
+        if p not in seen and p.exists() and p.is_file():
+            uniq.append(p); seen.add(p)
+        if len(uniq) >= int(limit):
+            break
+    return uniq
+
+
 def build_model_from_config(cfg: dict, device: torch.device, target_hwd: Tuple[int, int, int] = None):
     if target_hwd is not None:
         H, W, D = int(target_hwd[0]), int(target_hwd[1]), int(target_hwd[2])
@@ -1098,6 +1300,7 @@ def main_recon(argv=None):
     ap.add_argument("--views", type=str, required=True, help="Comma list of views (e.g., T1,FA)")
     ap.add_argument("--view-index", type=int, default=0, help="Which view to load (0-based)")
     ap.add_argument("--volume-size", type=str, required=True, help="Size format HxWxD (e.g., 64x80x64)")
+    ap.add_argument("--reference-image", type=str, default=None, help="Optional 3D image to define the header.")
     ap.add_argument("--batch", type=int, default=1, help="Batch size (keep low for 3D)")
     ap.add_argument("--devices", type=str, default="cuda:0")
     ap.add_argument("--outdir", type=str, required=True, help="Output directory for NIfTI volumes")
@@ -1184,16 +1387,26 @@ def main_recon(argv=None):
         diff = torch.abs(xb - xh)
         base_name = f"subj_{batch_idx:04d}_{vname}"
         
-        save_nifti(xb, out_dir / f"{base_name}_orig.nii.gz")
-        save_nifti(xh, out_dir / f"{base_name}_recon.nii.gz")
-        save_nifti(diff, out_dir / f"{base_name}_diff.nii.gz")
+        if args.reference_image is not None:
+            reference_image = ants.image_read(args.reference_image)
+            save_nifti(xb, out_dir / f"{base_name}_orig.nii.gz", reference_image)
+            save_nifti(xh, out_dir / f"{base_name}_recon.nii.gz", reference_image)
+            save_nifti(diff, out_dir / f"{base_name}_diff.nii.gz", reference_image)
+        else:
+            save_nifti(xb, out_dir / f"{base_name}_orig.nii.gz")
+            save_nifti(xh, out_dir / f"{base_name}_recon.nii.gz")
+            save_nifti(diff, out_dir / f"{base_name}_diff.nii.gz")
         
         print(f"[{batch_idx}] max |x - x_hat| = {float(diff.max().item()):.6f}")
 
         if xh_edit is not None:
             diff_edit = torch.abs(xb - xh_edit)
-            save_nifti(xh_edit, out_dir / f"{base_name}_edit.nii.gz")
-            save_nifti(diff_edit, out_dir / f"{base_name}_diff_edit.nii.gz")
+            if args.reference_image is not None:
+                save_nifti(xh_edit, out_dir / f"{base_name}_edit.nii.gz", reference_image)
+                save_nifti(diff_edit, out_dir / f"{base_name}_diff_edit.nii.gz", reference_image)
+            else:
+                save_nifti(xh_edit, out_dir / f"{base_name}_edit.nii.gz")
+                save_nifti(diff_edit, out_dir / f"{base_name}_diff_edit.nii.gz")
             print(f"[{batch_idx}] max |x - x_hat_edit| = {float(diff_edit.max().item()):.6f}")
 
     print(f"[recon] Volumes written to {out_dir}")
@@ -1877,7 +2090,7 @@ def main_recon_cohort_template(argv=None):
     ap.add_argument("--manifest", type=str, required=True, help="Manifest CSV with cohort images")
     ap.add_argument("--views", type=str, required=True, help="Comma list of views (e.g. T1,FA)")
     ap.add_argument("--view-index", type=int, default=0, help="Which view to use")
-    ap.add_argument("--volume-size", type=parse_dhw, default="64x64x64", help="Target spatial dims")
+    ap.add_argument("--volume-size", type=parse_hwd, default="64x64x64", help="Target spatial dims")
     ap.add_argument("--devices", type=str, default="cuda:0")
     ap.add_argument("--out", type=str, required=True, help="Output NIfTI filename")
     ap.add_argument("--sharpen-image", action="store_true", help="Apply Laplacian sharpening")
@@ -2115,21 +2328,24 @@ def main_calc_distance(argv=None):
     # 2. Chargement du modèle Gaussien (pour obtenir Mu et la structure des niveaux)
     npz = np.load(args.gauss, allow_pickle=True)
     L = int(npz["L"])
-    views_g = list(npz["views"])
-    level_sizes = [int(sz) for sz in npz["dims_per_view_L0"]]
+    
+    # Nettoyage des chaînes de caractères numpy
+    views_g = [str(v) for v in np.array(npz["views"]).tolist()]
     
     if vname not in views_g: 
         raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
-    v_idx_g = views_g.index(vname)
+    
+    # Extraction de la cartographie des slices via le JSON intégré
+    import json
+    raw_slices = json.loads(str(np.array(npz["slices_json"]).tolist()))
     
     slice_map = [] 
     for l in range(L):
-        sz = level_sizes[l]
         d = {}
-        curr = 0
-        for v in views_g:
-            d[v] = (curr, curr + sz)
-            curr += sz
+        for v_idx, v in enumerate(views_g):
+            # Le dictionnaire JSON encode les clés d'index (v_idx) en strings
+            s, e = raw_slices[l][str(v_idx)]
+            d[v] = (int(s), int(e))
         slice_map.append(d)
 
     # 3. Parsing Source (Manifest ou Image Unique)
@@ -2181,7 +2397,8 @@ def main_calc_distance(argv=None):
         if not tgt_path.exists(): raise FileNotFoundError(f"Target image not found: {tgt_path}")
         print(f"[info] Reference: Target Image ({tgt_path.name})")
         
-        xt = _read_image_3d(tgt_path, target_hwd=args.volume_size).to(device)
+        # Ajout de .unsqueeze(0) pour passer de 4D à 5D
+        xt = _read_image_3d(tgt_path, target_hwd=args.volume_size).unsqueeze(0).to(device)
         with torch.no_grad():
             z_tgt_list, _ = model.inverse_and_log_det(xt)
             if not isinstance(z_tgt_list, list): z_tgt_list = [z_tgt_list]
@@ -2231,7 +2448,8 @@ def main_calc_distance(argv=None):
             def _load_single(p):
                 try:
                     xi = _read_image_3d(p, target_hwd=args.volume_size)
-                    return xi.squeeze(0), str(p)
+                    # Retourner xi tel quel pour conserver la dimension du canal (1, D, H, W)
+                    return xi, str(p)
                 except Exception as e:
                     print(f"[warn] Failed to read {p}: {e}")
                     return None, None
@@ -2510,12 +2728,218 @@ def main_recon_interpolate(argv=None):
 
     return 0
 
+# --------------------------- main ---------------------------
+import argparse
+from pathlib import Path
+import json
+import torch
+import torch.nn.functional as F
+
+@torch.no_grad()
+def reconstruct_batch(model, xb: torch.Tensor):
+    """
+    Round-trip x -> z -> x_hat using MultiscaleFlow APIs for 3D volumes.
+    Uses model.inverse_and_log_det(x) to obtain latents, then decodes with
+    model.forward_and_log_det(z_list) for a noise-free reconstruction.
+    Returns x_hat tensor typically (N, C, D, H, W) or (N, C, H, W, D).
+    """
+    # Push x to latents
+    if hasattr(model, "inverse_and_log_det"):
+        z, _ = model.inverse_and_log_det(xb)
+    elif hasattr(model, "inverse"):
+        z, _ = model.inverse(xb)
+    else:
+        raise RuntimeError("Model lacks inverse mapping (inverse_and_log_det / inverse).")
+
+    # Ensure list of tensors for multiscale
+    z_list = z if isinstance(z, (list, tuple)) else [z]
+
+    # Decode using the flow graph
+    if hasattr(model, "forward_and_log_det"):
+        xh, _ = model.forward_and_log_det(z_list)
+        # Extraction des 3 dimensions spatiales de l'entrée d'origine
+        target_shape = (xb.shape[-3], xb.shape[-2], xb.shape[-1])
+        return _coerce_5d(xh, target_hwd=target_shape)
+    else:
+        raise RuntimeError(
+            "Model does not expose forward_and_log_det(z_list); cannot decode latents. "
+            "Please update your flow wrapper to include forward_and_log_det."
+        )
+
+def make_recon_panel(x: torch.Tensor, xh: torch.Tensor) -> torch.Tensor:
+    """
+    Create a 3-column panel per sample: [x | x_hat | abs(x-x_hat)], stacked into a grid batch.
+    Input: (N,1,H,W) in [0,1]
+    Output: (3N,1,H,W) suitable for save_grid with nrow=3
+    """
+    x = _coerce_nchw_4d(x, target_hw=(x.shape[-2], x.shape[-1]))
+    xh = _coerce_nchw_4d(xh, target_hw=(x.shape[-2], x.shape[-1]))
+    diff = torch.abs(x - xh)
+    diff_max = float(diff.max().item())
+
+    print(f"[info] recon: max |x - x_hat| = {diff_max:.6f}")
+
+    diff = to01(diff)
+    panels = []
+    for i in range(x.shape[0]):
+        panels.append(x[i:i+1])
+        panels.append(xh[i:i+1])
+        panels.append(diff[i:i+1])
+
+    return torch.cat(panels, dim=0)
+
+def make_recon_panel_3d(x: torch.Tensor, xh: torch.Tensor) -> torch.Tensor:
+    """
+    Create a sequence of 3 volumes per sample: [x | x_hat | abs(x-x_hat)], stacked into a batch.
+    Input: (N, C, H, W, D) in [0,1]
+    Output: (3N, C, H, W, D) suitable for 4D NIfTI export or 2D slice grids.
+    """
+    target_shape = (x.shape[-3], x.shape[-2], x.shape[-1])
+    
+    x = _coerce_5d(x, target_hwd=target_shape)
+    xh = _coerce_5d(xh, target_hwd=target_shape)
+    
+    diff = torch.abs(x - xh)
+    diff_max = float(diff.max().item())
+
+    print(f"[info] recon: max |x - x_hat| = {diff_max:.6f}")
+
+    # Normalisation de la différence pour mettre en évidence les erreurs
+    diff = to01(diff)
+    
+    panels = []
+    for i in range(x.shape[0]):
+        panels.append(x[i:i+1])
+        panels.append(xh[i:i+1])
+        panels.append(diff[i:i+1])
+
+    return torch.cat(panels, dim=0)
+@torch.no_grad()
+def sample_with_temperature(model, n: int, temp: float):
+    """
+    Robust sampler that tries to honor temperature:
+      1) model.sample(n, temperature=temp)
+      2) model.sample(n, T=temp)
+      3) Temporarily set q0 temperatures if available, then model.sample(n)
+      4) Fallback: model.sample(n) with a warning (temperature likely ignored)
+    Returns a tensor (N,C,H,W) or a (list/tuple, we coerce later).
+    """
+
+    def _try_set_temperature_on_q0(model, temp: float) -> Optional[Tuple[object, list]]:
+        """
+        Best-effort: if model has q0 distributions, try to set their temperature then return a handle to restore later.
+        Returns (container, prev_values) if successful, otherwise None.
+        """
+        q0 = getattr(model, "q0", None)
+        if q0 is None:
+            return None
+        # q0 may be a list/tuple of base dists, or a single object with sub-d dists
+        bases = []
+        if isinstance(q0, (list, tuple)):
+            bases = list(q0)
+        else:
+            # try common patterns
+            for attr in ("q0s", "bases", "base"):
+                cand = getattr(q0, attr, None)
+                if cand is not None:
+                    if isinstance(cand, (list, tuple)):
+                        bases = list(cand)
+                    else:
+                        bases = [cand]
+                    break
+            if not bases:
+                bases = [q0]
+
+        prev = []
+        did_any = False
+        for b in bases:
+            # Try common APIs
+            if hasattr(b, "T"):
+                try:
+                    prev.append(("T", float(getattr(b, "T"))))
+                    setattr(b, "T", float(temp))
+                    did_any = True
+                    continue
+                except Exception:
+                    pass
+            if hasattr(b, "temperature"):
+                try:
+                    prev.append(("temperature", float(getattr(b, "temperature"))))
+                    setattr(b, "temperature", float(temp))
+                    did_any = True
+                    continue
+                except Exception:
+                    pass
+            if hasattr(b, "set_temperature"):
+                try:
+                    prev.append(("call", None))
+                    b.set_temperature(float(temp))
+                    did_any = True
+                    continue
+                except Exception:
+                    pass
+        if did_any:
+            return (bases, prev)
+        return None
+
+    def _restore_q0_temperature(handle: Tuple[object, list] | None):
+        if handle is None:
+            return
+        bases, prev = handle
+        # prev aligns with bases by index if we stored in order
+        if not isinstance(bases, (list, tuple)):
+            return
+        j = 0
+        for i, b in enumerate(bases):
+            if j >= len(prev):
+                break
+            tag, val = prev[j]
+            j += 1
+            try:
+                if tag == "T" and hasattr(b, "T"):
+                    setattr(b, "T", float(val))
+                elif tag == "temperature" and hasattr(b, "temperature"):
+                    setattr(b, "temperature", float(val))
+                # if tag == "call", there may be no easy restore
+            except Exception:
+                pass
+
+    # 1) Try explicit kw "temperature"
+    try:
+        return model.sample(n, temperature=float(temp))
+    except TypeError:
+        pass
+    except Exception as e:
+        # some models accept the kw but error elsewhere—propagate later if all fails
+        err1 = e
+    # 2) Try "T"
+    try:
+        return model.sample(n, T=float(temp))
+    except TypeError:
+        pass
+    except Exception as e2:
+        err2 = e2
+    # 3) Try setting q0 temperature temporarily
+    handle = None
+    try:
+        handle = _try_set_temperature_on_q0(model, float(temp))
+        if handle is not None:
+            out = model.sample(n)
+            return out
+    finally:
+        _restore_q0_temperature(handle)
+    # 4) Fallback: plain sample, warn
+    print(f"[warn] temperature={temp} may have been ignored by model.sample; "
+          f"no compatible API found. Consider implementing explicit prior sampling for this model.")
+    return model.sample(n)
+    
 def main_sample(argv=None):
     ap = argparse.ArgumentParser("LAM‑Flow 3D sample tool")
     ap.add_argument("--ckpt", type=str, required=True)
     ap.add_argument("--view-index", type=int, default=0)
     ap.add_argument("--n-samples", type=int, default=1)
     ap.add_argument("--volume-size", type=parse_hwd, default="64x64x64")
+    ap.add_argument("--reference-image", type=str, default=None, help="Optional 3D image to define the header.")
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--ema", action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument("--seed", type=int, default=12345)
@@ -2525,37 +2949,62 @@ def main_sample(argv=None):
 
     ckpt_path = resolve_ckpt_path(Path(args.ckpt))
     out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     device = torch.device("cpu") if args.devices.lower() == "cpu" else torch.device(args.devices.split(",")[0])
     set_deterministic(args.seed)
+
+    print(f"[info] lamnr_glow_tool_3d {__version__}")
+    print(f"[info] loading checkpoint: {ckpt_path}")
 
     blob = torch.load(ckpt_path, map_location=device, weights_only=False)
     cfg = blob.get("config", {})
     
     model = build_model_from_config(cfg, device, target_hwd=args.volume_size)
     
-    Hc, Wc, Dc = args.volume_size
-    _prime_if_needed(model, Hc, Wc, Dc, device)
-    
-    ok, note = load_weights_into_model(model, blob, view_idx=int(args.view_index), prefer_ema=bool(args.ema))
-    if not ok: raise RuntimeError(f"Weights failed: {note}")
+    ok, src_note = load_weights_into_model(model, blob, view_idx=int(args.view_index), prefer_ema=bool(args.ema))
+    if not ok:
+        raise RuntimeError(f"Could not load weights from checkpoint ({src_note})")
+    which_src, note = src_note
+    if note:
+        print(f"[warn] weight load note: {note}")
+    print(f"[info] weights loaded from: {which_src} (view {args.view_index})")
 
+    # Dimensions spatiales du tenseur 3D (Profondeur, Hauteur, Largeur)
+    Dc, Hc, Wc = model.input_shape[-3], model.input_shape[-2], model.input_shape[-1]
+    _prime_if_needed(model, Dc, Hc, Wc, device)
+
+    # Échantillonnage
     if args.n_samples > 0:
-        print(f"[info] sampling {args.n_samples} volumes @ temp={args.temperature}")
-        with torch.no_grad():
-            for i in range(args.n_samples):
-                try: z_sample = model.sample(1, temperature=float(args.temperature))
-                except TypeError: z_sample = model.sample(1) 
-                    
-                x = _coerce_5d(z_sample, target_hwd=(Hc, Wc, Dc))
-                x = to01(x, winsorize=True)
-                
-                out_file = out_dir / f"sample_{i:04d}.nii.gz"
-                save_nifti(x, out_file)
-                save_mid_slice_png(x, out_dir / f"sample_{i:04d}_midslice.png")
+        total = args.n_samples
+        print(f"[info] sampling {total} volumes @ temp={args.temperature} (seed={args.seed})")
 
-        print(f"[ok] wrote {args.n_samples} samples to {out_dir}")
+        try:
+            # Note : Attention à la VRAM si 'total' est grand (générer 10 volumes 3D d'un coup peut causer un OOM)
+            s_out = sample_with_temperature(model, total, float(args.temperature))
+            x = s_out[0] if isinstance(s_out, (list, tuple)) else s_out
+        except Exception as e:
+            raise RuntimeError(f"sampling failed: {e}")
+
+        it = blob.get("iter", None)
+        it_str = (f"_it{int(it)-1:06d}" if isinstance(it, int) and it > 0 else "")
+        
+        # Correction : Utilisation de volume_size (qui est déjà un tuple H, W, D si paré correctement)
+        vol_sz = args.volume_size
+        base_name = f"samples{it_str}_view{int(args.view_index)}_temp{float(args.temperature):.2f}_{vol_sz[0]}x{vol_sz[1]}x{vol_sz[2]}"
+        
+        for s in range(args.n_samples):
+            # 1 & 3. Ajout de l'index unique et de l'extension NIfTI
+            file_name = f"{base_name}_{s:04d}.nii.gz"
+            file_path = out_dir / file_name
+            
+            # Extraction du volume individuel (on garde la dimension du batch avec le slicing)
+            vol_tensor = x[s:s+1] 
+            if args.reference_image is not None:
+                save_nifti(vol_tensor, file_path, ants.image_read(args.reference_image))
+            else:
+                save_nifti(vol_tensor, file_path)                
+            print(f"[ok] Sample {s+1}/{args.n_samples} saved to {file_path}")
+
 
 if __name__ == "__main__":
     table = {

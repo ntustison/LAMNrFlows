@@ -29,13 +29,10 @@ The component normalizing flow architecture was scaled to maximize spatial
 expressivity while adhering to hardware constraints, utilizing three multiscale
 resolution levels ($L=3$), 32 coupling steps per level ($K=32$), and 128 hidden
 channels. Training was stabilized using an effective batch size of 64 
-(``BATCH=8, GRAD_ACCUM=8``).  The data augmentation schedule was 
-
-* ``noise_std: cos:0.05->0.02``
-* ``sd_affine:  cos:0.00->0.00``
-* ``sd_deformation:linear: 6.0->0.2``
-* ``sd_simulated_bias_field:  cos:0.20->0.01``
-* ``sd_histogram_warping:cos:0.04->0.002``
+(``BATCH=8, GRAD_ACCUM=8``).  The data augmentation schedule was: 
+``noise_std: cos:0.05->0.02``, ``sd_deformation:linear: 6.0->0.2``, 
+``sd_simulated_bias_field: cos:0.20->0.01``,
+and ``sd_histogram_warping: cos:0.04->0.002``.
 
 over 80000 iterations with a total of 100000 iterations.  To ensure anatomical
 synchronization between modalities without overriding their respective
