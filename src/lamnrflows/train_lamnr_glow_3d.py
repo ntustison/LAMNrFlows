@@ -1333,8 +1333,8 @@ def main():
     # --- Glow Architecture ---
     ap.add_argument("--L", type=int, default=4, 
                     help="Number of resolution levels. Higher L increases receptive field but reduces spatial resolution at the deepest level.")
-    ap.add_argument("--K", type=int, default=3, 
-                    help="Number of flow steps (ActNorm -> 1x1 Conv -> Coupling) per resolution level.")
+    ap.add_argument("--K", type=int, nargs="+", default=[32], 
+                    help="Number of flow steps per resolution level. Accepts a single int or a list of ints matching L.")    
     ap.add_argument("--hidden", type=int, default=96, 
                     help="Number of hidden channels in the convolutional coupling networks.")
     ap.add_argument("--base", type=str, default="glow", choices=["glow","diag"], 
@@ -1504,6 +1504,16 @@ def main():
     
     args = ap.parse_args()
     args.num_views = len(args.view)
+
+    # --- NOUVEAU : Validation pour K multi-échelles ---
+    if isinstance(args.K, list):
+        if len(args.K) == 1:
+            args.K = args.K[0]  # Rétrocompatibilité si une seule valeur est passée
+        elif len(args.K) != args.L:
+            raise ValueError(f"La longueur de K ({len(args.K)}) doit correspondre à L ({args.L}).")
+        else:
+            args.K = tuple(args.K)  # Conversion en tuple pour antstorch/normflows
+    # --------------------------------------------------
 
     # Device + precision
     set_deterministic(args.seed)
