@@ -2649,22 +2649,36 @@ def main_recon_interpolate(argv=None):
         paths = per_view_paths[int(args.view_index)]
 
     # 3. Chargement de la Moyenne Gaussienne (\mu)
-    npz = np.load(args.gauss, allow_pickle=True)
-    L = int(npz["L"])
-    views_g = list(npz["views"])
+    print(f"[info] Loading Gaussian Mean (Mu)...")
+    gauss_blob = _load_gaussian_model(Path(args.gauss))
+    views_g, dims_tbl, shapes_by_view, L = _validate_gauss_blob(gauss_blob)
     
-    try: level_sizes = [int(sz) for sz in npz["dims_per_view"]] 
-    except KeyError: level_sizes = [int(sz) for sz in npz["dims_per_view_L0"]]
+    if vname not in views_g: 
+        raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
+    v_idx_g = views_g.index(vname)
+    mu_list_raw = gauss_blob["mu"]
 
+    # Extraction des tranches (slices) pour la vue cible
+    level_view_slices = []
+    raw_slices = gauss_blob.get("level_view_slices", None)
+    if raw_slices:
+        for l in range(L):
+            row = raw_slices[l]
+            if isinstance(row, dict): row = {int(k): tuple(v) for k, v in row.items()}
+            else: row = {vi: tuple(row[vi]) for vi in range(len(views_g))}
+            level_view_slices.append(row)
+    else:
+        for l in range(L):
+            off = 0; row = {}
+            for vi in range(len(views_g)):
+                d = int(np.asarray(dims_tbl[vi][l]).item()); row[vi] = (off, off+d); off += d
+            level_view_slices.append(row)
+
+    # Préparation des tenseurs \mu par niveau
     mu_tensors = []
     for l in range(L):
-        curr = 0
-        for v in views_g:
-            if v == vname:
-                s, e = curr, curr + level_sizes[l]
-                break
-            curr += level_sizes[l]
-        mu_flat = npz[f"mu_{l}"][s:e]
+        a, b = level_view_slices[l][v_idx_g]
+        mu_flat = np.asarray(mu_list_raw[l], dtype=np.float64).ravel()[a:b]
         mu_tensors.append(torch.from_numpy(mu_flat).float().to(device))
 
     # 4. Détermination de la Cible
