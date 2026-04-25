@@ -1725,7 +1725,7 @@ def main_gauss_fit(argv: List[str] | None = None):
             Sigma_list.append(Sigma); 
             stats_list.append(stats)
             import gc
-            del X, Xc, Xc_clean, Sd
+            del X, Xc, Xc_clean
             gc.collect()
 
         out_blob["mu"] = mu_list
