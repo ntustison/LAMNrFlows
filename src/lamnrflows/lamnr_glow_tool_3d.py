@@ -2687,7 +2687,7 @@ def main_recon_interpolate(argv=None):
     
     if args.target_image:
         tgt_path = Path(args.target_image)
-        xt = _read_image_3d(tgt_path, target_hwd=args.volume_size).to(device)
+        xt = _read_image_3d(tgt_path, target_hwd=args.volume_size).unsqueeze(0).to(device)
         with torch.no_grad():
             z_tgt_raw, _ = model.inverse_and_log_det(xt)
             if not isinstance(z_tgt_raw, list): z_tgt_raw = [z_tgt_raw]
@@ -2712,7 +2712,7 @@ def main_recon_interpolate(argv=None):
     
     for i in range(limit):
         pth = paths[i]
-        xs = _read_image_3d(pth, target_hwd=args.volume_size).to(device)
+        xs = _read_image_3d(pth, target_hwd=args.volume_size).unsqueeze(0).to(device)
         
         with torch.no_grad():
             z_source_list, _ = model.inverse_and_log_det(xs)
