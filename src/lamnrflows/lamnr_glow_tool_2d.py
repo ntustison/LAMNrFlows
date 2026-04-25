@@ -3400,9 +3400,33 @@ def main_gauss_fit(argv: List[str] | None = None):
                     cov_lam=float(args.cov_lam)
                 )
 
-            # Stats from the Sigma we actually save
-            Sd = _dense_from_cov(Sigma, D_l)
-            lam_min, lam_max, cond, tr, diag_mean = _cov_stats(Sd)
+            row_dims = [int(dims_per_level_per_view[v][l]) for v in range(V)]
+            offs = [0]
+            for d in row_dims: offs.append(offs[-1] + d)
+
+            if estimator == "lowrank":
+                U = Sigma["U"]
+                eig = Sigma["eig"]
+                sigma2 = float(Sigma["sigma2"])
+                
+                lam_min = sigma2
+                lam_max = float((np.max(eig) if eig.size > 0 else 0.0) + sigma2)
+                cond = lam_max / max(lam_min, 1e-300)
+                tr = float(np.sum(eig) + D_l * sigma2)
+                diag_mean = tr / D_l
+                
+                # Calcul de la trace par bloc sans instancier la matrice dense
+                blk_tr = []
+                for a, b in zip(offs[:-1], offs[1:]):
+                    U_v = U[a:b, :]
+                    blk_var = np.sum((U_v ** 2) * eig, axis=1) + sigma2
+                    blk_tr.append(float(np.sum(blk_var)))
+            else:
+                Sd = _dense_from_cov(Sigma, D_l)
+                lam_min, lam_max, cond, tr, diag_mean = _cov_stats(Sd)
+                blk_tr = [float(np.trace(Sd[a:b, a:b])) for a, b in zip(offs[:-1], offs[1:])]
+                del Sd # Libération explicite de la mémoire
+
             stats = {"lambda_min": lam_min, "lambda_max": lam_max,
                     "cond": cond, "trace": tr, "diag_mean": diag_mean,
                     "winsor_cap": float(sstats.get("cap", 0.0)),
@@ -3410,16 +3434,7 @@ def main_gauss_fit(argv: List[str] | None = None):
                     "winsor_nonfinite": int(sstats.get("nonfinite", 0)),
                     "winsor_abs_quantiles": sstats.get("abs_quantiles")
                     }
-            # print(f"[fit Σ L{l}] λmin={lam_min:.3e} λmax={lam_max:.3e} cond={cond:.3e} tr={tr:.3e} diag={diag_mean:.3e} D={D_l}")
-            # print(f"[debug] dims_per_level_per_view L{l}:",
-            #     [int(dims_per_level_per_view[v][l]) for v in range(V)])
 
-            # Per-view block traces at level l
-            row_dims = [int(dims_per_level_per_view[v][l]) for v in range(V)]
-            offs = [0]
-            for d in row_dims:
-                offs.append(offs[-1] + d)
-            blk_tr = [float(np.trace(Sd[a:b, a:b])) for a, b in zip(offs[:-1], offs[1:])]
             print("[fit Σ L{} by view] ".format(l) + " ".join("v{}:{:.3e}".format(vi, t) for vi, t in enumerate(blk_tr)))
 
             mu_list.append(mu); 
