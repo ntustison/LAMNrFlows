@@ -922,11 +922,16 @@ def build_model_from_config(cfg: dict, device: torch.device, target_hwd: Tuple[i
     if create_glow_normalizing_flow_model_3d is None:
         raise ImportError("antstorch.create_glow_normalizing_flow_model_3d is required.")
 
+    raw_k = cfg.get("K", 32)
+    parsed_k = [int(x) for x in raw_k] if isinstance(raw_k, (list, tuple)) else int(raw_k)
+    raw_hidden_channels = cfg.get("hidden", 128)
+    parsed_hidden_channels = [int(x) for x in raw_hidden_channels] if isinstance(raw_hidden_channels, (list, tuple)) else int(raw_hidden_channels)
+    
     m = create_glow_normalizing_flow_model_3d(
         input_shape=input_shape,
         L=int(cfg.get("L", 3)),
-        K=int(cfg.get("K", 32)),
-        hidden_channels=int(cfg.get("hidden", 128)),
+        K=parsed_k,
+        hidden_channels=parsed_hidden_channels,
         base=str(cfg.get("base", "glow")),
         glowbase_logscale_factor=float(cfg.get("glowbase_logscale_factor", 1.0)),
         glowbase_min_log=float(cfg.get("glowbase_min_log", -5.0)),
