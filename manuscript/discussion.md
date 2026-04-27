@@ -49,6 +49,20 @@ variance structures. This divergence highlights the importance of selecting
 alignment strategies, such as VICReg or HSIC, that balance density estimation
 with the specific geometric attributes of the datasets of interest.
 
+While traditional diffeomorphic image registration algorithms excel at alignment
+for large deformation scenarios, significant topological disruptions, such as
+tumor-induced changes, can limit accuracy.  One of our early hypotheses in the
+development of this work was that DCA-based latent interpolation would be able
+to  overcome such topological difficulties by providing an intermediate image
+($t=0.5$) for more robust image registration.  The BraTS-Reg22 challenge
+[@baheti2024braintumorsequenceregistration] provided the ideal opportunity to
+test such an hypothesis as it involved image registration data pre- and 
+post-resection with expert-annotated landmarks.  Although preliminary evaluations 
+demonstrate competitive structural recovery (cf. Figure \ref{fig:interpolation})
+for such data, the limited resolution of our 3D LAMNr models was insufficient
+for the task and will be postponed for future work when hardware capabilities 
+increase.
+
 Finally, the detailed framework explores the current challenges associated with
 scaling and training LAMNr flows and their constituent normalizing flows
 architectures.  While Glow-style architectures are memory-intensive due to the
