@@ -131,8 +131,8 @@ quantitative evaluations presented in the subsequent sections:
   alignment weight was applied (VICReg $\lambda=1.0$) with CCA-based screening.
 
 * __3D Single-view Model (T1-w).__ This whole-head model was trained on DLBS
-  wave 1 T1-weighted volumes downsampled to $64 \times 80 \times 64$ voxels. The
-  architecture utilizes $L=4$ levels, $K=32$ steps, and $HC=96$. As this
+  wave 1 T1-weighted volumes downsampled to $48 \times 64 \times 56$ voxels. The
+  architecture utilizes $L=3$ levels, $K=[16, 32, 64]$ steps, and $HC=96$. As this
   represents a single-view baseline, the alignment weight was set to
   $\lambda=0.0$, focusing purely on exact likelihood-based density estimation.
 
