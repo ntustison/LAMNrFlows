@@ -1958,8 +1958,13 @@ def main_recon_template(argv=None):
     npz = np.load(args.gauss, allow_pickle=True)
     L = int(npz["L"])
     views_g = list(npz["views"])
-    level_sizes = [int(sz) for sz in npz["dims_per_view_L0"]]
-    
+    raw_dims = npz["dims_json"]
+    dims_str = raw_dims.item() if hasattr(raw_dims, "item") and raw_dims.ndim == 0 else raw_dims[0]
+    dims_list = json.loads(dims_str) if isinstance(dims_str, str) else dims_str
+
+    # Récupère [43008, 43008, 86016]
+    level_sizes = dims_list[args.view_index]
+
     if vname not in views_g: raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
     v_idx = views_g.index(vname)
     
