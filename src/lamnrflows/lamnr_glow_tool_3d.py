@@ -2301,6 +2301,7 @@ def main_calc_distance(argv=None):
     Calcule la distance Euclidienne, geodesique, ou Mahalanobis.
     Référence par défaut : Moyenne Gaussienne (Mu) extraite du modèle .npz.
     Référence optionnelle : Une image cible (--target-image).
+    Nouveau mode : Distances croisées (NxN) via --pairwise.
     """
     ap = argparse.ArgumentParser("LAM-Flow 3D Latent Distance Calculator")
     ap.add_argument("--ckpt", required=True, help="Path to checkpoint")
@@ -2316,9 +2317,9 @@ def main_calc_distance(argv=None):
     ap.add_argument("--save-levels", action=argparse.BooleanOptionalAction, default=True,
                     help="Include separate columns for distance at each level.")
     ap.add_argument("--distance-metric", type=str, default="geodesic", choices=["euclidean", "mahalanobis", "geodesic"],
-                    help="Which distance metric to use.  If no target image is specified, geodesic shouldn't be used.")
+                    help="Which distance metric to use.")
     ap.add_argument("--variance-epsilon", type=float, default=1e-6, required=False, 
-                    help="Regularization parameter for numerical stability in mahalanobis and geodesic distances.")
+                    help="Regularization parameter for numerical stability.")
     
     # Options Source / Target
     ap.add_argument("--manifest", type=str, default=None, 
@@ -2326,14 +2327,17 @@ def main_calc_distance(argv=None):
     ap.add_argument("--source-image", type=str, default=None,
                     help="Optional single source 3D image. If set, ignores the manifest.")
     ap.add_argument("--target-image", type=str, default=None,
-                    help="Optional target 3D image path. If set, calculates distance to this image instead of the Gaussian mean.")
+                    help="Optional target 3D image path.")
+    ap.add_argument("--pairwise", action=argparse.BooleanOptionalAction, default=False,
+                    help="Calculate N x N pairwise distances between all subjects in the manifest.")
     
     args = ap.parse_args(argv)
     
     if not args.manifest and not args.source_image:
         raise ValueError("You must provide either --manifest or --source-image.")
 
-    if args.distance_metric == "geodesic"and not args.target_image: 
+    # Avertissement contourné si mode pairwise actif
+    if args.distance_metric == "geodesic" and not args.target_image and not getattr(args, 'pairwise', False): 
         warnings.warn(
            "Geodesic distance requires a target image. Falling back to Mahalanobis distance for Gaussian Mean.", 
            UserWarning )
@@ -2341,7 +2345,6 @@ def main_calc_distance(argv=None):
 
     device = torch.device(args.devices)
     
-    # Parser volume_size si c'est une string
     if isinstance(args.volume_size, str):
         v_parts = args.volume_size.lower().split("x")
         args.volume_size = (int(v_parts[0]), int(v_parts[1]), int(v_parts[2]))
@@ -2358,30 +2361,25 @@ def main_calc_distance(argv=None):
     views_list = [v.strip() for v in args.views.split(",")]
     vname = views_list[int(args.view_index)]
 
-    # 2. Chargement du modèle Gaussien (pour obtenir Mu et la structure des niveaux)
+    # 2. Chargement du modèle Gaussien
     npz = np.load(args.gauss, allow_pickle=True)
     L = int(npz["L"])
-    
-    # Nettoyage des chaînes de caractères numpy
     views_g = [str(v) for v in np.array(npz["views"]).tolist()]
     
     if vname not in views_g: 
         raise RuntimeError(f"View '{vname}' missing from Gaussian model.")
     
-    # Extraction de la cartographie des slices via le JSON intégré
     import json
     raw_slices = json.loads(str(np.array(npz["slices_json"]).tolist()))
-    
     slice_map = [] 
     for l in range(L):
         d = {}
         for v_idx, v in enumerate(views_g):
-            # Le dictionnaire JSON encode les clés d'index (v_idx) en strings
             s, e = raw_slices[l][str(v_idx)]
             d[v] = (int(s), int(e))
         slice_map.append(d)
 
-    # 3. Parsing Source (Manifest ou Image Unique)
+    # 3. Parsing Source
     paths = []
     if args.source_image:
         src_path = Path(args.source_image)
@@ -2395,24 +2393,18 @@ def main_calc_distance(argv=None):
     
     total_imgs = len(paths)
 
-    # ---------------------------------------------------------
-    # 4. PRÉPARATION DE LA RÉFÉRENCE ET DE LA VARIANCE
-    # ---------------------------------------------------------
+    # 4. PRÉPARATION DE LA VARIANCE (Et Référence si non Pairwise)
     reference_latents = [] 
     variance_latents = [] 
 
-    # A. Extraction systématique de la variance (depuis le modèle Gaussien)
     print(f"[info] Extracting latent variances for standardized distance...")
     for l in range(L):
         s, e = slice_map[l][vname]
-        
         if f"Sigma_{l}_type" in npz and str(npz[f"Sigma_{l}_type"]) == "lowrank":
             U_full = npz[f"Sigma_{l}_U"]
             eig = npz[f"Sigma_{l}_eig"]
             sigma2 = float(npz[f"Sigma_{l}_sigma2"])
-            
             U_v = U_full[s:e, :]
-            # Calcul rapide de la diagonale sans instancier la matrice géante
             var_flat = np.sum((U_v ** 2) * eig, axis=1) + sigma2
         else:
             Sig_full = npz[f"Sigma_{l}"]
@@ -2424,81 +2416,123 @@ def main_calc_distance(argv=None):
         var_tensor = torch.from_numpy(var_flat).float().to(device).view(1, -1)
         variance_latents.append(var_tensor)
 
-    # B. Détermination de la référence (Cible ou Moyenne)
-    if args.target_image:
-        tgt_path = Path(args.target_image)
-        if not tgt_path.exists(): raise FileNotFoundError(f"Target image not found: {tgt_path}")
-        print(f"[info] Reference: Target Image ({tgt_path.name})")
-        
-        # Ajout de .unsqueeze(0) pour passer de 4D à 5D
-        xt = _read_image_3d(tgt_path, target_hwd=args.volume_size).unsqueeze(0).to(device)
-        with torch.no_grad():
-            z_tgt_list, _ = model.inverse_and_log_det(xt)
-            if not isinstance(z_tgt_list, list): z_tgt_list = [z_tgt_list]
-            
-        for z in z_tgt_list:
-            reference_latents.append(z.view(1, -1).detach()) 
-    else:
-        print(f"[info] Reference: Gaussian Mean (Mu)")
-        for l in range(L):
-            mu_l = npz[f"mu_{l}"]
-            s, e = slice_map[l][vname]
-            mu_flat = mu_l[s:e]
-            mu_tensor = torch.from_numpy(mu_flat).float().to(device).view(1, -1)
-            reference_latents.append(mu_tensor)
+    if not getattr(args, 'pairwise', False):
+        if args.target_image:
+            tgt_path = Path(args.target_image)
+            if not tgt_path.exists(): raise FileNotFoundError(f"Target image not found: {tgt_path}")
+            print(f"[info] Reference: Target Image ({tgt_path.name})")
+            xt = _read_image_3d(tgt_path, target_hwd=args.volume_size).unsqueeze(0).to(device)
+            with torch.no_grad():
+                z_tgt_list, _ = model.inverse_and_log_det(xt)
+                if not isinstance(z_tgt_list, list): z_tgt_list = [z_tgt_list]
+            for z in z_tgt_list:
+                reference_latents.append(z.view(1, -1).detach()) 
+        else:
+            print(f"[info] Reference: Gaussian Mean (Mu)")
+            for l in range(L):
+                mu_l = npz[f"mu_{l}"]
+                s, e = slice_map[l][vname]
+                mu_tensor = torch.from_numpy(mu_l[s:e]).float().to(device).view(1, -1)
+                reference_latents.append(mu_tensor)
 
-    # ---------------------------------------------------------
     # 5. BOUCLE DE CALCUL
-    # ---------------------------------------------------------
     bs = max(1, int(args.batch))
     out_csv = Path(args.out_csv)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"[info] Calculating standardized L2 distances for {total_imgs} volumes...")
-
-    with open(out_csv, "w", newline="") as f:
-        writer = csv.writer(f)
-        
-        header = ["path", "total_distance"]
-        if args.save_levels:
-            header += [f"dist_L{l}" for l in range(L)]
-        writer.writerow(header)
-
-        # Remplacement de tqdm par une boucle simple si non disponible
+    from concurrent.futures import ThreadPoolExecutor
+    def _load_single(p):
         try:
-            from tqdm import tqdm
+            return _read_image_3d(p, target_hwd=args.volume_size), str(p)
+        except Exception:
+            return None, None
+
+    # -- NOUVELLE LOGIQUE : PAIRWISE (NxN) --
+    if getattr(args, 'pairwise', False):
+        print(f"[info] Calculating Pairwise (NxN) distances for {total_imgs} volumes...")
+        all_z_levels = [[] for _ in range(L)]
+        all_paths = []
+
+        try:
             iterable = tqdm(range(0, total_imgs, bs), desc="Distance calc", unit="batch")
         except ImportError:
             iterable = range(0, total_imgs, bs)
 
         for i in iterable:
             batch_paths = paths[i : i + bs]
-            xs = []
-            valid_paths = []
+            with ThreadPoolExecutor(max_workers=args.workers) as pool:
+                results = list(pool.map(_load_single, batch_paths))
             
-            from concurrent.futures import ThreadPoolExecutor
+            xs = [res[0] for res in results if res[0] is not None]
+            valid_paths = [res[1] for res in results if res[1] is not None]
+            if not xs: continue
 
-            def _load_single(p):
-                try:
-                    xi = _read_image_3d(p, target_hwd=args.volume_size)
-                    # Retourner xi tel quel pour conserver la dimension du canal (1, D, H, W)
-                    return xi, str(p)
-                except Exception as e:
-                    print(f"[warn] Failed to read {p}: {e}")
-                    return None, None
+            xb = torch.stack(xs, dim=0).to(device)
+            with torch.no_grad():
+                z_list, _ = model.inverse_and_log_det(xb)
+                if not isinstance(z_list, list): z_list = [z_list]
+                
+            # Mouvement crucial vers CPU pour éviter l'OOM
+            for l, z in enumerate(z_list):
+                all_z_levels[l].append(z.cpu())
+            all_paths.extend(valid_paths)
 
-            xs = []
-            valid_paths = []
+        N_valid = len(all_paths)
+        total_dist_sq = torch.zeros((N_valid, N_valid), dtype=torch.float64)
+
+        print(f"[info] Executing matrix multiplications on CPU for {N_valid}x{N_valid} combinations...")
+        for l in range(L):
+            Z_l = torch.cat(all_z_levels[l], dim=0).view(N_valid, -1)
             
-            # Chargement parallèle du batch
+            if args.distance_metric == "mahalanobis":
+                var = variance_latents[l].cpu() + args.variance_epsilon
+                Z_scaled = Z_l / torch.sqrt(var)
+                dist_l = torch.cdist(Z_scaled, Z_scaled, p=2)
+            elif args.distance_metric == "geodesic":
+                Z_norm = F.normalize(Z_l, p=2, dim=1)
+                cos_sim = torch.mm(Z_norm, Z_norm.t())
+                cos_sim = torch.clamp(cos_sim, min=-1.0 + args.variance_epsilon, max=1.0 - args.variance_epsilon)
+                dist_l = torch.acos(cos_sim)
+            else:
+                dist_l = torch.cdist(Z_l, Z_l, p=2)
+
+            total_dist_sq += (dist_l.double() ** 2)
+
+        total_dist = torch.sqrt(total_dist_sq).numpy()
+
+        with open(out_csv, "w", newline="") as f:
+            writer = csv.writer(f)
+            # En-tête : "subject", "sub-01_T1w.nii.gz", "sub-02_T1w.nii.gz"...
+            header = ["subject"] + [Path(p).name for p in all_paths]
+            writer.writerow(header)
+            
+            for i in range(N_valid):
+                row = [Path(all_paths[i]).name] + [f"{d:.6f}" for d in total_dist[i]]
+                writer.writerow(row)
+
+        print(f"[ok] Pairwise distances written to {out_csv}")
+        return 0
+
+    # -- ANCIENNE LOGIQUE : 1 TARGET (ou MU) --
+    with open(out_csv, "w", newline="") as f:
+        writer = csv.writer(f)
+        header = ["path", "total_distance"]
+        if args.save_levels:
+            header += [f"dist_L{l}" for l in range(L)]
+        writer.writerow(header)
+
+        try:
+            iterable = tqdm(range(0, total_imgs, bs), desc="Distance calc", unit="batch")
+        except ImportError:
+            iterable = range(0, total_imgs, bs)
+
+        for i in iterable:
+            batch_paths = paths[i : i + bs]
             with ThreadPoolExecutor(max_workers=args.workers) as pool:
                 results = list(pool.map(_load_single, batch_paths))
                 
-            for tensor, path in results:
-                if tensor is not None:
-                    xs.append(tensor)
-                    valid_paths.append(path)
-
+            xs = [res[0] for res in results if res[0] is not None]
+            valid_paths = [res[1] for res in results if res[1] is not None]
             if not xs: continue
 
             xb = torch.stack(xs, dim=0).to(device)
@@ -2512,26 +2546,18 @@ def main_calc_distance(argv=None):
             
             for l, z in enumerate(z_list):
                 ref = reference_latents[l] 
-                var = variance_latents[l] # La variance de la population
                 z_flat = z.view(B, -1)     
 
                 if args.distance_metric == "mahalanobis":
-                    # Formule : somme( (z - ref)^2 / variance )
                     var = variance_latents[l] + args.variance_epsilon
                     dist_sq = torch.sum(((z_flat - ref) ** 2) / var, dim=1)
                     dists_per_level[:, l] = np.sqrt(dist_sq.cpu().numpy())
                 elif args.distance_metric == "geodesic":
-                    # 1. Calculer la similarité cosinus
                     cos_sim = F.cosine_similarity(z_flat, ref, dim=1)
-                    
-                    # 2. Clamper les valeurs pour éviter les erreurs NaN avec acos dues aux erreurs d'arrondi
                     cos_sim = torch.clamp(cos_sim, min=-1.0 + args.variance_epsilon, max=1.0 - args.variance_epsilon)
-                    
-                    # 3. Calculer l'angle (distance géodésique)
                     geodesic_dist = torch.acos(cos_sim)
                     dists_per_level[:, l] = geodesic_dist.cpu().numpy()                        
                 else: 
-                    # Euclidienne simple
                     dist_sq = torch.sum((z_flat - ref) ** 2, dim=1)
                     dists_per_level[:, l] = np.sqrt(dist_sq.cpu().numpy())
 
@@ -2543,9 +2569,10 @@ def main_calc_distance(argv=None):
                 writer.writerow(row)
                 
                 if args.source_image:
-                    print(f"\n[Result] Standardized Distance (Source -> Target/Mu): {total_dist:.4f}")
+                    print(f"\n[Result] Standardized Distance: {total_dist:.4f}")
 
     print(f"[ok] Distances written to {out_csv}")
+    return 0
     
 def main_recon_interpolate(argv=None):
     """
