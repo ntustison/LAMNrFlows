@@ -2159,6 +2159,8 @@ def main_recon_cohort_template(argv=None):
         x = _read_image_3d(p, args.volume_size).to(device)
 
         with torch.no_grad():
+            if x.dim() == 4:
+                x = x.unsqueeze(1)            
             z_list, _ = model.inverse_and_log_det(x)
             if isinstance(z_list, tuple): z_list = list(z_list)
             if not isinstance(z_list, list): z_list = [z_list]
