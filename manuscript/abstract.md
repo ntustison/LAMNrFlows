@@ -18,9 +18,7 @@ latent distances, and geodesic pairwise image interpolation. Additionally, the
 proposed framework enables closed-form conditional modeling for exact cross-view
 imputation and other latent space manipulations. Evaluations and illustrations
 on both imaging-derived phenotypes (IDPs) and multimodal MRI demonstrate the
-proposed framework and potential applications.  For example, our proposed
-framework permits pairwise interpolative reconstructions which can facilitate
-traditional image registration scenarios. To further motivate our work, we
+proposed framework and potential applications.  To further motivate our work, we
 provide a robust and comprehensive, 2D- and 3D open-source implementation in
 PyTorch, natively integrated with the ANTsX ecosystem (i.e., ANTsTorch) for
 efficient training and subsequent data transformation, manipulation, and

@@ -246,8 +246,8 @@ details.
 cohort (second row).  Model training used only DLBS Wave 1 data (T1-w, FLAIR,
 FA).  (Top) The generated morphological transition between a source image
 ($t=1.0$) and a target ($t=0.0$) multimodal images (T1-w, FLAIR).  Interpolation
-DLBS data (Wave 2) included the source image (Subject 1225, age 93) and target
-image (Subject 612, age 25). BraTS-Reg is demonstrated using pre- and 
+DLBS data (Wave 2) included the source image (Subject 4488, Age 77) and target
+image (Subject 587, Age 53). BraTS-Reg is demonstrated using pre- and 
 post-resection T1-w and FLAIR images from Subject 5. (Bottom) A geometric
 representation of the joint latent space. The empirical distribution of the
 training cohort is centered around $\mu$. Standard linear interpolation (Lerp,
