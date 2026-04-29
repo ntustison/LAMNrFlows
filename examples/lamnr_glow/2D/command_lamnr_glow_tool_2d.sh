@@ -59,15 +59,15 @@ brats_t2flair_post="${brats_dir}/BraTSReg_003_01_0029_flair.nii.gz"
 # Sujet jeune : sub-612 (âge 25 ans, f)
 # Sujet vieux : sub-1225 (âge 93 ans, f)
 dlbs_dir="/Users/ntustison/Data/Public/OpenNeuro/ds004856/BIDSAlignedToTemplate/"
-dlbs_wave2_subj1_t1="${dlbs_dir}/sub-612/ses-wave2/anat/sub-612_ses-wave2_acq-MPRAGE_run-1_T1w.nii.gz"
-dlbs_wave2_subj1_t2flair="${dlbs_dir}/sub-612/ses-wave2/anat/sub-612_ses-wave2_acq-FLAIR_run-1_T2w.nii.gz"
-dlbs_wave2_subj2_t1="${dlbs_dir}/sub-1225/ses-wave2/anat/sub-1225_ses-wave2_acq-MPRAGE_run-1_T1w.nii.gz"
-dlbs_wave2_subj2_t2flair="${dlbs_dir}/sub-1225/ses-wave2/anat/sub-1225_ses-wave2_acq-FLAIR_run-1_T2w.nii.gz" 
+dlbs_wave2_subj1_t1="${dlbs_dir}/sub-587/ses-wave2/anat/sub-587_ses-wave2_acq-MPRAGE_run-1_T1w.nii.gz"
+dlbs_wave2_subj1_t2flair="${dlbs_dir}/sub-587/ses-wave2/anat/sub-587_ses-wave2_acq-FLAIR_run-1_T2w.nii.gz"
+dlbs_wave2_subj2_t1="${dlbs_dir}/sub-4488/ses-wave2/anat/sub-4488_ses-wave2_acq-MPRAGE_run-1_T1w.nii.gz"
+dlbs_wave2_subj2_t2flair="${dlbs_dir}/sub-4488/ses-wave2/anat/sub-4488_ses-wave2_acq-FLAIR_run-1_T2w.nii.gz" 
 
 # Paramètres d'exécution
 SLICE_INDEX=115
 WHICH_PYTHON="/Users/ntustison/anaconda3/bin/python3"
-WHICH_LAMNR_TOOL="${base_dir}/lamnr_glow_tool_2d.py"
+WHICH_LAMNR_TOOL="/Users/ntustison/Data/LAMNrFlows/src/lamnrflows/lamnr_glow_tool_2d.py"
 DEVICE="cpu"
 
 # Chemins des modèles dérivés
