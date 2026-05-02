@@ -119,8 +119,7 @@ manifold. This is demonstrated in Figure \ref{fig:interpolation} for both
 within-cohort data (i.e., DLBS Wave 2) and out-of-cohort data (i.e., BraTS-Reg),
 in terms of the model training data (i.e., DLBS Wave 1).  Both the T1-w and
 FLAIR images between the source ($t=0.0$) and target images ($t=1.0$).  In the
-case of the DLBS Wave 2 cohort, we selected an older subject (age = 93) as the
-source image and a younger subject (age 25) as the target image which
+case of the DLBS Wave 2 cohort, we selected two subjects of different ages which
 illustrates the morphological interpolation from larger to smaller ventricles
 and from the presence to absence of white matter hyperintensities. We see
 similar high quality interpolations in a BraTS-Reg subject (Subject 5, post- and
