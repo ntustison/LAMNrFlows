@@ -219,47 +219,27 @@ framework.
 
 ## Contributions 
 
-\textcolor{red}{Rework when closer to finishing.}
+We introduce LAMNr flows, a general framework for deep computational anatomy
+that learns shared and private latent structures across multiple views while
+preserving exact likelihoods and invertibility. Within the LAMNr flows
+framework, each view is equipped with a dedicated flow that maps observations to
+a structured latent space. Key contributions of this work include:  
 
-We introduce LAMNr flows, a general
-framework for deep computational anatomy that learns shared and private latent
-structures across multiple views while preserving exact likelihoods and
-invertibility. Within LAMNr flows, each view is equipped with a dedicated flow that
-maps observations to a structured latent space. 
+* __Unified Multiview Modeling.__ We provide a shared coordinate system for
+  heterogeneous data types, including 2D/3D images and tabular imaging-derived
+  phenotypes (IDPs). 
 
-Key contributions of this work include:
+* __Latent Alignment and Linearization.__ Using subject-matched batches, we
+  identify shared anatomical features via a library of alignment losses, such as
+  VICReg and InfoNCE. 
 
-1. **Unified Multiview Modeling:** We provide a shared coordinate system for
-   heterogeneous data types, including 2D/3D images and tabular imaging-derived
-   phenotypes (IDPs). For imaging, we adopt Glow-style multiscale architectures
-   to retain spatial detail; for tabular blocks, we utilize integrated per-view
-   flows.
+* __Demonstration of Deep Computational Anatomy.__ We demonstrate essential
+  capabilities including closed-form cross-modal data imputation via the
+  Woodbury identity and high-fidelity image interpolation using spherical linear
+  interpolation (Slerp) to prevent variance collapse.
 
-2. **Latent Alignment and Linearization:** Using subject-matched batches, we
-   identify shared anatomical features via a library of alignment losses (e.g.,
-   VICReg, InfoNCE). We optionally employ CCA or HSIC screens to restrict
-   alignment to statistically shared directions, leaving the orthogonal
-   complement to capture view-specific variation.
-
-3. **Closed-form Inference and Reconstruction:** We incorporate a conditional
-   Gaussian layer to provide closed-form posteriors over arbitrary latent
-   subsets. This yields a nonlinear, invertible extension of the shared/private
-   decomposition found in SiMLR [@Avants2021NatCompSci].
-
-4. **Contrast-Robust Surrogates:** We demonstrate that substituting private
-   latents with conditional means produces shared-latent reconstructions that
-   preserve identity while suppressing idiosyncratic contrast. These
-   "latent-mean" images act as robust representatives that empirically reduce
-   diffeomorphic registration effort.
-
-5. **Open-source, 3D-capable Implementation:** Unlike many contemporary
-   flow-based tools limited to 2D slice-wise processing
-   [@beizaee2025harmonizingflows;@Wen:2023aa], we provide a comprehensive, open-source, 2D and
-   3D PyTorch implementation, based on the `normflows` library
-   [@stimper2023normflows], which is integrated with the ANTsX ecosystem (via
-   ANTsTorch) for robust data handling and auxiliary functionality.
-
-Evaluations on multimodal MRI and multiview IDP datasets demonstrate that LAMNr
-flows improve calibrated likelihoods and prediction while providing a
-single, exact framework for likelihood-calibrated multiview analysis.
+* __Open-source Implementation.__ We provide a comprehensive, open-source 2D and
+  3D PyTorch implementation based on the normflows library. This framework is
+  natively integrated with the ANTsX ecosystem via ANTsTorch for robust data
+  handling and auxiliary functionality.
 
