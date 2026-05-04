@@ -51,18 +51,21 @@ training [@kong2025alignflow].  This approach establishes an explicit, optimal
 alignment between the noise distribution and data points to ensure straighter
 paths and more effective inference, even in high-dimensional settings.
 
-The bijective formulation of these models also enables the synthesis of biological
-variation through stochastic sampling, where latent vectors drawn from the
-Gaussian prior are mapped back to the high-dimensional image space. While latent
-diffusion and flow matching achieve high sample quality, they optimize denoising
-or continuous-transport objectives rather than exact log likelihoods, requiring
-multi-step sampling or ODE integration [@lipman2022flowmatching;
-@croitoru2023diffusion_vision_survey; @ho2020ddpm]. By contrast, normalizing
-flows offer an exact, interpretable framework with single-pass inversion,
-exposing multiscale latents for per-level alignment and enabling closed-form
-conditional queries. These advantages point to normalzing flows as an attractive
-framework for likelihood-calibrated multiview modeling.
-
+The bijective formulation of these models also enables the synthesis of
+biological variation through stochastic sampling, where latent vectors drawn
+from the Gaussian prior are mapped back to the high-dimensional image space.
+While latent diffusion and flow matching achieve high sample quality, they
+optimize denoising or continuous-transport objectives rather than exact log
+likelihoods, requiring multi-step sampling or ODE integration
+[@lipman2022flowmatching; @croitoru2023diffusion_vision_survey; @ho2020ddpm]. A
+critical distinction between normalizing flows and other generative paradigms,
+such as Generative Adversarial Networks (GANs) and diffusion models, lies in the
+optimization objective. While the latter often prioritize perceptual-based
+losses through divergence surrogates or denoising objectives, normalizing flows
+optimize exact log-likelihoods. This probabilistic formulation is foundational
+as it ensures that the latent space functions primarily as a simplified
+coordinate system with known structure rather than prioritizing aesthetic
+considerations for image synthesis.
 
 ## Multiview Learning with LAMNr Flows
 
