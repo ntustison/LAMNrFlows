@@ -51,6 +51,7 @@ training [@kong2025alignflow].  This approach establishes an explicit, optimal
 alignment between the noise distribution and data points to ensure straighter
 paths and more effective inference, even in high-dimensional settings.
 
+<<<<<<< HEAD
 The bijective formulation of these models also enables the synthesis of biological
 variation through stochastic sampling, where latent vectors drawn from the
 Gaussian prior are mapped back to the high-dimensional image space. While latent
@@ -63,6 +64,23 @@ exposing multiscale latents for per-level alignment and enabling closed-form
 conditional queries. These advantages point to normalizing flows as an attractive
 framework for likelihood-calibrated multiview modeling.
 
+=======
+The bijective formulation of these models also enables the synthesis of
+biological variation through stochastic sampling, where latent vectors drawn
+from the Gaussian prior are mapped back to the high-dimensional image space.
+While latent diffusion and flow matching achieve high sample quality, they
+optimize denoising or continuous-transport objectives rather than exact log
+likelihoods, requiring multi-step sampling or ODE integration
+[@lipman2022flowmatching; @croitoru2023diffusion_vision_survey; @ho2020ddpm]. A
+critical distinction between normalizing flows and other generative paradigms,
+such as Generative Adversarial Networks (GANs) and diffusion models, lies in the
+optimization objective. While the latter often prioritize perceptual-based
+losses through divergence surrogates or denoising objectives, normalizing flows
+optimize exact log-likelihoods. This probabilistic formulation is foundational
+as it ensures that the latent space functions primarily as a simplified
+coordinate system with known structure rather than prioritizing aesthetic
+considerations for image synthesis.
+>>>>>>> 8f760f158928c83c85502823acc58ccdb2d30aac
 
 ## Multiview Learning with LAMNr Flows
 
@@ -221,41 +239,25 @@ framework.
 
 We introduce LAMNr flows, a general framework for deep computational anatomy
 that learns shared and private latent structures across multiple views while
-preserving exact likelihoods and invertibility. Within LAMNr flows, each view is
-equipped with a dedicated flow that maps observations to a structured latent
-space.  Key contributions of this work include:
+preserving exact likelihoods and invertibility. Within the LAMNr flows
+framework, each view is equipped with a dedicated flow that maps observations to
+a structured latent space. Key contributions of this work include:  
 
-1. **Unified Multiview Modeling:** We provide a shared coordinate system for
-   heterogeneous data types, including 2D/3D images and tabular imaging-derived
-   phenotypes (IDPs). For imaging, we adopt Glow-style multiscale architectures
-   to retain spatial detail; for tabular blocks, we utilize integrated per-view
-   flows.
+* __Unified Multiview Modeling.__ We provide a shared coordinate system for
+  heterogeneous data types, including 2D/3D images and tabular imaging-derived
+  phenotypes (IDPs). 
 
-2. **Latent Alignment and Linearization:** Using subject-matched batches, we
-   identify shared anatomical features via a library of alignment losses (e.g.,
-   VICReg, InfoNCE). We optionally employ CCA or HSIC screens to restrict
-   alignment to statistically shared directions, leaving the orthogonal
-   complement to capture view-specific variation.
+* __Latent Alignment and Linearization.__ Using subject-matched batches, we
+  identify shared anatomical features via a library of alignment losses, such as
+  VICReg and InfoNCE. 
 
-3. **Closed-form Inference and Reconstruction:** We incorporate a conditional
-   Gaussian layer to provide closed-form posteriors over arbitrary latent
-   subsets. This yields a nonlinear, invertible extension of the shared/private
-   decomposition found in SiMLR [@Avants2021NatCompSci].
+* __Demonstration of Deep Computational Anatomy.__ We demonstrate essential
+  capabilities including closed-form cross-modal data imputation via the
+  Woodbury identity and high-fidelity image interpolation using spherical linear
+  interpolation (Slerp) to prevent variance collapse.
 
-4. **Contrast-Robust Surrogates:** We demonstrate that substituting private
-   latents with conditional means produces shared-latent reconstructions that
-   preserve identity while suppressing idiosyncratic contrast. These
-   "latent-mean" images act as robust representatives that empirically reduce
-   diffeomorphic registration effort.
-
-5. **Open-source, 3D-capable Implementation:** Unlike many contemporary
-   flow-based tools limited to 2D slice-wise processing
-   [@beizaee2025harmonizingflows;@Wen:2023aa], we provide a comprehensive, open-source, 2D and
-   3D PyTorch implementation, based on the `normflows` library
-   [@stimper2023normflows], which is integrated with the ANTsX ecosystem (via
-   ANTsTorch) for robust data handling and auxiliary functionality.
-
-Evaluations on multimodal MRI and multiview IDP datasets demonstrate that LAMNr
-flows improve calibrated likelihoods and prediction while providing a
-single, exact framework for likelihood-calibrated multiview analysis.
+* __Open-source Implementation.__ We provide a comprehensive, open-source 2D and
+  3D PyTorch implementation based on the normflows library. This framework is
+  natively integrated with the ANTsX ecosystem via ANTsTorch for robust data
+  handling and auxiliary functionality.
 
