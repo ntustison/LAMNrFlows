@@ -79,7 +79,7 @@ $D$ across all views. Default values are $H=512$ and $D=256$.  Attaching this
 projector decouples the flow’s internal latent dimensionality and arbitrary
 coordinate system from the alignment space. This allows each view to learn a
 light reparameterization of alignment of rotations and scales frequently
-introduced by invertible mixing layers such as the $1 \times 1 (\times 1)$
+introduced by invertible mixing layers such as the $1\times 1(\times 1)$
 convolutions in Glow, while harmonizing dimensions across disparate views.  The
 role of this $D$ subspace can vary strategically depending on the data type. For
 tabular IDPs (i.e., RealNVP) this configuration represents a high-capacity

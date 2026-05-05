@@ -63,15 +63,38 @@ for such data, the limited resolution of our 3D LAMNr models was insufficient
 for the task and will be postponed for future work when hardware capabilities 
 increase.
 
-Finally, the detailed framework explores the current challenges associated with
-scaling and training LAMNr flows and their constituent normalizing flows
-architectures.  While Glow-style architectures are memory-intensive due to the
-requirement of storing intermediate activations, we mitigate these constraints
-through architectural refinements such as gradient microbatching and bounded
-coupling scales. Additionally, the integration of a low-rank-plus-diagonal
-Gaussian parameterization, solved via the Woodbury matrix identity, enables
-exact conditional inference for cross-modal imputation in 3D. This allows LAMNr
-flows to scale to volumetric data while maintaining a manageable memory
-footprint. These advancements, integrated into the ANTsX ecosystem via
-ANTsTorch, provide a robust and scalable foundation for future exploration of
-deep computational anatomy.
+Our longitudinal analysis demonstrates that unsupervised, multiview
+representations can effectively model disease progression without regional
+priors. The fact that LAMNr achieves highly significant longitudinal predictive
+power ($\beta = -0.142$, $p = 0.008$) based solely on latent spatial distances
+highlights its capacity to encode relevant neurodegenerative trajectories
+intrinsically. Crucially, we observe a temporal divergence in biomarker utility.
+While macroscopic volumetry dominates the later stages of gross tissue
+loss—which accounts for the superior global fit (AIC) of the FreeSurfer
+composite model on the full OASIS-3 cohort—the LAMNr flows latent representation
+excels in the preclinical phase. By identifying structural deviations in
+subjects clinically diagnosed as cognitively normal, the LAMNr framework
+captures the early, sub-macroscopic morphological shifts that precede the overt
+atrophy required for standard macroscopic segmentation.
+
+Finally, we must explicitly acknowledge the computational limitations of the
+current work. While the LAMNr flows framework provides a mathematically rigorous
+foundation for deep computational anatomy, the underlying Glow-style
+architectures are inherently memory-intensive due to the requirement of storing
+intermediate activations for exact gradient computation. Currently, this VRAM
+bottleneck restricts the application of high-resolution 3D models to targeted
+sub-structures (e.g., the medial temporal lobe) or necessitates the downsampling
+of whole-brain volumes. However, the framework is currently effective for both
+higher-resolution 2D exploration and localized 3D applications. Furthermore, our
+comprehensive open-source software implementation, natively integrated into the
+ANTsX ecosystem via ANTsTorch, is fully 2D and 3D capable by design.
+
+To mitigate existing constraints, we have implemented architectural refinements
+such as gradient microbatching, bounded coupling scales, and a
+low-rank-plus-diagonal Gaussian parameterization (solved via the Woodbury matrix
+identity) to enable exact conditional inference for cross-modal imputation in
+3D. Our ongoing and future research is actively focused on remedying these
+memory limitations. By exploring advanced algorithmic efficiencies and
+leveraging next-generation hardware, we aim to extend this exact-likelihood
+framework to high-resolution, whole-brain 3D volumes, providing a robust and
+scalable foundation for the future of computational anatomy.

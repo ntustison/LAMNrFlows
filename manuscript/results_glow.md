@@ -6,7 +6,6 @@
 
 ### Image Data and Preprocessing
 
-
 Transitioning from tabular to image data within the LAMNr Flows context
 introduces significant computational challenges.  The Glow architecture requires
 storing all intermediate activations to compute exact gradients
@@ -25,19 +24,22 @@ resolutions. These constraints are primarily a function of current hardware
 availability, as the software framework is currently designed to scale with
 future computational resources.
 
-We use four data cohorts in the experiments below:  the Dallas Life Brain Study
+We use six data cohorts in the experiments below: the Dallas Life Brain Study
 [@ds004856:1.3.0;@Park:2025aa], the NIMH Healthy Research Volunteer Dataset
 [@ds005752:2.1.0], the Queensland Twin IMaging dataset
-[@ds004169:1.0.6;@Strike:2019aa;@Koenders:2016aa], and a T1-weighted structural
-MRI study of cannabis users at baseline and 3 years follow-up, and the Brain
+[@ds004169:1.0.6;@Strike:2019aa], a T1-weighted structural MRI study of cannabis
+users at baseline and 3 years follow-up (CBF3) [@Koenders:2016aa], the Brain
 Tumor Sequence Registration Challenge dataset
-[@baheti2024braintumorsequenceregistration].  Whereas the first four datasets
-are openly available at [OpenNeuro](https://openneuro.org/) (to facilitate
-reader reproducibility), the fourth dataset is available upon request from the
-challenge organizers.  These datasets are further summarized as follows:
+[@baheti2024braintumorsequenceregistration], and the Open Access Series of
+Imaging Studies 3 (OASIS-3) cohort [@lamontagne2019oasis3]. Whereas the first four
+datasets are openly available at [OpenNeuro](https://openneuro.org/) (to
+facilitate reader reproducibility), the BraTS-Reg dataset is available upon
+request from the challenge organizers, and OASIS-3 is
+available upon request through the OASIS project. These datasets are further
+summarized as follows:
 
 * __Dallas Life Brain Study (DLBS).__ T1-weighted, FLAIR, diffusion-weighted
-MRI.  Three longitudinal "waves" are included ($N_1=463$, $N_2=298$, $N_3=191$).
+MRI. Three longitudinal "waves" are included ($N_1=463$, $N_2=298$, $N_3=191$).
 
 * __NIMH Research Volunteer Dataset (NIMH).__ T1-weighted, T2-weighted, 
 diffusion-weighted MRI for $N=234$ complete subjects.  
@@ -50,7 +52,12 @@ including family identifiers.
 
 * __Brain Tumor Sequence Registration Challenge (BraTS-Reg).__ T1-weighted,
 T1-weighted contrast enhanced, T2-weighted, FLAIR from $N=140$ subjects,
-featuring pre-operative and follow-up scans with expert-validated landmarks.  
+featuring pre-operative and follow-up scans with expert-validated landmarks.
+
+* __Open Access Series of Imaging Studies 3 (OASIS-3).__ Longitudinal multimodal 
+neuroimaging (including T1-weighted MRI), clinical, and cognitive data (e.g., MMSE scores), 
+utilizing standard FreeSurfer outputs to evaluate structural trajectories.
+
 
 Common preprocessing steps for all data include rigid normalization to a common
 reference space, specifically the Nathan Kline Institute (NKI) template

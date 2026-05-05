@@ -3,7 +3,7 @@
 ## Implementation and Training Details
 
 Our implementation builds on the \texttt{normflows} PyTorch package for
-normalizing flows [@stimper2023normflows], which we have extensively 
+normalizing flows [@stimper2023normflows], which we have extensively
 modfiied for improvements in training normalizing flows and to accommodate the
 LAMNr flows framework. At the architectural level, we reconfigured the layer ordering to
 match Glow-style multiscale flows (ActNorm $\rightarrow$ invertible
@@ -130,7 +130,7 @@ exact likelihood computation (augmentations act on inputs only)
 [@Tustison:2024aa;@Tustison:2025aa]. For image views, we use geometric
 transforms (linear and non-linear transformations) shared across all views of a
 subject to preserve alignment targets, and per-view intensity-based transforms
-(noise, simulated bias-field, histogram warping) .  Similar to the tabular case,
+(noise, simulated bias-field, histogram warping).  Similar to the tabular case,
 the amplitude is controlled by a scalar schedule \(\alpha(t)\) (linear, cosine,
 or exponential in training time) (cf Figure \ref{fig:aug-schedule}).
 

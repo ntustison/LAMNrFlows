@@ -33,7 +33,7 @@ established the properties and advantages of invertible networks and flow-based
 density models [@Gomez2017RevNet; @Jacobsen2018iRevNet; @dinh2014nice;
 @rezende2015variational; @dinh2016realnvp; @kingma2016iaf;
 @papamakarios2017maf]. Later, Glow architectures introduced data-dependent
-normalization, invertible $1 \times 1 (\times 1)$ convolutions, and a multiscale
+normalization, invertible $1 \times 1(\times 1)$ convolutions, and a multiscale
 structure optimized for imaging [@kingma2018glow], with subsequent variants
 improving coupling transforms and stability while preserving exact likelihoods
 [@ho2019flowpp; @durkan2019nsf; @behrmann2019resflow; @grathwohl2019ffjord].
@@ -60,7 +60,7 @@ multi-step sampling or ODE integration [@lipman2022flowmatching;
 @croitoru2023diffusion_vision_survey; @ho2020ddpm]. By contrast, normalizing
 flows offer an exact, interpretable framework with single-pass inversion,
 exposing multiscale latents for per-level alignment and enabling closed-form
-conditional queries. These advantages point to normalzing flows as an attractive
+conditional queries. These advantages point to normalizing flows as an attractive
 framework for likelihood-calibrated multiview modeling.
 
 
@@ -111,7 +111,7 @@ multiview-enriched normalizing flows for complex density estimation
 [@kruse2025multiflowmultiviewenrichednormalizingflows] using standard RealNVP
 architectures. LAMNr flows specifically extend this logic by integrating a
 latent shared/private decomposition that enables geometrically-informed
-coordinate systems for multimodal alignment while also including image-specific 
+coordinate systems for multimodal alignment while also including image-specific
 Glow architectures.  
 
 Additionally, the development of LAMNr flows provides a practical strategy in
@@ -200,13 +200,13 @@ Beyond template construction, this continuous latent framework provides direct
 analogues to the fundamental metric operations of traditional computational
 anatomy. For example, in classic diffeomorphic frameworks, the transformation
 between a source and target anatomy is governed by integrating a time-varying
-velocity field over a continuous time domain $t \in [0, 1]$ . The length of this
+velocity field over a continuous time domain $t \in [0,1]$ . The length of this
 optimal, continuous deformation path establishes the exact geodesic distance
 between the two biological structures [@Miller2002LDDMMOverview;@Beg2005LDDMM].
 In the LAMNr flows framework, this computationally intensive temporal
 integration can be substituted with an algebraic interpolation within the latent
 space. Traversing the latent manifold between two encoded images, $z_0$ and
-$z_1$, using a scalar interpolation parameter $\alpha \in [0, 1]$ generates a
+$z_1$, using a scalar interpolation parameter $\alpha \in [0,1]$ generates a
 continuous trajectory of decoded images that closely approximates this
 diffeomorphic flow. Consequently, the distances computed directly in the latent
 space, when properly evaluated via distribution-preserving spherical metrics
@@ -219,15 +219,11 @@ framework.
 
 ## Contributions 
 
-\textcolor{red}{Rework when closer to finishing.}
-
-We introduce LAMNr flows, a general
-framework for deep computational anatomy that learns shared and private latent
-structures across multiple views while preserving exact likelihoods and
-invertibility. Within LAMNr flows, each view is equipped with a dedicated flow that
-maps observations to a structured latent space. 
-
-Key contributions of this work include:
+We introduce LAMNr flows, a general framework for deep computational anatomy
+that learns shared and private latent structures across multiple views while
+preserving exact likelihoods and invertibility. Within LAMNr flows, each view is
+equipped with a dedicated flow that maps observations to a structured latent
+space.  Key contributions of this work include:
 
 1. **Unified Multiview Modeling:** We provide a shared coordinate system for
    heterogeneous data types, including 2D/3D images and tabular imaging-derived

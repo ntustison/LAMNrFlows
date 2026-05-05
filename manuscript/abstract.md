@@ -11,15 +11,15 @@ across heterogeneous, multimodal datasets while simultaneously topologically
 unfolding the sampled data manifold into a continuous vector space. Formal
 latent-alignment constraints are used to model shared structural features
 separate from view-specific variations, coordinating latent projections into a
-shared geometric subspace. In the context of biological imaging, this
-transformation establishes a potential basis for a deep learning interpretation
-of foundational computational anatomy concepts, such as the population template,
-latent distances, and geodesic pairwise image interpolation. Additionally, the
-proposed framework enables closed-form conditional modeling for exact cross-view
-imputation and other latent space manipulations. Evaluations and illustrations
-on both imaging-derived phenotypes (IDPs) and multimodal MRI demonstrate the
-proposed framework and potential applications.  To further motivate our work, we
-provide a robust and comprehensive, 2D- and 3D open-source implementation in
-PyTorch, natively integrated with the ANTsX ecosystem (i.e., ANTsTorch) for
-efficient training and subsequent data transformation, manipulation, and
-analysis.
+shared geometric subspace. By applying this transformation in the context of
+biological imaging, the framework establishes a potential basis for a deep
+learning interpretation of foundational computational anatomy concepts, such as
+the population template, latent distances, and geodesic pairwise image
+interpolation. Additionally, the proposed framework enables closed-form
+conditional modeling for exact cross-view imputation and other latent space
+manipulations. Evaluations and illustrations on both imaging-derived phenotypes
+(IDPs) and multimodal MRI demonstrate the proposed framework and potential
+applications.  To further motivate our work, we provide a robust and
+comprehensive, 2D and 3D open-source implementation in PyTorch, natively
+integrated with the ANTsX ecosystem (i.e., ANTsTorch) for efficient training and
+subsequent data transformation, manipulation, and analysis.

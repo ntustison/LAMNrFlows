@@ -61,13 +61,13 @@ inverse flow, $x = f^{-1}_\theta(z)$. In high-dimensional latent spaces,
 however, the probability mass concentrates within a thin "typical set" located
 on a spherical shell of radius $\sqrt{d}\tau$, rather than near the mode at the
 origin. Adjusting the temperature parameter $\tau$ allows for explicit control
-over this sampling radius: lower temperatures ($\tau < 1$) contract the sampling
+over this sampling radius.  Lower temperatures ($\tau<1$) contract the sampling
 toward the high-density (but low-volume) region near the mean to generate
-high-fidelity, canonical anatomies, while $\tau \approx 1$ ensures that samples
+high-fidelity, canonical anatomies, while $\tau\approx1$ ensures that samples
 are drawn from the typical set, capturing the diverse structural variations
 characteristic of the true empirical distribution. See Figure
-\ref{fig:generative_samples}. Also, see ``lamnr_glow_tool_2/3d.py sample`` for more
-details.
+\ref{fig:generative_samples}. Also, see ``lamnr_glow_tool_2/3d.py sample`` for
+more details.
 
 \begin{figure}[!htbp]
     \centering
@@ -114,18 +114,18 @@ artifacts characteristic of standard linear interpolation, we employ a
 $\mu$-centered spherical linear interpolation (Slerp). By applying the spherical
 rotation relative to the population's empirical mean, $\mu$, the latent
 trajectory better preserves the intrinsic data variance, ensuring all
-intermediate representations remain closer the high-probability anatomical
+intermediate representations remain closer to the high-probability anatomical
 manifold. This is demonstrated in Figure \ref{fig:interpolation} for both
 within-cohort data (i.e., DLBS Wave 2) and out-of-cohort data (i.e., BraTS-Reg),
-in terms of the model training data (i.e., DLBS Wave 1).  Both the T1-w and
-FLAIR images between the source ($t=0.0$) and target images ($t=1.0$).  In the
-case of the DLBS Wave 2 cohort, we selected two subjects of different ages which
-illustrates the morphological interpolation from larger to smaller ventricles
-and from the presence to absence of white matter hyperintensities. We see
-similar high quality interpolations in a BraTS-Reg subject (Subject 5, post- and
-pre-resection scans).  It is noteworthy that training data did not include
-skull-stripped images.  See ``lamnr_glow_tool_2/3d.py recon-interpolate`` for more
-details.
+in terms of the model training data (i.e., DLBS Wave 1). We observe smooth
+transitions for both the T1-w and FLAIR images between the source ($t=0.0$) and
+target images ($t=1.0$).  In the case of the DLBS Wave 2 cohort, we selected two
+subjects of different ages which illustrates the morphological interpolation
+from larger to smaller ventricles and from the presence to absence of white
+matter hyperintensities. We see similar high quality interpolations in a
+BraTS-Reg subject (Subject 5, post- and pre-resection scans).  It is noteworthy
+that training data did not include skull-stripped images.  See
+``lamnr_glow_tool_2/3d.py recon-interpolate`` for more details.
 
 
 \begin{figure}[!htbp]
@@ -453,10 +453,10 @@ input.}
 
 __Latent distances.__ The bijective nature of normalizing flows allows complex
 anatomical deviations to be quantified through a flexible suite of distance
-metrics in the learned latent space, depending on the analytical
-objective.Euclidean distance provides a straightforward measure of separation
-for basic similarity assessments. To account for the natural variance of each
-latent dimension, we implement a standardized Euclidean (diagonal Mahalanobis)
+metrics in the learned latent space, depending on the analytical objective.
+Euclidean distance provides a straightforward measure of separation for basic
+similarity assessments. To account for the natural variance of each latent
+dimension, we implement a standardized Euclidean (diagonal Mahalanobis)
 distance, $d = \sqrt{ \sum_i \frac{(z_i - \mu_i)^2}{\sigma_i^2 + \epsilon} }$,
 which benchmarks a subject against the normative Gaussian mean ($\mu$) without
 artificially penalizing high-variance anatomical traits.  For point-to-point
