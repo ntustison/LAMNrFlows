@@ -5,8 +5,8 @@
 
 ## Conditional Gaussian Modeling Over Latents
 
-Normalizing flows give us an explicit bijection between data space and a latent
-space with a simple base density (e.g., Gaussian). Once the per-view flows have
+Normalizing flows yield an explicit bijection between data and latent spaces
+with a simple base density (e.g., Gaussian). Once the per-view flows have
 been trained, every multiview observation \(x = \{x^{(v)}\}_{v=1}^V\) can be
 mapped to a collection of latents \(z = \{z^{(v)}\}_{v=1}^V\) with an exactly
 known Jacobian. Any joint distribution placed on these latents induces a valid
@@ -27,17 +27,17 @@ factorizes as
 p_X(x) = p_Z(z)\,\prod_{v=1}^V \left|\det \frac{\partial f^{(v)}}{\partial x^{(v)}}\right|,
 \end{equation}
 
-with \(z = f(x)\). Because \(p_Z(z)\) is Gaussian, all conditionals
-\(p_Z(z_U \mid z_O)\) are available in closed form, and exact conditional
-inference in data space reduces to three steps: encode observed views to
-latents, apply Gaussian conditioning in \(z\), and decode the resulting latents
-back through the inverse flows. This yields closed-form posteriors, imputations,
-and counterfactuals that are fully consistent with the learned flow model.
+with \(z = f(x)\). Because \(p_Z(z)\) is Gaussian, all conditionals \(p_Z(z_U
+\mid z_O)\) are available in closed form, and exact conditional inference in
+data space reduces to three steps: 1) encode observed views to latents, 2) apply
+Gaussian conditioning in \(z\), and 3) decode the resulting latents back through
+the inverse flows. This yields closed-form posteriors, imputations, and
+counterfactuals that are fully consistent with the learned flow model.
 
 After training the per-view flows and projector alignment, we freeze the flow
 parameters and collect latents for all subjects. For image views, we retain a
 multiscale representation \(z^{(v)}_\ell\) at each level \(\ell \in
-\{1,\dots,L\}\); for tabular views, we have a single level. Concatenating across
+\{1,\dots,L\}\) whereas for tabular views, we have a single level. Concatenating across
 views and levels yields a joint latent vector
 
 \begin{equation}
@@ -53,7 +53,7 @@ dimensionality." While feasible for 2D images, a small 3D medical volume (e.g.,
 precision requires over 500 GB of memory, making direct Cholesky inversion
 computationally intractable.
 
-To resolve this in high-dimensional 3D settings, we employ a
+To resolve this in high-dimensional settings, we employ a
 low-rank-plus-diagonal parameterization via Singular Value Decomposition (SVD).
 We approximate the covariance as \(\Sigma \approx U \Lambda U^T + \sigma^2 I\),
 where \(U\) contains the top \(r\) eigenvectors (\(r \ll D\)), \(\Lambda\) is
@@ -75,11 +75,11 @@ Gaussian. The conditional mean and covariance are theoretically given by:
 To evaluate these equations without instantiating the massive $\Sigma_{OO}$
 matrix, we utilize the Woodbury matrix identity [@henderson1981deriving].
 Specifically, we apply the Push-Through identity to perform the inversion
-strictly within the low-dimensional subspace $r$ [@rasmussen2006gaussian].
+strictly within the lower-dimensional subspace $r$ [@rasmussen2006gaussian].
 By reformulating the system to solve for a strictly positive-definite $r \times
 r$ matrix ($K = \Lambda^{1/2} U_O^T U_O \Lambda^{1/2} + \sigma^2 I$), we bypass
-problematic numerical cancellations [@higham2002accuracy] and reduce the
-memory footprint to mere megabytes. 
+problematic numerical cancellations [@higham2002accuracy] and significantly 
+reduce the memory requirements. 
 
 Critically, the fidelity of these conditional results is intrinsically linked to
 the inter-view latent alignment established during the initial training phase.
@@ -91,13 +91,11 @@ recover missing modalities with high individual specificity. In the absence of
 such alignment (i.e., when $\Sigma_{UO} \approx 0$), the conditional mean
 $\mu_{U|O}$ collapses to the population prior $\mu_U$. In this limit, the
 imputed output reverts to a generic population template, losing the
-subject-matched morphological details. 
-
-Samples from this conditional Gaussian propagate uncertainty, while the
-posterior mean provides a calibrated point estimate. Applying the inverse flows
-to these posterior latents yields imputations, harmonized representations, and
-latent edits in the original data space, with exact likelihoods available for
-all configurations.
+subject-matched morphological details. Samples from this conditional Gaussian
+propagate uncertainty, while the posterior mean provides a calibrated point
+estimate. Applying the inverse flows to these posterior latents yields
+imputations, harmonized representations, and latent edits in the original data
+space, with exact likelihoods available for all configurations.
 
 <!--
 ### Latent distance as a Riemannian biomarker

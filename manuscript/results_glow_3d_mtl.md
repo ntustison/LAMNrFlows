@@ -57,10 +57,10 @@ tabular form. Intra-subject structural trajectories were quantified with our
 LAMNr flows approach by calculating the spherical linear interpolation (Slerp)
 geodesic distance in the latent space between a subject's baseline scan and
 subsequent follow-up visits for both the left and right (flipped) MTLs. We
-compared the predictive power of these latent geometric deformations against a
-FreeSurfer composite volumetric biomarker (hippocampus, entorhinal cortex, and
-parahippocampal cortex) for modeling cognitive decline [@schwarz2016large],
-measured via the Mini-Mental State Examination (MMSE).
+compared the resulting statistical model of these latent geometric deformations
+against a FreeSurfer composite volumetric biomarker (hippocampus, entorhinal
+cortex, and parahippocampal cortex) for modeling cognitive decline
+[@schwarz2016large], measured via the Mini-Mental State Examination (MMSE).
 
 A linear mixed-effects (LME) model incorporating the standardized geodesic distance, 
 age at visit, and intracranial volume (ICV) as fixed effects, with a random intercept 

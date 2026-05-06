@@ -34,7 +34,7 @@ z_n^{(v)} = f^{(v)}_{\theta}(x_n^{(v)}),
 
 that transforms observed data \(x_n^{(v)}\) to a latent space
 \(\mathcal{Z}^{(v)}\) with a chosen base density, typically
-\(p_Z(z) = \mathcal{N}(0, I)\). The induced density on \(\mathcal{X}^{(v)}\)
+\(p_Z(z) = \mathcal{N}(0, 1)\). The induced density on \(\mathcal{X}^{(v)}\)
 follows from the change-of-variables formula:
 
 \begin{equation}
@@ -46,7 +46,7 @@ follows from the change-of-variables formula:
 which can be evaluated exactly for the RealNVP [@dinh2016realnvp] and Glow
 [@kingma2018glow] architectures. The maximum-likelihood
 estimation chooses \(\theta^{(v)}\) to maximize the sum of log-likelihoods over
-subjects, or equivalently to minimize the average negative log-likelihood
+subjects, or equivalently to minimize the average negative log-likelihood (NLL)
 [@kobyzev2020nfsurvey].
 
 For multiple views in the LAMNr flows framework, we instantiate one flow per
@@ -88,7 +88,7 @@ alignment constraints with sufficient degrees of freedom to operate without
 inducing information loss or architectural bottlenecks.  For image
 data (i.e., Glow), the projection acts as an intentional dimensionality
 reduction and selective filter. By compressing the massive raw latent space into
-the lower space $D$, we filter out view-specific high-frequency noise, ensuring
+the lower space $D$, we filter out view-specific, high-frequency noise, ensuring
 the alignment objective captures shared, global morphometric trends rather than
 idiosyncratic imaging artifacts. By restricting alignment to this matched
 subspace, we stabilize the specified alignment constraint and avoid the
@@ -298,12 +298,12 @@ anatomy, Euclidean operations must be replaced with distribution-preserving
 mechanisms.
 
 To navigate this geometry appropriately, we replace standard linear
-interpolation with spherical linear interpolation when traversing
-the latent space between two generated samples $z_1$ and $z_2$
-[@white2016sampling; @agustsson2018optimaltransportmapsdistribution]. For an
-interpolation parameter $t \in [0, 1]$ and the angle $\theta =
-\arccos\left(\frac{z_1 \cdot z_2}{\|z_1\|_2 \|z_2\|_2}\right)$ between the
-vectors, the Slerp interpolative trajectory is defined as:
+interpolation with spherical linear interpolation when traversing the latent
+space between two generated samples $z_1$ and $z_2$ [@white2016sampling;
+@agustsson2018optimaltransportmapsdistribution]. For an interpolation parameter
+$t \in [0, 1]$ and the angle $\theta = \arccos\left(\frac{z_1 \cdot
+z_2}{\|z_1\|_2 \|z_2\|_2}\right)$ between the vectors, the Slerp (i.e.,
+spherical linear interpolation) trajectory is defined as:
 
 \begin{equation}\text{Slerp}(z_1,
 z_2; t) = \frac{\sin((1-t)\theta)}{\sin(\theta)}z_1 +

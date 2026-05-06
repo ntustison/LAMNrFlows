@@ -6,17 +6,17 @@
 Medical imaging data and their representative latent spaces have become
 fundamental for insight into biological structure and function. While deep
 learning has become the current standard for navigating these high-dimensional
-spaces, certain aspects of contemporary architectures (e.g., intractable
-likelihoods, lack of bijective mappings) limit exploration, quantitative
-analysis, and other potential applications through latent space evaluations and
-manipulations. Generative Adversarial Networks (GANs), for instance, are
-implicit samplers trained with divergence surrogates rather than likelihoods,
-which precludes calibration by exact probabilities [@papamakarios2021nfreview].
-Variational Autoencoders (VAEs) optimize an evidence lower bound rather than the
-exact log likelihood [@kobyzev2020nfsurvey]. Diffusion and score-based models
-rely on denoising or score-matching objectives with likelihoods obtained only
-indirectly [@croitoru2023diffusion_vision_survey]. Finally, while autoregressive
-decoders offer exact likelihoods, they do not yield a one-shot invertible latent
+spaces, certain aspects of contemporary architectures limit exploration,
+quantitative analysis, and other potential applications through latent space
+evaluations and manipulations. Generative Adversarial Networks (GANs), for
+instance, are implicit samplers trained with divergence surrogates rather than
+likelihoods, which precludes calibration by exact probabilities
+[@papamakarios2021nfreview]. Variational Autoencoders (VAEs) optimize an
+evidence lower bound rather than the exact log likelihood
+[@kobyzev2020nfsurvey]. Diffusion and score-based models rely on denoising or
+score-matching objectives with likelihoods obtained only indirectly
+[@croitoru2023diffusion_vision_survey]. Finally, while autoregressive decoders
+offer exact likelihoods, they do not yield a one-shot invertible latent
 representation [@papamakarios2021nfreview]. Such limitations extend to
 multimodal and multiview settings, where heterogeneous or missing data often
 require cross-view comparisons and coherent anatomical reconstructions.
@@ -42,7 +42,7 @@ qualities comparable to other state-of-the-art generative models
 [@croitoru2023diffusion_vision_survey; @zhai2024tarflow; @gu2025starflow].
 Beyond density estimation, normalizing flows provide a geometric framework for
 topologically unfolding the complex anatomical manifold sampled by modern
-medical imaging. By mapping complex imaging data to a symmetric Gaussian base
+medical imaging. In mapping complex imaging data to a symmetric Gaussian base
 distribution, the flow-induced metric ensures that latent paths approximate
 geodesics in the original data domain [@arvanitidis2018latent;
 @kobyzev2020nfsurvey]. Recent advancements have further refined these flow
@@ -51,36 +51,21 @@ training [@kong2025alignflow].  This approach establishes an explicit, optimal
 alignment between the noise distribution and data points to ensure straighter
 paths and more effective inference, even in high-dimensional settings.
 
-<<<<<<< HEAD
-The bijective formulation of these models also enables the synthesis of biological
-variation through stochastic sampling, where latent vectors drawn from the
-Gaussian prior are mapped back to the high-dimensional image space. While latent
-diffusion and flow matching achieve high sample quality, they optimize denoising
-or continuous-transport objectives rather than exact log likelihoods, requiring
-multi-step sampling or ODE integration [@lipman2022flowmatching;
-@croitoru2023diffusion_vision_survey; @ho2020ddpm]. By contrast, normalizing
-flows offer an exact, interpretable framework with single-pass inversion,
-exposing multiscale latents for per-level alignment and enabling closed-form
-conditional queries. These advantages point to normalizing flows as an attractive
-framework for likelihood-calibrated multiview modeling.
-
-=======
 The bijective formulation of these models also enables the synthesis of
 biological variation through stochastic sampling, where latent vectors drawn
-from the Gaussian prior are mapped back to the high-dimensional image space.
+from the Gaussian prior can be mapped back to the high-dimensional image space.
 While latent diffusion and flow matching achieve high sample quality, they
 optimize denoising or continuous-transport objectives rather than exact log
 likelihoods, requiring multi-step sampling or ODE integration
-[@lipman2022flowmatching; @croitoru2023diffusion_vision_survey; @ho2020ddpm]. A
-critical distinction between normalizing flows and other generative paradigms,
-such as Generative Adversarial Networks (GANs) and diffusion models, lies in the
-optimization objective. While the latter often prioritize perceptual-based
-losses through divergence surrogates or denoising objectives, normalizing flows
-optimize exact log-likelihoods. This probabilistic formulation is foundational
-as it ensures that the latent space functions primarily as a simplified
-coordinate system with known structure rather than prioritizing aesthetic
-considerations for image synthesis.
->>>>>>> 8f760f158928c83c85502823acc58ccdb2d30aac
+[@lipman2022flowmatching; @croitoru2023diffusion_vision_survey; @ho2020ddpm].
+Further distinction between normalizing flows and other generative
+architectures, such as Generative Adversarial Networks (GANs) and diffusion
+models, lies in the optimization objective. While the latter often prioritize
+perceptual-based losses through divergence surrogates or denoising objectives,
+normalizing flows optimize exact log-likelihoods in latent space. This
+probabilistic formulation is foundational as it ensures that the latent space
+functions primarily as a simplified coordinate system with known structure
+rather than prioritizing aesthetic considerations for image synthesis.
 
 ## Multiview Learning with LAMNr Flows
 
@@ -91,15 +76,15 @@ via projections (often to lower-dimensional space) to improve calibration and
 cross-cohort comparability. Traditionally, these shared projections have been
 estimated using classical correlation-based methods, such as Canonical
 Correlation Analysis (CCA) [@Hotelling1936CCA; @Hardoon2004CCAOverview]. More
-recently, kernel-based measures like the Hilbert–Schmidt Independence Criterion
-(HSIC) [@gretton2005hsic] and learned alignment objectives, including Barlow
+recently, kernel-based measures, like the Hilbert–Schmidt Independence Criterion
+(HSIC) [@gretton2005hsic], and learned alignment objectives, including Barlow
 Twins [@zbontar2021barlow], VICReg [@bardes2021vicreg], and InfoNCE
 [@oord2018cpc], have expanded these capabilities to accommodate more complex
 patterns.
 
-Similarity-driven multilinear reconstruction (SiMLR) captures this joint
-variation in a linear, low-rank setting by projecting multiview data into a
-shared subspace under subject-level similarity constraints
+One example, similarity-driven multilinear reconstruction (SiMLR), captures this
+joint variation in a linear, low-rank setting by projecting multiview data into
+a shared subspace under subject-level similarity constraints
 [@Avants2021NatCompSci]. While SiMLR isolates this shared representation, it
 treats the remaining view-specific variation as an unstructured residual rather
 than explicitly modeling a private component. This separation supports robust
@@ -109,7 +94,7 @@ learning approaches have explored cross-modal translation and disentanglement
 using convolutional neural networks, VAEs, or diffusion models
 [@havaei2016hemis; @Chartsias2019SDNet; @yuan2024remind], they often lack the
 unique combination of exact likelihoods and one-shot invertible mappings. Recent
-works have also explored normalizing flows for unsupervised MRI harmonization,
+work has also explored normalizing flows for unsupervised MRI harmonization,
 but utilize the flow purely as a test-time density estimator to iteratively
 adapt an auxiliary translation network to an unknown target domain
 [@beizaee2025harmonizingflows].
@@ -148,13 +133,14 @@ safeguards, such as bounding the scale parameters within the affine coupling
 layers, to mitigate gradient blow-ups during training. Furthermore, the
 inclusion of training jitter serves as an additional regularizer (i.e.,
 "dequantization" [@ho2019flowpp]). In the imaging context (i.e., Glow-based
-models), by introducing stochastic intensity- and shape-based perturbations
-during the learning phase, the model is discouraged from over-fitting to local
+models), by introducing stochastic intensity-based and shape-based perturbations
+during the learning phase, the model is discouraged from overfitting to local
 voxel intensities. Together, these constraints force convergence on more
-generalized anatomical representations, stabilizing the Jacobian determinant and
-ensuring that the discrete transitions of the Glow architecture maintain the
-smooth, diffeomorphic properties required.  Analogous network architectural
-features are also leveraged for IDP-based scenarios using RealNVP.  
+generalized anatomical representations, facilitating the stabilization of the
+Jacobian determinant and ensuring that the discrete transitions of the Glow
+architecture maintain the smooth, diffeomorphic properties required.  Analogous
+network architectural features are also leveraged for IDP-based scenarios using
+RealNVP.  
 
 
 ## Computational Anatomy and Normalizing Flows
@@ -166,7 +152,7 @@ features are also leveraged for IDP-based scenarios using RealNVP.
     normalizing flow for a single modality (e.g., T1-weighted MRI). The
     architecture projects complex anatomical data from the observation space
     $\mathcal{X}$ (left) to a tractable, symmetric Gaussian base distribution in
-    the latent space $\mathcal{Z} \sim \mathcal{N}(0, I)$ (right). This
+    the latent space $\mathcal{Z} \sim \mathcal{N}(0, 1)$ (right). This
     single-pass encoding and decoding mechanism provides the exact-likelihood
     foundation upon which the LAMNr flows framework is built.}
     \label{fig:single_view_flow}

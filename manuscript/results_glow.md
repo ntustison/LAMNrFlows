@@ -20,23 +20,21 @@ sizes, to prevent memory overflow. Consequently, we adopt a dual organizational
 approach which utilizes high-resolution 2D slices as a practical sandbox for
 visualizing the geometric properties of the framework, while demonstrating that
 3D LAMNr flows remain robust and biologically informative even at lower
-resolutions. These constraints are primarily a function of current hardware
-availability, as the software framework is currently designed to scale with
-future computational resources.
+resolutions and structural applications. These constraints are primarily a
+function of current hardware availability, as the software framework is
+currently designed to scale with future computational resources.
 
-We use six data cohorts in the experiments below: the Dallas Life Brain Study
+We use five data cohorts in the experiments below: the Dallas Life Brain Study
 [@ds004856:1.3.0;@Park:2025aa], the NIMH Healthy Research Volunteer Dataset
 [@ds005752:2.1.0], the Queensland Twin IMaging dataset
-[@ds004169:1.0.6;@Strike:2019aa], a T1-weighted structural MRI study of cannabis
-users at baseline and 3 years follow-up (CBF3) [@Koenders:2016aa], the Brain
-Tumor Sequence Registration Challenge dataset
-[@baheti2024braintumorsequenceregistration], and the Open Access Series of
-Imaging Studies 3 (OASIS-3) cohort [@lamontagne2019oasis3]. Whereas the first four
-datasets are openly available at [OpenNeuro](https://openneuro.org/) (to
-facilitate reader reproducibility), the BraTS-Reg dataset is available upon
-request from the challenge organizers, and OASIS-3 is
-available upon request through the OASIS project. These datasets are further
-summarized as follows:
+[@ds004169:1.0.6;@Strike:2019aa], the Brain Tumor Sequence Registration
+Challenge dataset [@baheti2024braintumorsequenceregistration], and the Open
+Access Series of Imaging Studies 3 (OASIS-3) cohort [@lamontagne2019oasis3].
+Whereas the first three datasets are openly available at
+[OpenNeuro](https://openneuro.org/) (to facilitate reader reproducibility), the
+BraTS-Reg dataset is available upon request from the challenge organizers, and
+OASIS-3 is available upon request through the OASIS project. These datasets are
+further summarized as follows:
 
 * __Dallas Life Brain Study (DLBS).__ T1-weighted, FLAIR, diffusion-weighted
 MRI. Three longitudinal "waves" are included ($N_1=463$, $N_2=298$, $N_3=191$).
@@ -47,24 +45,20 @@ diffusion-weighted MRI for $N=234$ complete subjects.
 * __Queensland Twin IMaging (QTIM).__ T1-weighted MRI ($N=1202$)
 including family identifiers.
 
-* __Cannabis users: Baseline and Follow-up at 3 Years (CBF3).__ T1-weighted MRI
-($N=42$) including demographics and characterization of cannabis use.
-
 * __Brain Tumor Sequence Registration Challenge (BraTS-Reg).__ T1-weighted,
 T1-weighted contrast enhanced, T2-weighted, FLAIR from $N=140$ subjects,
 featuring pre-operative and follow-up scans with expert-validated landmarks.
 
 * __Open Access Series of Imaging Studies 3 (OASIS-3).__ Longitudinal multimodal 
 neuroimaging (including T1-weighted MRI), clinical, and cognitive data (e.g., MMSE scores), 
-utilizing standard FreeSurfer outputs to evaluate structural trajectories.
-
+utilizing standard FreeSurfer tabulated outputs to evaluate structural trajectories.
 
 Common preprocessing steps for all data include rigid normalization to a common
 reference space, specifically the Nathan Kline Institute (NKI) template
 [@tustison_largescale_2014] (1 mm$^3$, $192 \times 256 \times 224$) using
 brain-extracted T1-weighted images [@tustison_antsx_2021] and ANTs registration
 [@Avants:2014aa].  Cropped volumetric left and right MTL sections for
-modeling were derived from the NIMH and CBF3 T1-w images using DeepFlash
+modeling were derived from the NIMH and OASIS-3 images using DeepFlash
 [@Tustison:2024aa], a deep-learning approach to parcellating specific structures
 of the medial temporal lobe (MTL).  Similar cropped T1-w volumes from the DLBS
 cohort were also generated for inference. Left and right MTLs for each subject
@@ -130,18 +124,18 @@ quantitative evaluations presented in the subsequent sections:
   modalities over the course of optimization is provided in Figure
   \ref{fig:2d_dlbs_training}.
 
+* __3D Single-view Model (T1-w).__ This whole-head model was trained on DLBS
+  wave 1 T1-weighted volumes downsampled to $48 \times 64 \times 56$ voxels. The
+  architecture utilizes $L=3$ levels, $K=[16, 32, 64]$ steps, and $HC=96$. As this
+  represents a single-view baseline, the alignment weight was set to
+  $\lambda=0.0$, focusing purely on exact likelihood-based density estimation.
+
 * __3D Multiview Model (T1-w, T2-w).__ This volumetric model of the left
   hippocampus used NIMH dataset inputs cropped to a size of $40 \times 40 \times
   64$ voxels. The network configuration consists of $L=3$ levels with $K=32$
   coupling steps and $HC=128$ hidden channels. Due to the high structural
   correlation between T1 and T2 modalities in the hippocampus, a stronger
   alignment weight was applied (VICReg $\lambda=1.0$) with CCA-based screening.
-
-* __3D Single-view Model (T1-w).__ This whole-head model was trained on DLBS
-  wave 1 T1-weighted volumes downsampled to $48 \times 64 \times 56$ voxels. The
-  architecture utilizes $L=3$ levels, $K=[16, 32, 64]$ steps, and $HC=96$. As this
-  represents a single-view baseline, the alignment weight was set to
-  $\lambda=0.0$, focusing purely on exact likelihood-based density estimation.
 
 All models were optimized using the Adamax optimizer with a scheduled learning
 rate ranging from $2.5 \times 10^{-5}$ to $5 \times 10^{-5}$. To ensure
@@ -161,14 +155,14 @@ extended functionality for sampling, reconstruction, and latent space
 manipulation. These utilities allow for the fitting of conditional Gaussian
 models to the learned latents via the ``gauss-fit`` sub-function, utilizing
 low-rank (SVD) or diagonal covariance estimators to bypass memory errors when
-processing high-dimensional 3D volumes. The ``gauss-impute`` sub-function
+processing high-dimensional image data. The ``gauss-impute`` sub-function
 facilitates the synthesis of missing modalities (e.g., T1 to FA) by leveraging
 the "Push-Through" Woodbury identity to ensure numerical stability in high
 dimensions. Furthermore, the toolkit supports the construction of population
 templates (``recon-template``), latent temperature modulation to suppress
 anatomical anomalies (``recon-temperature``), and geodesic interpolation that
 respects the high-probability manifold (``recon-interpolate``). Finally,
-rigorous anomaly detection relative to the cohort mean is provided through the
+distances relative to the cohort mean is provided through the
 calculation of Mahalanobis or Euclidean distances (``calc-distance``).
 
 

@@ -10,7 +10,7 @@ match Glow-style multiscale flows (ActNorm $\rightarrow$ invertible
 $1{\times}1(\times1)$ convolution $\rightarrow$ affine coupling).  We also
 implemented 3D variants of the core components (squeeze / unsqueeze, split /
 merge, invertible $1{\times}1{\times}1$ convolutions, and 3D coupling networks)
-to support volumetric MRI data. These models are exposed through ANTsTorch as
+to support volumetric image data. These models are exposed through ANTsTorch as
 configurable factories for both image and tabular views: Glow-style flows for
 2D/3D images and RealNVP-style flows for IDPs and other tabular blocks. The
 ANTsTorch interface handles dataset-level normalization and imputation, Gaussian
@@ -42,7 +42,7 @@ Collectively, these changes reduce log-det explosions and latent outliers in
 deep multiscale flows while preserving exact likelihoods and invertibility.
 
 Training and validation splits are defined at the subject level, and each
-minibatch contains aligned multiview slices from matched subjects. Image data
+minibatch contains aligned multiview data from matched subjects. Image data
 augmentation is performed on-the-fly using the ANTsTorch-based `ImageDataset`
 with affine and diffeomorphic deformations, small intensity perturbations
 (histogram warping and bias field simulation [@Tustison:2021aa]), and additive
