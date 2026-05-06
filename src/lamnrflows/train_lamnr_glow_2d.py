@@ -21,7 +21,7 @@ import csv
 
 import ants
 import antstorch
-import normflows as nf
+import antsnormflows as nf
 
 from contextlib import nullcontext
 from multiprocessing import Value  # optional but recommended if num_workers>0
