@@ -1,11 +1,12 @@
 
 ## Deep Computational Anatomy via Latent-Aligned Multiview Normalizing Flows
 
-<p align="center">
+<!-- <p align="center">
 <img align="center" width="75%" src="manuscript/Figures/DiagramFromBrian.png">
 </p>
+ -->
 
-<!-- <img align="center" width="50%" src="manuscript/Figures/lamnr_templates.png"><img align="center" width="45%" src="manuscript/Figures/lamnr_flows_illustration.png"> -->
+<img align="center" width="50%" src="manuscript/Figures/lamnr_templates.png"><img align="center" width="45%" src="manuscript/Figures/lamnr_flows_illustration.png">
 
 ----
 
