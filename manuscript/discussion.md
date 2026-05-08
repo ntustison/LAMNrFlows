@@ -27,7 +27,7 @@ idiosyncratic high-frequency noise, yielding a smooth representation of shared
 structural signals. Furthermore, to navigate this space without the variance
 collapse typical of high-dimensional Euclidean operations, we utilize spherical
 linear interpolation. This ensures that interpolative trajectories
-remain strictly on the typical set—the high-probability manifold where realistic
+remain strictly on the typical set, i.e., the high-probability manifold where realistic
 anatomical instances reside.  Similarly, the metric operations of DCA substitute
 the image registration of CA with algebraic interpolations calculated directly
 within the latent manifold which respect the underlying latent-space geometry
@@ -71,9 +71,8 @@ highlights its capacity to encode relevant neurodegenerative trajectories
 intrinsically. Crucially, we observe a temporal divergence in biomarker utility.
 While macroscopic volumetry dominates the later stages of gross tissue
 loss—which accounts for the superior global fit (AIC) of the FreeSurfer
-composite model on the full OASIS-3 cohort—the LAMNr flows latent representation
-excels in the preclinical phase. By identifying structural deviations in
-subjects clinically diagnosed as cognitively normal, the LAMNr framework
+composite model on the full OASIS-3 cohort. By identifying structural deviations
+in subjects clinically diagnosed as cognitively normal, the LAMNr framework
 captures the early, sub-macroscopic morphological shifts that precede the overt
 atrophy required for standard macroscopic segmentation.
 
