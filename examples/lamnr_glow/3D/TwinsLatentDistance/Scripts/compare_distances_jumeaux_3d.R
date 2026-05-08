@@ -30,7 +30,7 @@ read_pairwise_matrix <- function(file_path, condition_name) {
 }
 
 # 3. Charger et combiner les deux matrices
-df_skull <- read_pairwise_matrix(paste0(base_dir, "/output_brain_3d/distances_pairwise_matrix_whole_head.csv"), "(with skull)")
+df_skull <- read_pairwise_matrix(paste0(base_dir, "/output_brain_3d/distances_pairwise_matrix_whole_head.csv"), "(whole head)")
 df_brain <- read_pairwise_matrix(paste0(base_dir, "/output_brain_3d/distances_pairwise_matrix_brain.csv"), "(brain only)")
 
 all_distances <- bind_rows(df_skull, df_brain)
@@ -70,8 +70,8 @@ stats_pvalues <- df_twins_wide %>%
   summarize(
     p_value = wilcox.test(
       x = `(brain only)`, 
-      y = `(with skull)`, 
-      paired = TRUE, 
+      y = `(whole head)`, 
+      paired = TRUE,  
       alternative = "less" # Teste si l'extraction crânienne (brain only) améliore (réduit) le rang de similarité
     )$p.value,
     .groups = "drop"
@@ -86,12 +86,12 @@ stats_pvalues <- df_twins_wide %>%
     )
   )
 
-cat("\n--- P-VALUES (Paired Test: Brain Only vs With Skull for Twins) ---\n")
+cat("\n--- P-VALUES (Paired Test: Brain Only vs Whole Head for Twins) ---\n")
 print(as.data.frame(stats_pvalues))
 
 # 7. Définition de la palette restreinte
 palette_twins <- c(
-  "Twins (with skull)" = "#ea801c", 
+  "Twins (whole head)" = "#ea801c", 
   "Twins (brain only)" = "#1a80bb"
 )
 
@@ -139,7 +139,7 @@ geom_text(
   scale_fill_manual(values = palette_twins) +
   scale_color_manual(values = palette_twins) +
   labs(
-    title = "Twin Latent Similarity Ranking: Skull vs Brain Only",
+    title = "Twin Latent Similarity Ranking: Whole Head vs Brain Only",
     subtitle = "(Distribution of ranks. Paired Wilcoxon: *** p < 0.001)",
     x = "Twin Similarity Rank",
     y = "Frequency (Count of Twin Pairs)"
