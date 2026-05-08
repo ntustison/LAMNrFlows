@@ -266,18 +266,6 @@ Comparison of population Fréchet mean approximations. (Top) The standard
 
 </details>
 
-
-<details>
-<summary>Model: MTL, 3D, 2 views (T1/T2)</summary>
-
-Training evolution samples (100000 iterations)
-<p align="center">
-<img src="manuscript/Figures/training_evolution_hippo_views.gif" alt="training evolution" width="75%">
-</p>
-
-</details>
-
-
 ***
 
 ### Funding support
