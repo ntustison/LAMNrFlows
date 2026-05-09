@@ -195,7 +195,7 @@ For imaging-derived phenotypes (IDPs) and other tabular data, we use
 single-scale flows based on RealNVP and masked autoregressive flows (MAF) with
 affine couplings and masked multilayer perceptrons. Continuous variables are
 preprocessed per view using dataset-owned normalization and imputation:
-columns are coerced to numeric, NaNs are imputed (typically by the column mean),
+columns are coerced to numeric, NaNs are imputed as the column mean,
 and features are standardized to zero mean or rescaled to \([0,1]\) depending on
 a user-selectable normalization mode. Very low-variance columns are stabilized
 by floor-clamping the standard deviation. Positively skewed, non-negative
@@ -229,7 +229,7 @@ multiscale representation in which shallower levels capture coarse structure
 while deeper levels model fine texture. Our implementation follows the standard
 Glow construction, instantiated via a model factory in ANTsTorch, with
 configurable image size (both 2D and 3D), number of levels \(L\), steps per
-level \(K\), and hidden channels.[^starflow] 
+level \(K\), and number of hidden channels.[^starflow] 
 
 [^starflow]: Recent transformer autoregressive flows such as STARFlow achieve
 strong high-resolution synthesis by operating as a normalizing flow in the
@@ -292,10 +292,7 @@ typical set creates a trajectory that moves inward toward the latent origin. In
 high dimensions, this effect forces the interpolation path through unpopulated
 latent regions of extremely low probability, causing a distribution mismatch
 [@agustsson2018optimaltransportmapsdistribution]. The resulting generated images
-exhibit blurriness, structural artifacts, and anatomical inconsistencies. To
-better align deep generative models with the principles of computational
-anatomy, Euclidean operations must be replaced with distribution-preserving
-mechanisms.
+exhibit blurriness, structural artifacts, and anatomical inconsistencies. 
 
 To navigate this geometry appropriately, we replace standard linear
 interpolation with spherical linear interpolation when traversing the latent

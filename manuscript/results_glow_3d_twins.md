@@ -28,9 +28,9 @@
     \includegraphics[width=0.9\linewidth]{Figures/histogramme_rangs_twins_with_labels.png}
   \end{subfigure}
   
-  \caption{Top row:  Canonical views of the latent-defined template mean from
+  \caption{Top row:  Canonical views of the latent-defined template from
   the 3D, T1-w volumetric LAMNr flow model constructed from the DLBS wave 1 data.  Second row:
-  Distribution of latent similarity ranks between twins (with and without skull
+  Distribution of latent similarity ranks between twins (with and without brain
   extraction) from the QTIM dataset. The latent distance was calculated from
   each subject to every other subject for which a ranking was derived per
   subject. A rank closer to 1 indicates the highest possible similarity (i.e.,
@@ -38,7 +38,7 @@
   imaging data including the effects of brain extraction. The vertical dashed
   lines indicate the respective medians of the two groups. Skull-stripped images
   significantly lower the median similarity rank to 36.5, compared to a median
-  rank of 83 for images with the skull ($p < 0.001$).}
+  rank of 83 for whole-head images ($p < 0.001$).}
   \label{fig:twins_histogramme}
 \end{figure}
 
@@ -56,6 +56,6 @@ generated to evaluate anatomical affinity by converting these distances into
 similarity ranks. A rank of 1 indicates that a subject's twin is their nearest
 neighbor in the latent space. Statistical results demonstrate significantly
 higher discriminative power when the model processes brain-only images, with the
-median similarity rank for twin pairs improving from 83 (with skull) to 36.5
+median similarity rank for twin pairs improving from 83 (whole head) to 36.5
 (brain only). A paired Wilcoxon test confirmed that this improvement is
 significant ($p < 0.001$). 

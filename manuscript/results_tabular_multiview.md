@@ -63,7 +63,7 @@ Parkinson’s disease progression.
     across two levels of comparison: (1) the gain from non-linear manifold
     mapping, represented by the difference between LAMNr flows (with VICReg) and
     the SiMLR baseline (i.e., red intervals), and (2) the gain from latent
-    alignment, represented by the difference between the aligned LAMNr model and
+    alignment, represented by the difference between the aligned LAMNr flows model and
     an unconstrained multi-view baseline ($\lambda = 0$, i.e., blue intervals).
     Error bars represent the 95\% confidence intervals derived from 1000
     bootstrap resamples. Top panel displays results for the NNL cohort, showing

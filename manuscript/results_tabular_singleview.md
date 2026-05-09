@@ -23,11 +23,11 @@ NNL and PPMI IDP data to determine optimal hyperparameter settings of the
 RealNVP-style normalizing flow architecture across the single modalities in
 terms of trained likelihoods, i.e., bits-per-dimension (BPD). The network
 capacity is controlled by two primary hyperparameters: (i) the coupling depth
-$K$ (number of transform layers), and (ii) the conditioner width or hidden
-channels ($HC$). Rather than performing an exhaustive grid search over a broad
-parameter space, we restricted our evaluation to a targeted window ($K \in \{3,
-4, 5\}$, $HC \in \{64, 80, 96\}$). This focused selection is informed by a
-caution against overfitting, given the broad range in cohort sizes. An
+$K$ (number of transform layers), and (ii) the conditioner width or the number
+of hidden channels ($HC$). Rather than performing an exhaustive grid search over
+a broad parameter space, we restricted our evaluation to a targeted window ($K
+\in \{3, 4, 5\}$, $HC \in \{64, 80, 96\}$). This focused selection is informed
+by a caution against overfitting, given the broad range in cohort sizes. An
 over-parameterized model risks capturing idiosyncratic noise rather than the
 underlying manifold geometry. By selecting the smallest architecture capable of
 minimizing the validation negative log-likelihood, we ensure that the model

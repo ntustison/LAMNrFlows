@@ -6,7 +6,7 @@
     \centering
     \includegraphics[width=0.4\linewidth]{Figures/mtl_input_data_view0_cropped.png}
     \includegraphics[width=0.4\linewidth]{Figures/mtl_input_data_view1_cropped.png}
-\caption{Representative 2D slices from the 3D T1-weighted (left) and T2-weighted
+\caption{Representative 2D oblique slices from the 3D T1-weighted (left) and T2-weighted
 (right) medial temporal lobe (MTL) training pairs from the NIMH dataset. The
 volumes have been cropped and rigidly normalized to the DeepFLASH template,
 orienting the longitudinal axis of the hippocampus perpendicular to the coronal
@@ -17,16 +17,16 @@ plane.}
 We evaluated the ability of the proposed framework to capture clinically
 relevant changes of the medial temporal lobe (MTL). The LAMNr flows model is
 volumetric ($40\times40\times64$ voxels) comprising two views/modalities (T1-w,
-T2-w) common to imaging of the MTL [@Yushkevich:2015aa,@Wisse:2017aa]. T1-w/T2-w
+T2-w) common to imaging of the MTL [@Yushkevich:2015aa;@Wisse:2017aa]. T1-w/T2-w
 imaging pairs ($N=249$) were taken from the NIMH dataset [@ds005752:2.1.0].
 Training included both the left and right (flipped) MTLs. The cropped volume for
 each image set was defined by applying DeepFLASH [@Tustison:2024aa], an MTL
-segmentation application available in ANTsXNet, to linearly normalize each
-hemisphere to the DeepFLASH template with the long axis of the hippocampus
-oriented perpendicular to the coronal plane (see Figure
+segmentation application available in ANTsXNet and ANTsTorch, to linearly
+normalize each hemisphere to the DeepFLASH template with the long axis of the
+hippocampus oriented perpendicular to the coronal plane (see Figure
 \ref{fig:nimh_mtl_training_input}).
 
-Each view-specific normalizing flow architecture was scaled to maximize spatial
+Each view-specific Glow instance was scaled to maximize spatial
 expressivity while adhering to hardware constraints, utilizing three multiscale
 resolution levels ($L=3$), 32 coupling steps per level ($K=32$), and 128 hidden
 channels. Training was stabilized using an effective batch size of 64
@@ -52,7 +52,7 @@ $10^{-3}$ to stabilize the covariance matrix inversion.
 
 To validate the clinical utility of the learned structural representations, we
 evaluated the LAMNr latent space using longitudinal data from the OASIS-3 cohort
-[@lamontagne2019oasis3] which includes standard Freesurfer output compiled in
+[@lamontagne2019oasis3] which includes standard FreeSurfer output compiled in
 tabular form. Intra-subject structural trajectories were quantified with our
 LAMNr flows approach by calculating the spherical linear interpolation (Slerp)
 geodesic distance in the latent space between a subject's baseline scan and

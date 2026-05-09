@@ -124,8 +124,9 @@ subjects of different ages which illustrates the morphological interpolation
 from larger to smaller ventricles and from the presence to absence of white
 matter hyperintensities. We see similar high quality interpolations in a
 BraTS-Reg subject (Subject 5, post- and pre-resection scans).  It is noteworthy
-that training data did not include skull-stripped images.  See
-``lamnr_glow_tool_2/3d.py recon-interpolate`` for more details.
+reiterating that training data did not include skull-stripped images.  See
+``lamnr_glow_tool_2/3d.py recon-interpolate`` for specific implementation 
+details.
 
 
 \begin{figure}[!htbp]
@@ -242,19 +243,19 @@ that training data did not include skull-stripped images.  See
 \end{tikzpicture}
 }
 \caption{Interpolation using the DLBS Wave 2 cohort (top row) and BraTS-Reg
-cohort (second row).  Model training used only DLBS Wave 1 data (T1-w, FLAIR,
-FA).  (Top) The generated morphological transition between a source image
-($t=1.0$) and a target ($t=0.0$) multimodal images (T1-w, FLAIR).  Interpolation
-DLBS data (Wave 2) included the source image (Subject 4488, Age 77) and target
-image (Subject 587, Age 53). BraTS-Reg is demonstrated using pre- and 
-post-resection T1-w and FLAIR images from Subject 5. (Bottom) A geometric
+cohort (second row).  Model training used only whole-head DLBS Wave 1 data
+(T1-w, FLAIR, FA).  (Top) The generated morphological transition between a
+source image ($t=1.0$) and a target ($t=0.0$) multimodal images (T1-w, FLAIR).
+Interpolation DLBS data (Wave 2) included the source image (Subject 4488, Age
+77) and target image (Subject 587, Age 53). BraTS-Reg is demonstrated using pre-
+and post-resection T1-w and FLAIR images from Subject 5. (Bottom) A geometric
 representation of the joint latent space. The empirical distribution of the
 training cohort is centered around $\mu$. Standard linear interpolation (Lerp,
 dotted red line) cuts through the interior of the latent hypersphere, causing a
 severe contraction of the vector's norm (variance collapse). This forces the
 decoding flow to evaluate out-of-distribution coordinates. Conversely, applying
 Slerp relative to the empirical mean $\mu$ (solid green arc) better preserves
-the natural variance of the data such the trajectory follows the
+the natural variance of the data such that the trajectory follows the
 high-probability manifold.}
 \label{fig:interpolation}
 \end{figure}
@@ -267,11 +268,11 @@ Projecting this optimal estimate through the target modalities' inverse flows,
 $\hat{\mathcal{X}}^{(U)} = (f^{(U)})^{-1}(\mu_{U|O})$, yields a high-fidelity imputation
 that guarantees mathematical consistency with the population's cross-view
 dependencies. Crucially, because the joint prior models the full multi-view
-latent space simultaneously, this formulation is inherently flexible: it
+latent space simultaneously, this formulation is inherently flexible.  It
 supports conditioning on any arbitrary subset of available data, enabling
 complex many-to-many translations (e.g., synthesizing a single FA map from
-combined T1 and T2 inputs, or simultaneously generating T2, FA, and MD from a
-single T1 scan).  See Figure \ref{fig:imputation}.  Also, see
+combined T1-w and T2-w inputs, or simultaneously generating T2-w and FA from a
+single T1-w scan).  See Figure \ref{fig:imputation}.  Also, see
 ``lamnr_glow_tool_2/3d.py impute`` for more details.
 
 \begin{figure}[!htbp]

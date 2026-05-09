@@ -26,15 +26,15 @@ is the exact mode of the learned distribution, it naturally filters
 idiosyncratic high-frequency noise, yielding a smooth representation of shared
 structural signals. Furthermore, to navigate this space without the variance
 collapse typical of high-dimensional Euclidean operations, we utilize spherical
-linear interpolation. This ensures that interpolative trajectories
-remain strictly on the typical set, i.e., the high-probability manifold where realistic
+linear interpolation. This ensures that interpolative trajectories remain
+strictly on the typical set, i.e., the high-probability manifold where realistic
 anatomical instances reside.  Similarly, the metric operations of DCA substitute
 the image registration of CA with algebraic interpolations calculated directly
 within the latent manifold which respect the underlying latent-space geometry
 with efficient inverse single passes through the network(s). By leveraging the
-exact-likelihood foundations of normalizing flows, this framework parallels the
-geometric rigor of traditional CA while potentially providing a deep
-learning-based approach for multimodal biological analysis.
+exact-likelihood foundations of certain normalizing flows architectures, this
+framework parallels the geometric rigor of traditional CA while potentially
+providing a deep learning-based approach for multimodal biological analysis.
 
 Beyond CA modeling, the empirical results demonstrate the utility of LAMNr flows
 for clinical and biological investigation. In the tabular experiments, LAMNr
@@ -54,27 +54,27 @@ for large deformation scenarios, significant topological disruptions, such as
 tumor-induced changes, can limit accuracy.  One of our early hypotheses in the
 development of this work was that DCA-based latent interpolation would be able
 to  overcome such topological difficulties by providing an intermediate image
-($t=0.5$) for more robust image registration.  The BraTS-Reg22 challenge
-[@baheti2024braintumorsequenceregistration] provided the ideal opportunity to
-test such an hypothesis as it involved image registration data pre- and 
-post-resection with expert-annotated landmarks.  Although preliminary evaluations 
-demonstrate competitive structural recovery (cf. Figure \ref{fig:interpolation})
-for such data, the limited resolution of our 3D LAMNr models was insufficient
-for the task and will be postponed for future work when hardware capabilities 
-increase.
+($t=0.5$) for more robust image registration, in the style of classic Symmetric
+Normalization.  The BraTS-Reg22 Challenge
+[@baheti2024braintumorsequenceregistration] data provided a potentially ideal opportunity to
+test such an hypothesis as it involves pre- and
+post-resection data with expert-annotated landmarks.  Although preliminary
+evaluations demonstrated competitive accuracy (cf. Figure
+\ref{fig:interpolation}), the limited resolution of our 3D LAMNr
+models was insufficient for the task and will be addressed in future work.
 
-Our longitudinal analysis demonstrates that unsupervised, multiview
+Our longitudinal MTL analysis demonstrates that unsupervised, multiview
 representations can effectively model disease progression without regional
 priors. The fact that LAMNr achieves highly significant longitudinal predictive
 power ($\beta = -0.142$, $p = 0.008$) based solely on latent spatial distances
 highlights its capacity to encode relevant neurodegenerative trajectories
 intrinsically. Crucially, we observe a temporal divergence in biomarker utility.
 While macroscopic volumetry dominates the later stages of gross tissue
-loss—which accounts for the superior global fit (AIC) of the FreeSurfer
+loss, which accounts for the superior global fit (AIC) of the FreeSurfer
 composite model on the full OASIS-3 cohort. By identifying structural deviations
 in subjects clinically diagnosed as cognitively normal, the LAMNr framework
-captures the early, sub-macroscopic morphological shifts that precede the overt
-atrophy required for standard macroscopic segmentation.
+potentially captures the early, sub-macroscopic morphological shifts that 
+precede the overt atrophy required for conventional segmentation approaches.
 
 Finally, we must explicitly acknowledge the computational limitations of the
 current work. While the LAMNr flows framework provides a mathematically rigorous
@@ -82,18 +82,17 @@ foundation for deep computational anatomy, the underlying Glow-style
 architectures are inherently memory-intensive due to the requirement of storing
 intermediate activations for exact gradient computation. Currently, this VRAM
 bottleneck restricts the application of high-resolution 3D models to targeted
-sub-structures (e.g., the medial temporal lobe) or necessitates the downsampling
-of whole-brain volumes. However, the framework is currently effective for both
+sub-structures (e.g., the MTL) or necessitates the downsampling of whole-brain
+volumes. However, the framework is currently effective for both
 higher-resolution 2D exploration and localized 3D applications. Furthermore, our
 comprehensive open-source software implementation, natively integrated into the
-ANTsX ecosystem via ANTsTorch, is fully 2D and 3D capable by design.
-
-To mitigate existing constraints, we have implemented architectural refinements
-such as gradient microbatching, bounded coupling scales, and a
-low-rank-plus-diagonal Gaussian parameterization (solved via the Woodbury matrix
-identity) to enable exact conditional inference for cross-modal imputation in
-3D. Our ongoing and future research is actively focused on remedying these
-memory limitations. By exploring advanced algorithmic efficiencies and
-leveraging next-generation hardware, we aim to extend this exact-likelihood
-framework to high-resolution, whole-brain 3D volumes, providing a robust and
-scalable foundation for the future of computational anatomy.
+ANTsX ecosystem via ANTsTorch, is fully 2D and 3D capable by design. To mitigate
+existing constraints, we have implemented architectural refinements such as
+gradient microbatching, bounded coupling scales, and a low-rank-plus-diagonal
+Gaussian parameterization (solved via the Woodbury matrix identity) to enable
+exact conditional inference for cross-modal imputation in 3D. Our ongoing and
+future research is actively focused on remedying these memory limitations. By
+exploring advanced algorithmic efficiencies and leveraging next-generation
+hardware, we aim to extend this exact-likelihood framework to high-resolution,
+whole-brain 3D volumes, providing a robust and scalable foundation for 
+computational anatomy.

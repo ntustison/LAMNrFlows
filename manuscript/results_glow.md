@@ -22,7 +22,7 @@ visualizing the geometric properties of the framework, while demonstrating that
 3D LAMNr flows remain robust and biologically informative even at lower
 resolutions and structural applications. These constraints are primarily a
 function of current hardware availability, as the software framework is
-currently designed to scale with future computational resources.
+currently designed to scale with future increase in computational capabilities.
 
 We use five data cohorts in the experiments below: the Dallas Life Brain Study
 [@ds004856:1.3.0;@Park:2025aa], the NIMH Healthy Research Volunteer Dataset
@@ -31,7 +31,7 @@ We use five data cohorts in the experiments below: the Dallas Life Brain Study
 Challenge dataset [@baheti2024braintumorsequenceregistration], and the Open
 Access Series of Imaging Studies 3 (OASIS-3) cohort [@lamontagne2019oasis3].
 Whereas the first three datasets are openly available at
-[OpenNeuro](https://openneuro.org/) (to facilitate reader reproducibility), the
+[OpenNeuro](https://openneuro.org/) (to facilitate reproducibility), the
 BraTS-Reg dataset is available upon request from the challenge organizers, and
 OASIS-3 is available upon request through the OASIS project. These datasets are
 further summarized as follows:

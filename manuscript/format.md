@@ -13,7 +13,7 @@ output:
     fig_caption: true
 bibliography:
   - references.bib
-csl: nature.csl
+csl: medical-image-analysis.csl
 longtable: true
 urlcolor: blue
 header-includes:
