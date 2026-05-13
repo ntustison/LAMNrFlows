@@ -336,38 +336,34 @@ class Projector(nn.Module):
 
 def _flatten_latents(z, target_pool_size=2):
     """
-    Aplatit les latents pour l'alignement (Projector).
-    Applique d'abord un pooling adaptatif pour éviter une explosion de la mémoire 
-    avec des volumes 3D de haute résolution (ex: 128^3).
+    Aplatit les latents pour l'alignement (VICReg/CCA/HSIC).
     
-    Args:
-        z: Tenseur ou liste de tenseurs (sortie de model.inverse_and_log_det)
-        target_pool_size (int): Taille spatiale cible (ex: 4 -> 4x4 ou 4x4x4).
-                                Réduit la dimensionnalité tout en gardant une 
-                                information structurelle grossière.
+    STRATÉGIE LAMNr (Latent-Aligned Multiview) : 
+    On extrait uniquement le niveau latent le plus profond (zs[-1]). 
+    Cela permet d'aligner la sémantique globale des vues sans détruire 
+    les gradients des convolutions spatiales haute fréquence des niveaux supérieurs.
     """
     zs = z if isinstance(z, (list, tuple)) else [z]
-    flattened_list = []
     
-    for zi in zs:
-        # Si c'est un volume 3D (N, C, D, H, W)
-        if zi.ndim == 5:
-            # Réduit à (N, C, 4, 4, 4) peu importe la taille d'entrée
-            zi_pooled = F.adaptive_avg_pool3d(zi, (target_pool_size, target_pool_size, target_pool_size))
-            flattened_list.append(zi_pooled.flatten(1))
-            
-        # Si c'est une image 2D (N, C, H, W)
-        elif zi.ndim == 4:
-            # Réduit à (N, C, 4, 4)
-            zi_pooled = F.adaptive_avg_pool2d(zi, (target_pool_size, target_pool_size))
-            flattened_list.append(zi_pooled.flatten(1))
-            
-        # Si c'est déjà plat ou autre (N, D)
-        else:
-            flattened_list.append(zi.flatten(1))
-
-    return torch.cat(flattened_list, dim=1)  # [B, Total_Reduced_Features]
-
+    # 1. Isolation exclusive du niveau le plus profond
+    deepest_z = zs[-1]
+    
+    # 2. Pooling adaptatif pour contrôler la taille du Projector MLP
+    if deepest_z.ndim == 5:
+        # Volume 3D (N, C, D, H, W)
+        z_pooled = F.adaptive_avg_pool3d(deepest_z, (target_pool_size, target_pool_size, target_pool_size))
+        return z_pooled.flatten(1)
+        
+    elif deepest_z.ndim == 4:
+        # Image 2D (N, C, H, W)
+        # target_pool_size peut être augmenté à 4 pour la 2D via l'appel de fonction si désiré
+        z_pooled = F.adaptive_avg_pool2d(deepest_z, (target_pool_size, target_pool_size))
+        return z_pooled.flatten(1)
+        
+    else:
+        # Tenseur déjà plat (N, D)
+        return deepest_z.flatten(1)
+    
 # ------------------------- screening helpers (CCA / HSIC) -------------------------
 
 from typing import Optional, Dict, Literal, Tuple as _Tuple
