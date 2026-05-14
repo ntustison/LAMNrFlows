@@ -2027,12 +2027,18 @@ def main():
                     bpd_views_for_log[vi] += bpd_mean
                     curr_bpd_views.append(bpd_mean)
                     sum_bpd += bpd_mean
+                    
+                    # Eventuellement on devrait remplacer cette ligne 
                     L_nll = L_nll - logp_v.mean()
+                    # avec ces deux lignes :
+                    # bpd_loss_v = -logp_v.mean() / (np.log(2.0) * float(n_dims))
+                    # L_nll = L_nll + bpd_loss_v
 
-            for i, z in enumerate(lat_flat):
-                first = next(m for m in projectors[i].net.modules() if isinstance(m, torch.nn.Linear))
+            # for i, z in enumerate(lat_flat):
+            #     first = next(m for m in projectors[i].net.modules() if isinstance(m, torch.nn.Linear))
 
-            if bad_batch or (not torch.isfinite(L_nll)):
+            if bad_batch or (not torch.isfinite(L_nll)) or abs(float(L_nll.item())) > 10000000.0:
+                tqdm.write(f"[anomaly] skipping update at iter {it} (bad_batch={bad_batch}, L_nll={float(L_nll.item()):.2f})")
                 bad_update = True
                 break
 
