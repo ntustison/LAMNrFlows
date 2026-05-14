@@ -1946,16 +1946,16 @@ def main():
     if not csv_path.exists():
             with open(csv_path, "w") as f:
                 f.write("iter,loss,sum_bpd,lr\n")
-        else:
-            # Troncature du CSV pour éviter la corruption du graphique lors d'un --resume
-            try:
-                import pandas as pd
-                df = pd.read_csv(csv_path)
-                # Ne conserver que les historiques strictement antérieurs au point de reprise
-                df = df[df['iter'] < start_iter]
-                df.to_csv(csv_path, index=False)
-            except Exception as e:
-                print(f"[warn] Impossible de nettoyer le CSV : {e}")
+    else:
+        # Troncature du CSV pour éviter la corruption du graphique lors d'un --resume
+        try:
+            import pandas as pd
+            df = pd.read_csv(csv_path)
+            # Ne conserver que les historiques strictement antérieurs au point de reprise
+            df = df[df['iter'] < start_iter]
+            df.to_csv(csv_path, index=False)
+        except Exception as e:
+            print(f"[warn] Impossible de nettoyer le CSV : {e}")
 
     with global_step.get_lock():
         global_step.value = int(start_iter)
