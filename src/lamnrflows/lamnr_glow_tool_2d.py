@@ -126,6 +126,17 @@ __version__ = "0.3.9"
 from antstorch import create_glow_normalizing_flow_model_2d
 
 # ------------------------- utils ----------------------------
+
+_orig_double = torch.Tensor.double
+
+def _mps_safe_double(self, *args, **kwargs):
+    # Si le tenseur est sur puce Apple, on force float32 car float64 fait planter
+    if self.device.type == 'mps':
+        return self.float(*args, **kwargs)
+    return _orig_double(self, *args, **kwargs)
+
+torch.Tensor.double = _mps_safe_double
+
 def parse_hw(spec: str) -> Tuple[int, int]:
     try:
         a, b = spec.lower().split("x")

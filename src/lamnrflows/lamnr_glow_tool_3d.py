@@ -147,6 +147,17 @@ except ImportError:
 
 # ------------------------- utils ----------------------------
 
+_orig_double = torch.Tensor.double
+
+def _mps_safe_double(self, *args, **kwargs):
+    # Si le tenseur est sur puce Apple, on force float32 car float64 fait planter
+    if self.device.type == 'mps':
+        return self.float(*args, **kwargs)
+    return _orig_double(self, *args, **kwargs)
+
+torch.Tensor.double = _mps_safe_double
+# -----------------------------------------
+
 def parse_hwd(spec: str) -> Tuple[int, int, int]:
     try:
         parts = spec.lower().split("x")
