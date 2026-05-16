@@ -1951,6 +1951,8 @@ def main_recon_template(argv=None):
     ok, note = load_weights_into_model(model, blob, int(args.view_index))
     if not ok: raise RuntimeError(f"Weights failed: {note}")
 
+    model = model.to(device)
+
     views_list = [v.strip() for v in args.views.split(",") if v.strip()]
     vname = views_list[int(args.view_index)]
 
