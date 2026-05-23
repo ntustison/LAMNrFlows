@@ -11,9 +11,9 @@ quantitative analysis, and other potential applications through latent space
 evaluations and manipulations. Generative Adversarial Networks (GANs), for
 instance, are implicit samplers trained with divergence surrogates rather than
 likelihoods, which precludes calibration by exact probabilities
-[@papamakarios2021nfreview]. Variational Autoencoders (VAEs) optimize an
-evidence lower bound rather than the exact log likelihood
-[@kobyzev2020nfsurvey]. Diffusion and score-based models rely on denoising or
+[@smith2026calibratinggenerativemodelsdistributional]. Variational Autoencoders
+(VAEs) optimize an evidence lower bound rather than the exact log likelihood
+[@struski2025boundingevidenceestimatingloglikelihood]. Diffusion and score-based models rely on denoising or
 score-matching objectives with likelihoods obtained only indirectly
 [@croitoru2023diffusion_vision_survey]. Finally, while autoregressive decoders
 offer exact likelihoods, they do not yield a one-shot invertible latent
