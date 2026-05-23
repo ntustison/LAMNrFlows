@@ -1,5 +1,5 @@
 
-## Deep Computational Anatomy via Latent-Aligned Multiview Normalizing Flows
+## [Deep Computational Anatomy via Latent-Aligned Multiview Normalizing Flows](https://www.biorxiv.org/content/10.64898/2026.05.05.723039v2)
 
 <!-- <p align="center">
 <img align="center" width="75%" src="manuscript/Figures/DiagramFromBrian.png">
