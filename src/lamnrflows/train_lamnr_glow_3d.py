@@ -735,6 +735,8 @@ def save_coordinated_input_grids(
     import torch
     from torchvision.utils import make_grid, save_image
 
+    import gc
+
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -762,8 +764,14 @@ def save_coordinated_input_grids(
                     xvi = xs[vi][:take].detach().cpu()
                     samples_per_view[vi].append(xvi)
                 collected += take
+
+            del xs
+            del batch 
+
             if collected >= n:
                 break
+
+        gc.collect()
 
         if collected == 0:
             return None, "loader yielded no samples."
@@ -1992,6 +2000,13 @@ def main():
             except StopIteration:
                 train_iter = iter(train_loader)
                 x = next(train_iter)
+
+                import gc
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                if torch.backends.mps.is_available():
+                    torch.mps.empty_cache()
 
             L_nll = torch.tensor(0.0, device=dev, dtype=torch.float32)
             curr_bpd_views = []

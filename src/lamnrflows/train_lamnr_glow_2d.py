@@ -592,10 +592,12 @@ def save_coordinated_input_grids(val_loader, num_views: int, out_dir: Path,
                                  fallback_loader=None,
                                  n: int = 100, nrow: int = 10, target_hw=None, device="cpu"):
     import torch
+    import gc
 
     def collect_from_loader(loader):
         samples_per_view = [[] for _ in range(num_views)]
         collected = 0
+
         for batch in loader:
             xs = _extract_views_from_batch(batch, num_views=num_views)
             if len(xs) != num_views:
@@ -607,8 +609,15 @@ def save_coordinated_input_grids(val_loader, num_views: int, out_dir: Path,
                     xvi = xs[vi][:take].to(dtype=torch.float32, device=device, non_blocking=True)
                     samples_per_view[vi].append(xvi)
                 collected += take
+
+            del xs
+            del batch 
+
             if collected >= n:
                 break
+            
+        gc.collect()
+
         if collected == 0:
             return None, "loader yielded no samples."
         stacked = [torch.cat(vs, dim=0)[:n] for vs in samples_per_view]
@@ -1043,8 +1052,8 @@ def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch
         number_of_samples=int(val_samples),
     )
 
-    train_loader = DataLoader(train_ds, batch_size=batch, shuffle=True,  num_workers=num_workers, pin_memory=True)
-    val_loader   = DataLoader(val_ds,   batch_size=min(16, batch), shuffle=False, num_workers=max(1, num_workers // 2), pin_memory=True)
+    train_loader = DataLoader(train_ds, batch_size=batch, shuffle=True,  num_workers=num_workers, pin_memory=False)
+    val_loader   = DataLoader(val_ds,   batch_size=min(16, batch), shuffle=False, num_workers=max(1, num_workers // 2), pin_memory=False)
     return train_loader, val_loader, global_step
 
 def ensure_shapes_cached(model, x_template: torch.Tensor):
@@ -1705,6 +1714,14 @@ def main():
             except StopIteration:
                 train_iter = iter(train_loader)
                 x = next(train_iter)
+
+                import gc
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                if torch.backends.mps.is_available():
+                    torch.mps.empty_cache()
+
             x_last = x
 
             L_nll = torch.tensor(0.0, device=dev, dtype=torch.float32)
