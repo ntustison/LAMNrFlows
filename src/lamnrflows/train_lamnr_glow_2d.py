@@ -29,6 +29,14 @@ from multiprocessing import Value  # optional but recommended if num_workers>0
 from datetime import datetime
 import json, platform
 
+class AugSchedulerWrapper:
+    """Wrapper global pour permettre la sérialisation (pickling) du scheduler."""
+    def __init__(self, sched):
+        self.sched = sched
+
+    def __call__(self, step: int):
+        return self.sched.step(step)
+
 from concurrent.futures import ThreadPoolExecutor
 
 class GlowStepWrapper(nn.Module):
@@ -486,7 +494,7 @@ def update_screen(feats: List[torch.Tensor], state: Optional[ScreenState], metho
         state.meta = {"cca_info": info, "keep_dim": r}
     elif method == "hsic":
         masks, info = _screen_hsic(feats, keep_frac=keep_frac, prefilter_frac=prefilter_frac)
-        state.masks = [m.to(device=device) for m in masks]
+        state.masks = [m.to(device=device, dtype=dtype) for m in masks]
         state.projectors = None
         state.meta = {"hsic_info": info, "keep_dim": r}
     return state
@@ -596,7 +604,7 @@ def save_coordinated_input_grids(val_loader, num_views: int, out_dir: Path,
             take = min(n - collected, B)
             if take > 0:
                 for vi in range(num_views):
-                    xvi = xs[vi][:take].to(device, non_blocking=True)
+                    xvi = xs[vi][:take].to(dtype=torch.float32, device=device, non_blocking=True)
                     samples_per_view[vi].append(xvi)
                 collected += take
             if collected >= n:
@@ -660,7 +668,7 @@ def _coerce_nchw_4d(x, target_hw=None):
                     t = t.permute(0,3,1,2).contiguous()
             fixed.append(t)
             areas.append(int(t.shape[-1]) * int(t.shape[-2]))
-        x = fixed[int(torch.tensor(areas).argmax().item())]
+        x = fixed[int(torch.tensor(areas, dtype=torch.float32).argmax().item())]
     if not torch.is_tensor(x):
         raise ValueError(f"Sample output is not a tensor: {type(x)}")
     if x.dim() == 3:
@@ -681,9 +689,11 @@ def _coerce_nchw_4d(x, target_hw=None):
 
 @torch.no_grad()
 def _save_samples_grid(model, n, temp, out_prefix, nrow=10, target_hw=None, warm_x=None, which_type="to01"):
+    temp_tensor = torch.tensor(temp, dtype=torch.float32)
+    device_original = next(model.parameters()).device
     try:
         try:
-            s = model.sample(n, temperature=temp)
+            s = model.sample(n, temperature=temp_tensor)
         except TypeError:
             s = model.sample(n)
     except Exception as e:
@@ -692,13 +702,44 @@ def _save_samples_grid(model, n, temp, out_prefix, nrow=10, target_hw=None, warm
             _prime_if_needed(model, warm_x)
             try:
                 try:
-                    s = model.sample(n, temperature=temp)
+                    s = model.sample(n, temperature=temp_tensor)
                 except TypeError:
                     s = model.sample(n)
             except Exception as e2:
-                return False, str(e2)
+                # REPLI CPU : Si l'échantillonnage échoue (ex. erreur float64 sur MPS)
+                try:
+                    model.to('cpu')
+                    temp_tensor_cpu = temp_tensor.to('cpu')
+                    try:
+                        s = model.sample(n, temperature=temp_tensor_cpu)
+                    except TypeError:
+                        s = model.sample(n)
+                    # Déplacer les échantillons générés vers le périphérique d'origine
+                    if isinstance(s, (list, tuple)):
+                        s = [item.to(device_original) if isinstance(item, torch.Tensor) else item for item in s]
+                    elif isinstance(s, torch.Tensor):
+                        s = s.to(device_original)
+                    model.to(device_original)
+                except Exception as e_cpu:
+                    model.to(device_original)
+                    return False, f"MPS failed: {e2}. CPU fallback also failed: {e_cpu}"
         else:
-            return False, str(e)
+             # REPLI CPU (même logique si pas d'erreur 'latent shapes unknown')
+             try:
+                 model.to('cpu')
+                 temp_tensor_cpu = temp_tensor.to('cpu')
+                 try:
+                     s = model.sample(n, temperature=temp_tensor_cpu)
+                 except TypeError:
+                     s = model.sample(n)
+                 if isinstance(s, (list, tuple)):
+                     s = [item.to(device_original) if isinstance(item, torch.Tensor) else item for item in s]
+                 elif isinstance(s, torch.Tensor):
+                     s = s.to(device_original)
+                 model.to(device_original)
+             except Exception as e_cpu:
+                 model.to(device_original)
+                 return False, f"MPS failed: {e}. CPU fallback also failed: {e_cpu}"
 
     try:
         x = s[0] if isinstance(s, (list, tuple)) else s
@@ -709,7 +750,7 @@ def _save_samples_grid(model, n, temp, out_prefix, nrow=10, target_hw=None, warm
             _std = 0.0
         if _std < 1e-5:
             try:
-                x = _manual_prior_sample(model, n, temp, x_template=None)
+                x = _manual_prior_sample(model, n, temp_tensor, x_template=None)
                 x = _coerce_nchw_4d(x, target_hw=target_hw)
             except Exception:
                 pass
@@ -717,7 +758,7 @@ def _save_samples_grid(model, n, temp, out_prefix, nrow=10, target_hw=None, warm
             _std = x.std().item()
             if _std < 1e-5:
                 try:
-                    x = _manual_prior_sample(model, n, temp)
+                    x = _manual_prior_sample(model, n, temp_tensor)
                     x = _coerce_nchw_4d(x, target_hw=target_hw)
                 except Exception:
                     pass
@@ -852,8 +893,9 @@ def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch
                 for f in files:
                     # Extraction de l'ID du sujet via expression régulière
                     # Cherche le motif "sub-" suivi de caractères alphanumériques
-                    match = re.search(r'(sub-[a-zA-Z0-9]+)', str(f))
-                    subj = match.group(1) if match else f.parent.name
+                    # match = re.search(r'(sub-[a-zA-Z0-9]+)', str(f))
+                    # subj = match.group(1) if match else f.parent.name
+                    subj = f.name.split('_')[0]
                     
                     d[subj].append(f)
                 
@@ -897,7 +939,7 @@ def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch
 
         def _read_slice(path: Path, idx: int, H: int, W: int):
             im = ants.image_read(str(path))
-            slc = ants.slice_image(im, axis=2, idx=idx, collapse_strategy=1)
+            slc = ants.slice_image(im, axis=1, idx=idx, collapse_strategy=1)
             resize_factor = min(float(H)/float(slc.shape[0]), 
                                 float(W)/float(slc.shape[1]))
             spacing = (slc.spacing[0] / resize_factor, 
@@ -965,8 +1007,7 @@ def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch
 
     if aug_schedules and not disable_aug_anneal:
         sched = antstorch.MultiParamScheduler(antstorch.parse_schedules(aug_schedules))
-        def aug_sched_fn(step: int):
-            return sched.step(step)
+        aug_sched_fn = AugSchedulerWrapper(sched)
     else:
         aug_sched_fn = None
 
@@ -1040,7 +1081,7 @@ def _manual_prior_sample(model, n: int, temp: float = 1.0, x_template: torch.Ten
         if hasattr(model, "input_shape") and isinstance(model.input_shape, (tuple, list)) and len(model.input_shape) >= 3:
             H, W = int(model.input_shape[-2]), int(model.input_shape[-1])
         x_template = torch.randn(1, 1, H, W, device=dev, dtype=dt) * 0.1
-    z_tmpl, _ = model.inverse_and_log_det(x_template[:1].to(dev, dt))
+    z_tmpl, _ = model.inverse_and_log_det(x_template[:1].to(dtype=dt, device=dev))
     if isinstance(z_tmpl, torch.Tensor):
         z_tmpl = [z_tmpl]
     z_list = [torch.randn(n, *z.shape[1:], device=dev, dtype=z.dtype) * float(temp) for z in z_tmpl]
@@ -1259,7 +1300,8 @@ def main():
 
     # Device + precision
     set_deterministic(args.seed)
-    dev = torch.device("cpu") if args.devices.lower() == "cpu" else torch.device(args.devices.split(",")[0])
+    dev = torch.device("mps" if args.devices == "mps" and torch.backends.mps.is_available() else "cpu")
+    print(f"Utilisation du périphérique : {dev}")
 
     if args.precision == "double":
         model_dtype = torch.float64
@@ -1334,7 +1376,7 @@ def main():
         )
         # --- AJOUT CRITIQUE POUR LA VITESSE ---
         # 1. Envoyer sur GPU
-        m = m.to(dev).float().train()
+        m = m.to(dtype=torch.float32, device=dev).float().train()
         
         # 2. Forcer l'init ActNorm MAINTENANT (sur GPU) avec un faux batch
         with torch.no_grad():
@@ -1381,19 +1423,19 @@ def main():
     projectors = None
     if args.align != "none":
         with torch.no_grad():
-            x_tmpl = to01(warm_batch[:, 0:1].to(dev)).to(torch.float32)
+            x_tmpl = to01(warm_batch[:, 0:1].to(dtype=torch.float32, device=dev)).to(torch.float32)
             z_probe, _ = models[0].inverse_and_log_det(x_tmpl[:1])
             flat_dim = _flatten_latents(z_probe).size(1)
         projectors = nn.ModuleList([
-            Projector(flat_dim, args.proj_hidden, args.proj_dim).to(dev).train()
+            Projector(flat_dim, args.proj_hidden, args.proj_dim).to(dtype=torch.float32, device=dev).train()
             for _ in range(len(models))
         ])
 
     # --- Kendall & Gal weighting scalars ---
     s_nll = s_align = None
     if args.weighting == "kendall" and args.align != "none":
-        s_nll   = nn.Parameter(torch.tensor([args.init_logvar_nll], device=dev))
-        s_align = nn.Parameter(torch.tensor([args.init_logvar_align], device=dev))
+        s_nll   = nn.Parameter(torch.tensor([args.init_logvar_nll], device=dev, dtype=torch.float32))
+        s_align = nn.Parameter(torch.tensor([args.init_logvar_align], device=dev, dtype=torch.float32))
 
     # Optimizer + schedulers
     param_groups = [{"params": [p for m in models for p in m.parameters()]}]
@@ -1504,7 +1546,7 @@ def main():
         if args.ema and blob.get("ema") is not None:
             import copy
             # Note : em est maintenant un GlowDataParallel car m l'est aussi
-            ema_models = [copy.deepcopy(m).eval().to(dev) for m in models]
+            ema_models = [copy.deepcopy(m).eval().to(dtype=torch.float32, device=dev) for m in models]
             for em in ema_models:
                 for p in em.parameters():
                     p.requires_grad_(False)
@@ -1560,7 +1602,7 @@ def main():
         with torch.no_grad():
             for vi, m in enumerate(models):
                 xb = xs[vi][:1]                      # 1 sample
-                xb = _ensure_4d(xb).to(device, non_blocking=True)
+                xb = _ensure_4d(xb).to(dtype=torch.float32).to(dtype=torch.float32, device=device, non_blocking=True)
                 # match dtype to model (avoid half/float mismatch under mixed precision)
                 p = next(m.parameters(), None)
                 if p is not None and xb.dtype != p.dtype:
@@ -1680,7 +1722,7 @@ def main():
             with ctx:
                 bad_batch = False
                 for vi, m in enumerate(models):
-                    x_v = to01(x[:, vi:vi+1, :, :].to(dev))
+                    x_v = to01(x[:, vi:vi+1, :, :].to(dtype=torch.float32, device=dev))
                     
                     # --- GESTION MULTI-GPU ---
                     if isinstance(m, GlowDataParallel):
@@ -1720,7 +1762,7 @@ def main():
                 bad_update = True
                 break
 
-            L_align = torch.tensor(0.0, device=dev)
+            L_align = torch.tensor(0.0, dtype=torch.float32, device=dev)
             if args.align != "none" and it >= args.align_warmup:
                 # 1) Build per-view features (post-projector) BEFORE screening
                 feats = [projectors[i](lat_flat[i]) for i in range(len(lat_flat))]
@@ -1845,14 +1887,14 @@ def main():
         curr_bpd_views = [float(v) / float(grad_accum) for v in (bpd_views_acc or [])]
         if args.ema and ema_models is None:
             import copy
-            ema_models = [copy.deepcopy(m).eval().to(dev) for m in models]
+            ema_models = [copy.deepcopy(m).eval().to(dtype=torch.float32, device=dev) for m in models]
             for em in ema_models:
                 for p in em.parameters():
                     p.requires_grad_(False)
             with torch.no_grad():
                 for vi, (m, em) in enumerate(zip(models, ema_models)):
                     _copy_actnorm_state(m, em)
-                    xv_real = to01(x[:, vi:vi+1, :, :].to(dev)).float()
+                    xv_real = to01(x[:, vi:vi+1, :, :].to(dtype=torch.float32, device=dev)).float()
                     warmup_actnorm_with_real_batch(em, xv_real)
             tqdm.write("[ema] initialized from base after first update")
 
@@ -1916,7 +1958,7 @@ def main():
                 for j, batch_val in enumerate(val_loader):
                     bpd_views = []
                     for vi, m in enumerate(eval_models):
-                        xv = to01(batch_val[:, vi:vi+1, :, :].to(dev))
+                        xv = to01(batch_val[:, vi:vi+1, :, :].to(dtype=torch.float32, device=dev))
                         tmpl_by_view[vi] = xv
                         lp = m.log_prob(xv.float())
                         lp = torch.nan_to_num(lp, nan=-1e9, posinf=-1e9, neginf=-1e9)
@@ -1960,7 +2002,9 @@ def main():
                             if cuda_states is not None:
                                 torch.cuda.set_rng_state_all(cuda_states)
                         if not ok:
+                            import traceback
                             tqdm.write(f"[warn] model sampling failed for view {vi} at iter {it}: {err}")
+                            traceback.print_exc()
                         any_ok = any_ok or ok
                     if any_ok:
                         tqdm.write(f"[samples] saved *coordinated* model sample grids @ iter {it}")
