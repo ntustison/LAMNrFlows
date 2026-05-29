@@ -1225,19 +1225,28 @@ def build_loaders_from_globs_3d(
         number_of_samples=int(val_samples),
     )
 
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:    
+        device = torch.device("cpu")
+
+    use_pin_memory = (device.type == "cuda")
+
     train_loader = DataLoader(
         train_ds,
         batch_size=batch,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=False,
+        pin_memory=use_pin_memory,
     )
     val_loader = DataLoader(
         val_ds,
         batch_size=min(16, batch),
         shuffle=False,
         num_workers=max(1, num_workers // 2),
-        pin_memory=False,
+        pin_memory=use_pin_memory,
     )
     return train_loader, val_loader, global_step
 
