@@ -2198,7 +2198,7 @@ def main_recon_template(argv=None):
        # CORRECTION 2 : Ajoutez .cpu() avant .numpy()
        # Traitement du template moyen (mu)
        if x_mu.is_cuda: x_mu = x_mu.cpu() # Sécurité
-       ants_mu = ants.from_numpy(x_mu.squeeze().numpy())       
+       ants_mu = ants.from_numpy(x_mu.detach().cpu().squeeze().numpy())     
        img_smooth = ants.smooth_image(ants_mu, 1.0)  
        # img_smooth = ants.from_numpy(ndimage.median_filter(ants_mu.numpy(), size=3))
        img_sharp = ants.iMath_sharpen(img_smooth) 
