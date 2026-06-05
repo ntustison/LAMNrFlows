@@ -1226,7 +1226,7 @@ def main():
                     help="EMA smoothing factor in (0,1] for metric logging; higher = faster adaptation to new values.")
 
     # --- Multimodal Latent Alignment ---
-    ap.add_argument("--align", choices=["none","infonce","barlow","vicreg","hsic","pearson"], default="none", 
+    ap.add_argument("--align", choices=["none","infonce","barlow","vicreg","hsic","pearson","mse"], default="none", 
                     help="Latent alignment loss function to synchronize representations across different views.")
     ap.add_argument("--align-weight", type=float, default=0.05, 
                     help="Fixed weight for alignment loss (used if --weighting=fixed).")
@@ -1853,6 +1853,8 @@ def main():
                     L_align = antstorch.hsic_multi(feats_screened, sigma=float(args.hsic_sigma))
                 elif args.align == "pearson":
                     L_align = antstorch.pearson_multi(feats_screened)
+                elif args.align == "mse":
+                    L_align = antstorch.mse_multi(feats)
 
             if args.weighting == "fixed" or args.align == "none":
                 loss_total = L_nll + (args.align_weight * L_align if args.align != "none" else 0.0)

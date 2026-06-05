@@ -1444,7 +1444,7 @@ def main():
                     help="Smoothing factor for calculating running NLL metrics in logs (0,1]. Higher means faster metric adaptation.")
 
     # --- Multimodal Latent Alignment (Cross-Modal Translation) ---
-    ap.add_argument("--align", choices=["none","infonce","barlow","vicreg","hsic","pearson"], default="none", 
+    ap.add_argument("--align", choices=["none","infonce","barlow","vicreg","hsic","pearson","mse"], default="none", 
                     help="Loss function used to force latent spaces of different views (e.g., T1 and FA) to align structurally.")
     ap.add_argument("--align-weight", type=float, default=0.05, 
                     help="Fixed multiplier for the alignment loss relative to the NLL loss (used if --weighting=fixed).")
@@ -2111,6 +2111,8 @@ def main():
                     L_align = antstorch.hsic_multi(feats, sigma=float(args.hsic_sigma))
                 elif args.align == "pearson":
                     L_align = antstorch.pearson_multi(feats)
+                elif args.align == "mse":
+                    L_align = antstorch.mse_multi(feats)
 
             if args.weighting == "fixed" or args.align == "none":
                 loss_total = L_nll + (args.align_weight * L_align if args.align != "none" else 0.0)
