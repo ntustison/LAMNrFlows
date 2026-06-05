@@ -8,6 +8,11 @@
 \textbf{Hyperparameters} &
 \textbf{Qualitative behavior / usage} \\
 \hline
+\textbf{MSE (multi)} &
+Minimize pointwise distance: \newline
+$\mathcal{L} = \| Z^{(i)} - Z^{(j)} \|_2^2$ &
+None (parameter-free) &
+Deterministic point-to-point matching independent of batch statistics; highly stable for extremely small batch sizes (e.g., high-resolution 3D volumes); forces strict isomorphism but can strongly compete with likelihood optimization. \\[0.2em]
 \textbf{Pearson (multi)} &
 Maximize mean pairwise correlation:
 $\mathcal{L} = \mathrm{corr}(\tilde Z^{(i)}, \tilde Z^{(j)})$ &
