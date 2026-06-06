@@ -2112,13 +2112,24 @@ def main():
                 elif args.align == "pearson":
                     L_align = antstorch.pearson_multi(feats)
                 elif args.align == "mse":
-                    L_align = antstorch.mse_multi(feats)
+                    L_align = antstorch.lpnorm_multi(feats, p=2.0)
 
             if args.weighting == "fixed" or args.align == "none":
-                loss_total = L_nll + (args.align_weight * L_align if args.align != "none" else 0.0)
+                # Utilise le warmup de sécurité défini plus haut
+                current_align_weight = float(args.align_weight) if it >= 500 else 0.0
+                
+                loss_total = L_nll + (current_align_weight * L_align if args.align != "none" else 0.0)
+                
+                # Ces variables servent uniquement au logging
+                w_nll = 1.0
+                w_align = current_align_weight
             else:
-                # keep your existing kendall block here
-                ...
+                # Ton bloc existant pour la pondération adaptative (Kendall/Uncertainty)
+                s_nll_eff   = torch.clamp(s_nll, -5.0, 5.0)
+                s_align_eff = torch.clamp(s_align, -5.0, 5.0)
+                
+                loss_total = torch.exp(-s_nll_eff) * L_nll + s_nll_eff
+                loss_total = loss_total + torch.exp(-s_align_eff) * L_align + s_align_eff
 
             # scale so accumulated grads match a true big batch
             loss_scaled = loss_total / float(args.grad_accum)

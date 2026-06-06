@@ -1854,7 +1854,7 @@ def main():
                 elif args.align == "pearson":
                     L_align = antstorch.pearson_multi(feats_screened)
                 elif args.align == "mse":
-                    L_align = antstorch.mse_multi(feats)
+                    L_align = antstorch.lpnorm_multi(feats, p=2.0)
 
             if args.weighting == "fixed" or args.align == "none":
                 loss_total = L_nll + (args.align_weight * L_align if args.align != "none" else 0.0)
