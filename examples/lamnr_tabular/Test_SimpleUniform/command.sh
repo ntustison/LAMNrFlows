@@ -1,9 +1,9 @@
 #/usr/bin/zsh
 
-python3 ../train_lamnr_flows_tabular.py \
+python3 ../../../src/lamnrflows/train_lamnr_flows_tabular.py \
   --views UniformSimulatedData/uniform_10000x4.csv \
   --output-prefix ./runs/uniform_singleview \
-  --cuda-device "cuda:1" \
+  --cuda-device "cpu" \
   \
   --base-distribution DiagGaussian \
   --base-sigma 1.0 \
@@ -50,11 +50,11 @@ python3 ../train_lamnr_flows_tabular.py \
   --verbose
 
 
-python3 ../plot_csv_distributions.py runs/uniform_z_view0.csv --ncols 4 -o ./
+python3 ../../../sandbox/plot_csv_distributions.py runs/uniform_z_view0.csv --ncols 4 -o ./
 
-Rscript sanity_check_gauss_decor.R  \
-  --raw UniformSimulatedData/uniform_10000x4.csv \
-  --z runs/uniform_z_view0.csv \
-  --labelraw raw \
-  --labelsz z \
-  --outdir sanity_uniform
+# Rscript sanity_check_gauss_decor.R  \
+#   --raw UniformSimulatedData/uniform_10000x4.csv \
+#   --z runs/uniform_z_view0.csv \
+#   --labelraw raw \
+#   --labelsz z \
+#   --outdir sanity_uniform
