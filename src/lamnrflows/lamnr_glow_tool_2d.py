@@ -495,7 +495,7 @@ from PIL import Image
 from typing import Optional, Tuple
 import torch.nn.functional as F
 
-def _read_image_any(path: Path, slice_axis: int, slice_index: int, target_hw: Optional[Tuple[int, int]] = None) -> torch.Tensor:
+def _read_image_any(path: Path, slice_axis: int, slice_index: int, target_hw: Optional[Tuple[int, int]] = None, mask_background: bool=False) -> torch.Tensor:
     """
     Read a 2D image from disk and return a tensor (1,H,W) in float32.
     """
@@ -525,6 +525,9 @@ def _read_image_any(path: Path, slice_axis: int, slice_index: int, target_hw: Op
             mid0 = shp[0] // 2 if (shp is not None and len(shp) > 0) else 0
             img2d = ants.slice_image(img, axis=0, idx=mid0, collapse_strategy=0)
 
+        if mask_background:
+            img2d = img2d * ants.threshold_image(ants.otsu_segmentation(img2d, 3), 0, 0, 0, 1)
+    
         # --- 2. Redimensionnement Géométrique Physique ---
         if target_hw is not None:
             H, W = target_hw

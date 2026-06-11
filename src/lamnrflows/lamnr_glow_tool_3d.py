@@ -449,7 +449,7 @@ def _read_image_3d(path: Path, target_hwd: tuple[int, int, int], mask_background
     img = ants.pad_or_crop_image_to_size(img, (H, W, D))
     
     if mask_background:
-        img = img * ants.get_mask(img) 
+        img = img * ants.threshold_image(ants.otsu_segmentation(img, 3), 0, 0, 0, 1)
     
     arr = img.numpy()
     if arr.ndim == 3: 
@@ -3223,7 +3223,7 @@ def main_sample(argv=None):
             
             for pth in tqdm(chosen_paths, desc="Encoding Vectors", unit="scan"):
                 try:
-                    xi = _read_image_3d(pth, target_hwd=(Hc, Wc, Dc)) 
+                    xi = _read_image_3d(pth, target_hwd=(Hc, Wc, Dc), mask_background=True)  # (C, H, W, D)
                     xb = xi.unsqueeze(0).to(device=device, dtype=torch.float32)
                 except Exception as e:
                     print(f"\n[warn] Failed to read/interpolate {pth}: {e}")
@@ -3267,6 +3267,8 @@ def main_sample(argv=None):
             Z_picked = Z_flat[:total * args.hull_k].view(total, args.hull_k, -1)
 
             empirical_radius = torch.mean(torch.norm(Z_flat, p=2, dim=-1))
+            dirichlet = torch.distributions.Dirichlet(torch.ones(args.hull_k, device=device))
+            alpha = dirichlet.sample((total,))  # C'est ici que 'alpha' est défini !
 
             if args.sampling_strategy == "projected-hull":
                 z_linear = torch.sum(alpha.unsqueeze(-1) * Z_picked, dim=1)
