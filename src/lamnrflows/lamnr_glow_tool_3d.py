@@ -3174,7 +3174,8 @@ def main_sample(argv=None):
                 recon_out = out_dir / recon_out
         else:
             recon_out = out_dir / f"recon_view{int(args.view_index)}_N{panel.shape[0]//3}_{Hc}x{Wc}x{Dc}_slice{args.slice_index}.png"
-        save_grid(panel, recon_out, nrow=3, target_hw=(Hc, Wc))
+        panel = F.interpolate(panel, size=(Hc, Wc), mode="bilinear", align_corners=False)
+        save_grid(panel, recon_out, nrow=3)
         print(f"[ok] 3D recon slice panel saved: {recon_out}")
 
     # Section Échantillonnage 3D
@@ -3196,19 +3197,45 @@ def main_sample(argv=None):
                 raise SystemExit("Hull sampling requested but no 3D support cohort found in --val-list.")
             
             # Encodage complet des volumes de la cohorte dans le sous-espace latent 3D
+
             z_list = []
             print(f"[info] Projecting {len(support_paths)} volumetric scans into latent space...")
-            for pth in support_paths:
-                try:
-                    xi = _read_image_3d(pth)
-                except Exception:
-                    continue
-                xi = F.interpolate(xi.unsqueeze(0), size=(Dc, Hc, Wc), mode="trilinear", align_corners=False).to(device=device, dtype=torch.float32)
-                with torch.no_grad():
-                    res = model(xi)
-                    z = res[0] if isinstance(res, (list, tuple)) else res
-                    z_list.append(z.cpu())
             
+            for pth in support_paths:
+                
+                # --- ÉTAPE 1 : Lecture de l'image via ANTs ---
+                try:
+                    img = ants.image_read(str(pth))
+                    xi = torch.from_numpy(img.numpy()).float()  # Tenseur [D, H, W]
+                    
+                    # Sécurisation : on force la dimension du canal pour obtenir [1, D, H, W]
+                    if xi.dim() == 3:
+                        xi = xi.unsqueeze(0)
+                    elif xi.dim() == 4 and xi.shape[0] > 1:
+                        xi = xi[0:1, ...] # Sécurité : force un canal unique si image multicible
+                except Exception as e:
+                    print(f"[warn] Failed to read image {pth}: {e}")
+                    continue
+                
+                # --- ÉTAPE 2 : Redimensionnement spatial Trilinéaire ---
+                try:
+                    # L'ajout de .unsqueeze(0) créé la dimension Batch -> [1, 1, D, H, W]
+                    xi_resized = F.interpolate(xi.unsqueeze(0), size=(Dc, Hc, Wc), mode="trilinear", align_corners=False)
+                    xi_resized = xi_resized.to(device=device, dtype=torch.float32)
+                except Exception as e:
+                    print(f"[warn] Failed to interpolate {pth}: {e}")
+                    continue
+                
+                # --- ÉTAPE 3 : Projection inverse dans l'espace latent ---
+                try:
+                    with torch.no_grad():
+                        res = model(xi_resized)
+                        z = res[0] if isinstance(res, (list, tuple)) else res
+                        z_list.append(z.cpu())
+                except Exception as e:
+                    print(f"[warn] Failed to encode {pth}: {e}")
+                    continue
+                            
             if not z_list:
                 raise SystemExit("Could not encode any 3D support vectors to construct the typical convex hull.")
             
@@ -3274,10 +3301,28 @@ def main_sample(argv=None):
             print(f"[info] ANTs 3D resample by voxel size -> {target_size}")
             x = resample_with_ants_size_3d(x, target_size=target_size, native_spacing=native_spacing)
 
-        # Extraction de la coupe 2D cible du volume généré pour composer la grille PNG finale
+        # Extraction de la coupe 2D cible
+        from torchvision.utils import save_image  # <-- Import direct de la fonction officielle
+
+        # Extraction de la coupe 2D cible
         print(f"[info] Slicing generated 3D volumes (axis={args.slice_axis}, index={args.slice_index}) for grid visualization.")
         x_slice = _extract_2d_slice(x, args.slice_axis, args.slice_index)
 
+        # 1. Sécurisation du parsing de la taille
+        if isinstance(args.image_size, str):
+            th, tw = args.image_size.lower().split('x')
+            target_h, target_w = int(th), int(tw)
+        else:
+            target_h, target_w = int(args.image_size[0]), int(args.image_size[1])
+
+        # 2. Redimensionnement
+        if (target_h, target_w) != (int(x_slice.shape[-2]), int(x_slice.shape[-1])):
+            x_slice = F.interpolate(x_slice, size=(target_h, target_w), mode="bilinear", align_corners=False)
+
+        # 3. Forcer le format strict (Batch, Canal, Hauteur, Largeur)
+        if x_slice.dim() == 3:
+            x_slice = x_slice.unsqueeze(1) # Restaure le canal (1) si une fonction l'a écrasé
+            
         # Détermination du chemin de sortie
         if args.sample_grid_out:
             out_path = Path(args.sample_grid_out)
@@ -3292,8 +3337,9 @@ def main_sample(argv=None):
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Enregistrement de la grille bidimensionnelle des coupes extraites
-        save_grid(x_slice, out_path, nrow=int(N), target_hw=(int(args.image_size[0]), int(args.image_size[1])))
+        # 4. SAUVEGARDE DIRECTE : On bypasse 'save_grid'
+        # x_slice est garanti d'être de forme [10, 1, 128, 128]
+        save_image(x_slice.float().cpu(), out_path, nrow=int(N))
         print(f"[ok] wrote summary grid PNG: {out_path}")
 
         # Métadonnées JSON enrichies pour la traçabilité 3D
