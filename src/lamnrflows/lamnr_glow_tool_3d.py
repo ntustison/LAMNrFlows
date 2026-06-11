@@ -480,7 +480,7 @@ def save_mid_slice_png(x: torch.Tensor, out_path: Path, slice_axis: int = 2):
 def _encode_latents(model, xb: torch.Tensor) -> List[torch.Tensor]:
     """
     Pousse un lot de volumes (5D) vers les latents multi-échelles z_list.
-    Input: xb (B, 1, D, H, W)
+    Input: xb (B, 1, H, W, D)
     Output: Liste de tenseurs per-level
     """
     # S'assurer que le tenseur est au bon format pour la 3D
@@ -3180,6 +3180,7 @@ def main_sample(argv=None):
         print(f"[ok] 3D recon slice panel saved: {recon_out}")
 
     # Section Échantillonnage 3D
+
     if args.sample_grid_size is not None:
         M, N = args.sample_grid_size
         total = int(M) * int(N)
@@ -3196,62 +3197,61 @@ def main_sample(argv=None):
             support_paths = _gather_val_paths(getattr(args, "val_list", None), limit=9999)
             if not support_paths:
                 raise SystemExit("Hull sampling requested but no 3D support cohort found in --val-list.")
-            
-            # Encodage complet des volumes de la cohorte dans le sous-espace latent 3D
 
+            print(f"[info] Projecting {len(support_paths)} volumetric scans into latent space...")
+            
+            # --- ENCODAGE CORRECT (Image -> Latent via 'inverse') ---
             z_list = []
             saved_latent_shape = None
-            print(f"[info] Projecting {len(support_paths)} volumetric scans into latent space...")
+            saved_is_tuple = False
             
             for pth in tqdm(support_paths, desc="Encoding Volumes", unit="scan"):
                 try:
-                    img = ants.image_read(str(pth))
-                    xi = torch.from_numpy(img.numpy()).float()
-                    if xi.dim() == 3:
-                        xi = xi.unsqueeze(0)
-                    elif xi.dim() == 4 and xi.shape[0] > 1:
-                        xi = xi[0:1, ...]
+                    # Lecture et redimensionnement à la volée (comme dans votre bloc gauss-fit)
+                    xi = _read_image_3d(pth, target_hwd=(Hc, Wc, Dc)) 
+                    xb = xi.unsqueeze(0).to(device=device, dtype=torch.float32) # (1, C, H, W, D)
                 except Exception as e:
-                    print(f"\n[warn] Failed to read {pth}: {e}")
-                    continue
-                
-                try:
-                    xi_resized = F.interpolate(xi.unsqueeze(0), size=(Dc, Hc, Wc), mode="trilinear", align_corners=False)
-                    xi_resized = xi_resized.to(device=device, dtype=torch.float32)
-                except Exception as e:
-                    print(f"\n[warn] Failed to interpolate {pth}: {e}")
+                    print(f"\n[warn] Failed to read/interpolate {pth}: {e}")
                     continue
                 
                 try:
                     with torch.no_grad():
-                        res = model(xi_resized)
-                        # Gère les retours de type (z, logdet) ou z seul
-                        z_raw = res[0] if isinstance(res, (list, tuple)) and len(res) == 2 and isinstance(res[1], torch.Tensor) else res
-                        
-                        if isinstance(z_raw, (list, tuple)):
-                            # Cas d'architecture multi-échelle (liste de tenseurs spatiaux)
-                            latent_shape = [zl.shape for zl in z_raw]
-                            z_flat_subject = torch.cat([zl.flatten() for zl in z_raw])
+                        # L'encodage se fait via 'inverse' dans ce framework
+                        if hasattr(model, "inverse_and_log_det"):
+                            z_raw, _ = model.inverse_and_log_det(xb) 
+                        elif hasattr(model, "inverse"):
+                            z_raw, _ = model.inverse(xb)
                         else:
-                            # Cas standard (tenseur unique)
-                            latent_shape = z_raw.shape
-                            z_flat_subject = z_raw.flatten()
+                            raise RuntimeError("Model lacks inverse mapping for encoding")
                         
-                        z_list.append(z_flat_subject.cpu())
-                        if saved_latent_shape is None:
-                            saved_latent_shape = latent_shape
+                        # Sauvegarde et aplatissement (similaire à _flatten_latents_by_level)
+                        if isinstance(z_raw, (list, tuple)):
+                            latent_shape = [zl.shape for zl in z_raw]
+                            # Aplatit chaque niveau à partir de la dimension 1, puis concatène
+                            z_flat_subject = torch.cat([zl.flatten(start_dim=1) for zl in z_raw], dim=1)
+                            if saved_latent_shape is None:
+                                saved_latent_shape = latent_shape
+                                saved_is_tuple = isinstance(z_raw, tuple)
+                        else:
+                            latent_shape = z_raw.shape
+                            z_flat_subject = z_raw.flatten(start_dim=1)
+                            if saved_latent_shape is None:
+                                saved_latent_shape = latent_shape
+                        
+                        z_list.append(z_flat_subject.cpu()) # Ajoute un (1, D_total)
                 except Exception as e:
                     print(f"\n[warn] Failed to encode {pth}: {e}")
                     continue
-            
+
             if not z_list:
-                raise SystemExit("Could not encode any 3D support vectors to construct the typical convex hull.")
+                raise SystemExit("Could not encode any 3D support vectors.")
 
-            # --- CORRECTION CRITIQUE : Utilisation de torch.stack ---
-            # Construit une matrice 2D stricte [N_support, D_latent]
-            Z_flat = torch.stack(z_list, dim=0).to(device)
+            # Construction de la matrice d'enveloppe (N_support, D_total)
+            Z_flat = torch.cat(z_list, dim=0).to(device)
             N_support, D_latent = Z_flat.shape
+            print(f"[info] Encoded matrix shape: {Z_flat.shape}")
 
+            # --- MANIPULATION LATENTE (Enveloppe Convexe) ---
             dirichlet = torch.distributions.Dirichlet(torch.ones(args.hull_k, device=device))
             alpha = dirichlet.sample((total,))
             idx = torch.randint(0, N_support, (total, args.hull_k), device=device)
@@ -3283,34 +3283,44 @@ def main_sample(argv=None):
                 
                 z_sample_flat = z_geo * empirical_radius
 
-            # --- Reconstruction de la topologie originale (Single ou Multi-scale) ---
+            # --- RECONSTRUCTION TOPOLOGIQUE ---
             if isinstance(saved_latent_shape, list):
-                z_sample = []
+                z_sample_list = []
                 current_idx = 0
                 for shape in saved_latent_shape:
-                    target_shape = (total,) + tuple(shape)[1:]
+                    # shape est (1, C, H, W, D). On remplace le 1 par 'total'
+                    target_shape = (total,) + tuple(shape)[1:] 
                     num_elements = torch.prod(torch.tensor(target_shape[1:])).item()
                     zl_flat = z_sample_flat[:, current_idx : current_idx + num_elements]
-                    z_sample.append(zl_flat.view(*target_shape))
+                    z_sample_list.append(zl_flat.view(*target_shape).to(device))
                     current_idx += num_elements
+                
+                if saved_is_tuple:
+                    z_sample = tuple(z_sample_list)
+                else:
+                    z_sample = z_sample_list
             else:
                 target_shape = (total,) + tuple(saved_latent_shape)[1:]
-                z_sample = z_sample_flat.view(*target_shape)
+                z_sample = z_sample_flat.view(*target_shape).to(device)
 
-            # Inversion vers l'espace image 3D
+            print_shape = z_sample[0].shape if isinstance(z_sample, (list, tuple)) else z_sample.shape
+            print(f"[info] Generated {total} latent samples with structural shape {print_shape} using strategy '{args.sampling_strategy}'.")
 
+            # --- DÉCODAGE CORRECT (Latent -> Image via 'forward') ---
             try:
                 with torch.no_grad():
-                    if hasattr(model, 'inverse'):
-                        x = model.inverse(z_sample)
-                    elif hasattr(model, 'decode'):
-                        x = model.decode(z_sample)
+                    # Dans ce framework, forward génère l'image à partir du latent
+                    if hasattr(model, "forward_and_log_det"):
+                        x_out, _ = model.forward_and_log_det(z_sample)
                     else:
-                        x = model(z_sample, reverse=True)
-                    if isinstance(x, (list, tuple)):
-                        x = x[0]
+                        x_out = model(z_sample) # Appelle model.forward()
+                        
+                    if isinstance(x_out, (list, tuple)):
+                        x = x_out[0] # Extrait l'image si c'est un tuple (x, log_det)
+                    else:
+                        x = x_out
             except Exception as e:
-                raise RuntimeError(f"Decoding failed: {e}")
+                raise RuntimeError(f"Decoding (Latent -> Image) failed: {e}")
 
         # Recalage optionnel ANTs (Versions 3D des fonctions de rééchantillonnage)
         if args.resample_spacing is not None:
