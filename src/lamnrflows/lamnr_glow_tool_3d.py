@@ -3127,7 +3127,7 @@ def main_sample(argv=None):
     Dc, Hc, Wc = model.input_shape[-3], model.input_shape[-2], model.input_shape[-1]
     _prime_if_needed(model, Hc, Wc, Dc, device)
 
-    # Helper interne pour extraire une coupe 2D d'un tenseur 3D (B, C, D, H, W)
+    # Helper interne pour extraire une coupe 2D d'un tenseur 3D (B, C, H, W, D)
     def _extract_2d_slice(tensor_5d, axis, index):
         idx = min(max(0, int(index)), tensor_5d.shape[axis + 2] - 1)
         if axis == 0:
@@ -3306,7 +3306,7 @@ def main_sample(argv=None):
             "slice_axis": int(args.slice_axis),
             "slice_index": int(args.slice_index),
             "sample_grid_size": [int(M), int(N)],
-            "ckpt_native_shape_3d": [int(Dc), int(Hc), int(Wc)],
+            "ckpt_native_shape_3d": [int(Hc), int(Wc), int(Dc)],
             "seed": int(args.seed),
             "out": str(out_path),
             "native_spacing_3d": list(native_spacing),
