@@ -385,7 +385,7 @@ import torchvision as tv
 import torch
 from pathlib import Path
 
-def save_grid_2d_slice(x: torch.Tensor, out_path: Path | str, nrow: int, slice_axis: int = 2, winsorize: bool = True):
+def save_grid(x: torch.Tensor, out_path: Path | str, nrow: int, slice_axis: int = 2, winsorize: bool = True):
     """
     Extrait une coupe 2D du milieu de chaque volume 3D dans un lot (batch) 
     et sauvegarde le tout sous forme de grille d'images (PNG/JPG).
@@ -3125,7 +3125,7 @@ def main_sample(argv=None):
 
     # Amorce (Prime) du réseau avec la taille spatiale 3D native
     Dc, Hc, Wc = model.input_shape[-3], model.input_shape[-2], model.input_shape[-1]
-    _prime_if_needed(model, Dc, Hc, Wc, device)
+    _prime_if_needed(model, Hc, Wc, Dc, device)
 
     # Helper interne pour extraire une coupe 2D d'un tenseur 3D (B, C, D, H, W)
     def _extract_2d_slice(tensor_5d, axis, index):
@@ -3152,7 +3152,7 @@ def main_sample(argv=None):
                 print(f"[warn] skipping {pth}: {e}")
                 continue
             # Redimensionnement volumétrique Trilinéraire pour correspondre au domaine du flux
-            xi = F.interpolate(xi.unsqueeze(0), size=(Dc, Hc, Wc), mode="trilinear", align_corners=False).squeeze(0)
+            xi = F.interpolate(xi.unsqueeze(0), size=(Hc, Wc, Dc), mode="trilinear", align_corners=False).squeeze(0)
             xs.append(xi)
         if not xs:
             raise SystemExit("Recon: no readable volumes after parsing inputs.")
@@ -3173,7 +3173,7 @@ def main_sample(argv=None):
             if not recon_out.is_absolute():
                 recon_out = out_dir / recon_out
         else:
-            recon_out = out_dir / f"recon_view{int(args.view_index)}_N{panel.shape[0]//3}_{Dc}x{Hc}x{Wc}_slice{args.slice_index}.png"
+            recon_out = out_dir / f"recon_view{int(args.view_index)}_N{panel.shape[0]//3}_{Hc}x{Wc}x{Dc}_slice{args.slice_index}.png"
         save_grid(panel, recon_out, nrow=3, target_hw=(Hc, Wc))
         print(f"[ok] 3D recon slice panel saved: {recon_out}")
 
