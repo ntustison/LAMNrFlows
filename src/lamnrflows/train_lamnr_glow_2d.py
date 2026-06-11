@@ -875,6 +875,68 @@ def cleanup_checkpoints(run_dir: Path, keep_every: int = 10000):
 
 # ------------------------- data -------------------------
 
+import torch
+from torch.utils.data import Dataset
+import torchvision.transforms.v2 as v2
+import torchvision.io as io
+from pathlib import Path
+import numpy as np
+
+class PNGMultiViewDataset(Dataset):
+    def __init__(self, images_list, target_size=(128, 128), do_aug=False):
+        """
+        images_list: Liste de listes. Chaque élément est un sujet contenant N vues.
+                     Les vues peuvent être des chemins de fichiers (str/Path) ou des tenseurs.
+        """
+        self.images_list = images_list
+        self.do_aug = do_aug
+        
+        # Base : Redimensionnement et conversion des pixels en [0.0, 1.0]
+        self.base_transform = v2.Compose([
+            v2.Resize(target_size, antialias=True),
+            v2.ToDtype(torch.float32, scale=True)
+        ])
+        
+        # Augmentations spatiales (réplique de affineAndDeformation)
+        if self.do_aug:
+            self.spatial_transforms = v2.Compose([
+                v2.RandomAffine(degrees=5, translate=(0.05, 0.05), scale=(0.95, 1.05)),
+                v2.ElasticTransform(alpha=50.0, sigma=5.0)
+            ])
+
+    def __len__(self):
+        return len(self.images_list)
+
+    def __getitem__(self, idx):
+        views = self.images_list[idx]
+        tensors = []
+        
+        for v in views:
+            if isinstance(v, (str, Path)):
+                # Lecture native du PNG multi-canaux -> shape: (C, H, W)
+                img = io.read_image(str(v), mode=io.ImageReadMode.RGB)
+            elif isinstance(v, np.ndarray):
+                # Conversion numpy (H, W, C) -> tensor (C, H, W)
+                img = torch.from_numpy(v).permute(2, 0, 1)
+            else:
+                img = v
+                
+            img = self.base_transform(img)
+            tensors.append(img)
+            
+        # Empiler [V, C, H, W] garantit que torchvision applique la MÊME 
+        # transformation géométrique à toutes les vues du sujet.
+        stacked_views = torch.stack(tensors)
+        
+        if self.do_aug:
+            stacked_views = self.spatial_transforms(stacked_views)
+            
+            # Réplique de additivegaussian noise (indépendant par canal/vue)
+            noise = torch.randn_like(stacked_views) * 0.05
+            stacked_views = torch.clamp(stacked_views + noise, 0.0, 1.0)
+            
+        return stacked_views
+
 def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch, num_workers,
                              slice_idx: int, val_frac: float,
                              subject_limit: int | None,
@@ -947,8 +1009,16 @@ def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch
             return per_view_files
 
         def _read_slice(path: Path, idx: int, H: int, W: int):
+            # Si c'est un PNG, on retourne juste le chemin pour Torchvision
+            if path.suffix.lower() == '.png':
+                return path
+                
+            # Sinon, on applique la logique ANTs standard pour les NIfTI/NRRD
             im = ants.image_read(str(path))
-            slc = ants.slice_image(im, axis=1, idx=idx, collapse_strategy=1)
+            if im.dimension == 3:
+                slc = ants.slice_image(im, axis=1, idx=idx, collapse_strategy=1)
+            else:
+                slc = im
             resize_factor = min(float(H)/float(slc.shape[0]), 
                                 float(W)/float(slc.shape[1]))
             spacing = (slc.spacing[0] / resize_factor, 
@@ -1022,35 +1092,52 @@ def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch
 
     global_step = Value('i', 0)
 
-    train_ds = antstorch.ImageDataset(
-        images=images_train,
-        template=tmpl,
-        do_data_augmentation=do_aug,
-        data_augmentation_transform_type="affineAndDeformation",
-        data_augmentation_sd_affine=0.05,
-        data_augmentation_sd_deformation=10.0,
-        data_augmentation_noise_model="additivegaussian",
-        data_augmentation_noise_parameters=(0.0, 0.05),
-        data_augmentation_sd_simulated_bias_field=0.00000001,
-        data_augmentation_sd_histogram_warping=0.025,
-        number_of_samples=int(train_samples),
-        aug_scheduler=aug_sched_fn,
-    )
-    train_ds.global_step_ref = global_step
+    if isinstance(tmpl, ants.core.ants_image.ANTsImage):
+        train_ds = antstorch.ImageDataset(
+            images=images_train,
+            template=tmpl,
+            do_data_augmentation=do_aug,
+            data_augmentation_transform_type="affineAndDeformation",
+            data_augmentation_sd_affine=0.05,
+            data_augmentation_sd_deformation=10.0,
+            data_augmentation_noise_model="additivegaussian",
+            data_augmentation_noise_parameters=(0.0, 0.05),
+            data_augmentation_sd_simulated_bias_field=0.00000001,
+            data_augmentation_sd_histogram_warping=0.025,
+            number_of_samples=int(train_samples),
+            aug_scheduler=aug_sched_fn,
+        )
+        train_ds.global_step_ref = global_step
 
-    val_ds = antstorch.ImageDataset(
-        images=(images_val if len(images_val) > 0 else images_train[:1]),
-        template=tmpl,
-        do_data_augmentation=True,
-        data_augmentation_transform_type="affineAndDeformation",
-        data_augmentation_sd_affine=0.0,
-        data_augmentation_sd_deformation=0.0,
-        data_augmentation_noise_model="additivegaussian",
-        data_augmentation_noise_parameters=(0.0, 0.0),
-        data_augmentation_sd_simulated_bias_field=0.0,
-        data_augmentation_sd_histogram_warping=0.0,
-        number_of_samples=int(val_samples),
-    )
+        val_ds = antstorch.ImageDataset(
+            images=(images_val if len(images_val) > 0 else images_train[:1]),
+            template=tmpl,
+            do_data_augmentation=True,
+            data_augmentation_transform_type="affineAndDeformation",
+            data_augmentation_sd_affine=0.0,
+            data_augmentation_sd_deformation=0.0,
+            data_augmentation_noise_model="additivegaussian",
+            data_augmentation_noise_parameters=(0.0, 0.0),
+            data_augmentation_sd_simulated_bias_field=0.0,
+            data_augmentation_sd_histogram_warping=0.0,
+            number_of_samples=int(val_samples),
+        )
+
+    else:
+        
+        train_ds = PNGMultiViewDataset(
+            images_list=images_train,
+            target_size=(H, W),
+            do_aug=False
+        )
+        # L'attribut global_step_ref peut toujours être attaché dynamiquement
+        train_ds.global_step_ref = global_step
+
+        val_ds = PNGMultiViewDataset(
+            images_list=(images_val if len(images_val) > 0 else images_train[:1]),
+            target_size=(H, W),
+            do_aug=False
+        )
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -1353,9 +1440,6 @@ def main():
         aug_sched_fn = None
 
     _check_hw_divisible(args.H, args.W, args.L)
-    C = 1
-    input_shape = (C, args.H, args.W)
-    n_dims = int(np.prod(input_shape))
 
     # ---------------- Data ----------------
     
@@ -1373,6 +1457,16 @@ def main():
         print("[data] failed to build loaders:", repr(e))
         traceback.print_exc()
         raise
+
+    sample_batch = next(iter(train_loader))
+    if sample_batch.ndim == 5: # Forme: (Batch, View, Channel, Height, Width)
+        C = sample_batch.shape[2]
+    else:                      # Forme: (Batch, Channel, Height, Width)
+        C = sample_batch.shape[1]
+
+    input_shape = (C, args.H, args.W)
+    n_dims = int(np.prod(input_shape))
+    print(f"[info] Modèle instancié avec {C} canal/canaux.")
 
     input_data_sampled = False
 
@@ -1443,8 +1537,8 @@ def main():
     projectors = None
     if args.align != "none":
         with torch.no_grad():
-            x_tmpl = to01(warm_batch[:, 0:1].to(dtype=torch.float32, device=dev)).to(torch.float32)
-            z_probe, _ = models[0].inverse_and_log_det(x_tmpl[:1])
+            x_tmpl = to01(xs[0][:1].to(dtype=torch.float32, device=dev))
+            z_probe, _ = models[0].inverse_and_log_det(x_tmpl)
             flat_dim = _flatten_latents(z_probe).size(1)
         projectors = nn.ModuleList([
             Projector(flat_dim, args.proj_hidden, args.proj_dim).to(dtype=torch.float32, device=dev).train()
@@ -1747,10 +1841,12 @@ def main():
                 from contextlib import nullcontext
                 ctx = nullcontext()
 
+            xs_train = _extract_views_from_batch(x, num_views=len(models))
+
             with ctx:
                 bad_batch = False
                 for vi, m in enumerate(models):
-                    x_v = to01(x[:, vi:vi+1, :, :].to(dtype=torch.float32, device=dev))
+                    x_v = to01(xs_train[vi].to(dtype=torch.float32, device=dev))
                     
                     # --- GESTION MULTI-GPU ---
                     if isinstance(m, GlowDataParallel):
@@ -1921,11 +2017,14 @@ def main():
             for em in ema_models:
                 for p in em.parameters():
                     p.requires_grad_(False)
+
             with torch.no_grad():
+                xs_ema = _extract_views_from_batch(x, num_views=len(models))
                 for vi, (m, em) in enumerate(zip(models, ema_models)):
                     _copy_actnorm_state(m, em)
-                    xv_real = to01(x[:, vi:vi+1, :, :].to(dtype=torch.float32, device=dev)).float()
+                    xv_real = to01(xs_ema[vi].to(dtype=torch.float32, device=dev)).float()
                     warmup_actnorm_with_real_batch(em, xv_real)
+
             tqdm.write("[ema] initialized from base after first update")
 
         if ema_models is not None:
@@ -1985,10 +2084,13 @@ def main():
                 bpd_acc = []
                 tmpl_by_view = [None] * len(eval_models)
                 vbar = tqdm(total=10, leave=False, dynamic_ncols=True, desc=f"val@{it}")
+
                 for j, batch_val in enumerate(val_loader):
+                    xs_val = _extract_views_from_batch(batch_val, num_views=len(eval_models))
                     bpd_views = []
                     for vi, m in enumerate(eval_models):
-                        xv = to01(batch_val[:, vi:vi+1, :, :].to(dtype=torch.float32, device=dev))
+                        xv = to01(xs_val[vi].to(dtype=torch.float32, device=dev))
+
                         tmpl_by_view[vi] = xv
                         lp = m.log_prob(xv.float())
                         lp = torch.nan_to_num(lp, nan=-1e9, posinf=-1e9, neginf=-1e9)
