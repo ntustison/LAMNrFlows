@@ -122,6 +122,7 @@ import sys
 import time
 import hashlib
 import warnings
+from xml.parsers.expat import model
 
 import torch
 import torch.nn.functional as F
@@ -3199,50 +3200,56 @@ def main_sample(argv=None):
             # Encodage complet des volumes de la cohorte dans le sous-espace latent 3D
 
             z_list = []
+            saved_latent_shape = None
             print(f"[info] Projecting {len(support_paths)} volumetric scans into latent space...")
-                        
-            # --- NOUVEAU : Enveloppement de la boucle avec tqdm ---
+            
             for pth in tqdm(support_paths, desc="Encoding Volumes", unit="scan"):
-                
-                # --- ÉTAPE 1 : Lecture de l'image via ANTs ---
                 try:
                     img = ants.image_read(str(pth))
-                    xi = torch.from_numpy(img.numpy()).float()  # Tenseur [D, H, W]
-                    
-                    # Sécurisation : on force la dimension du canal pour obtenir [1, D, H, W]
+                    xi = torch.from_numpy(img.numpy()).float()
                     if xi.dim() == 3:
                         xi = xi.unsqueeze(0)
                     elif xi.dim() == 4 and xi.shape[0] > 1:
-                        xi = xi[0:1, ...] # Sécurité : force un canal unique si image multicible
+                        xi = xi[0:1, ...]
                 except Exception as e:
-                    print(f"\n[warn] Failed to read image {pth}: {e}")
+                    print(f"\n[warn] Failed to read {pth}: {e}")
                     continue
                 
-                # --- ÉTAPE 2 : Redimensionnement spatial Trilinéaire ---
                 try:
-                    # L'ajout de .unsqueeze(0) créé la dimension Batch -> [1, 1, D, H, W]
                     xi_resized = F.interpolate(xi.unsqueeze(0), size=(Dc, Hc, Wc), mode="trilinear", align_corners=False)
                     xi_resized = xi_resized.to(device=device, dtype=torch.float32)
                 except Exception as e:
                     print(f"\n[warn] Failed to interpolate {pth}: {e}")
                     continue
                 
-                # --- ÉTAPE 3 : Projection inverse dans l'espace latent ---
                 try:
                     with torch.no_grad():
                         res = model(xi_resized)
-                        z = res[0] if isinstance(res, (list, tuple)) else res
-                        z_list.append(z.cpu())
+                        # Gère les retours de type (z, logdet) ou z seul
+                        z_raw = res[0] if isinstance(res, (list, tuple)) and len(res) == 2 and isinstance(res[1], torch.Tensor) else res
+                        
+                        if isinstance(z_raw, (list, tuple)):
+                            # Cas d'architecture multi-échelle (liste de tenseurs spatiaux)
+                            latent_shape = [zl.shape for zl in z_raw]
+                            z_flat_subject = torch.cat([zl.flatten() for zl in z_raw])
+                        else:
+                            # Cas standard (tenseur unique)
+                            latent_shape = z_raw.shape
+                            z_flat_subject = z_raw.flatten()
+                        
+                        z_list.append(z_flat_subject.cpu())
+                        if saved_latent_shape is None:
+                            saved_latent_shape = latent_shape
                 except Exception as e:
                     print(f"\n[warn] Failed to encode {pth}: {e}")
                     continue
-                                            
+            
             if not z_list:
                 raise SystemExit("Could not encode any 3D support vectors to construct the typical convex hull.")
-            
-            Z_support_all = torch.cat(z_list, dim=0).to(device)
-            latent_shape = Z_support_all.shape[1:]
-            Z_flat = Z_support_all.flatten(start_dim=1)  # L'immense vecteur 3D est aplati : [N_support, D_latent]
+
+            # --- CORRECTION CRITIQUE : Utilisation de torch.stack ---
+            # Construit une matrice 2D stricte [N_support, D_latent]
+            Z_flat = torch.stack(z_list, dim=0).to(device)
             N_support, D_latent = Z_flat.shape
 
             dirichlet = torch.distributions.Dirichlet(torch.ones(args.hull_k, device=device))
@@ -3276,9 +3283,22 @@ def main_sample(argv=None):
                 
                 z_sample_flat = z_geo * empirical_radius
 
-            z_sample = z_sample_flat.view(total, *latent_shape)
+            # --- Reconstruction de la topologie originale (Single ou Multi-scale) ---
+            if isinstance(saved_latent_shape, list):
+                z_sample = []
+                current_idx = 0
+                for shape in saved_latent_shape:
+                    target_shape = (total,) + tuple(shape)[1:]
+                    num_elements = torch.prod(torch.tensor(target_shape[1:])).item()
+                    zl_flat = z_sample_flat[:, current_idx : current_idx + num_elements]
+                    z_sample.append(zl_flat.view(*target_shape))
+                    current_idx += num_elements
+            else:
+                target_shape = (total,) + tuple(saved_latent_shape)[1:]
+                z_sample = z_sample_flat.view(*target_shape)
 
             # Inversion vers l'espace image 3D
+
             try:
                 with torch.no_grad():
                     if hasattr(model, 'inverse'):
