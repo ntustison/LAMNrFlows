@@ -1288,6 +1288,7 @@ def main_sample(argv=None):
         print(f"[ok] recon panel saved: {recon_out}")
 
     # Section Échantillonnage (Mise à jour avec enveloppe convexe typique)
+# Section Échantillonnage (Mise à jour avec enveloppe convexe typique)
     if args.sample_grid_size is not None:
         M, N = args.sample_grid_size
         total = int(M) * int(N)
@@ -1305,33 +1306,65 @@ def main_sample(argv=None):
             if not support_paths:
                 raise SystemExit("Hull sampling requested but no support cohort found in --val-list.")
             
-            # Encodage des patients de référence en vecteurs latents
+            # --- ENCODAGE ROBUSTE (Image -> Latent via 'inverse') ---
             z_list = []
+            saved_latent_shape = None
+            saved_is_tuple = False
+            
             print(f"[info] Projecting {len(support_paths)} support images into latent space...")
-            for pth in support_paths:
+            
+            from tqdm import tqdm
+            for pth in tqdm(support_paths, desc="Encoding Images", unit="img"):
                 try:
+                    # Lecture et redimensionnement à la taille native du flow (Hc, Wc)
                     xi = _read_image_any(pth, args.slice_axis, args.slice_index)
-                except Exception:
+                    xi = F.interpolate(xi.unsqueeze(0).unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False)
+                    xb = xi.to(device=device, dtype=torch.float32)  # (1, C, Hc, Wc)
+                except Exception as e:
+                    print(f"\n[warn] Failed to read/interpolate {pth}: {e}")
                     continue
-                xi = F.interpolate(xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False).to(device=device, dtype=torch.float32)
-                with torch.no_grad():
-                    res = model(xi)
-                    z = res[0] if isinstance(res, (list, tuple)) else res
-                    z_list.append(z.cpu())
+                
+                try:
+                    with torch.no_grad():
+                        # L'encodage se fait via 'inverse' dans l'écosystème antsnormflows
+                        if hasattr(model, "inverse_and_log_det"):
+                            z_raw, _ = model.inverse_and_log_det(xb) 
+                        elif hasattr(model, "inverse"):
+                            z_raw, _ = model.inverse(xb)
+                        else:
+                            raise RuntimeError("Model lacks inverse mapping for encoding")
+                        
+                        # Aplatissement robuste multi-échelle vs simple échelle
+                        if isinstance(z_raw, (list, tuple)):
+                            latent_shape = [zl.shape for zl in z_raw]
+                            z_flat_subject = torch.cat([zl.flatten(start_dim=1) for zl in z_raw], dim=1)
+                            if saved_latent_shape is None:
+                                saved_latent_shape = latent_shape
+                                saved_is_tuple = isinstance(z_raw, tuple)
+                        else:
+                            latent_shape = z_raw.shape
+                            z_flat_subject = z_raw.flatten(start_dim=1)
+                            if saved_latent_shape is None:
+                                saved_latent_shape = latent_shape
+                        
+                        z_list.append(z_flat_subject.cpu()) # Ajoute un (1, D_total)
+                except Exception as e:
+                    print(f"\n[warn] Failed to encode {pth}: {e}")
+                    continue
             
             if not z_list:
                 raise SystemExit("Could not encode any support vectors to construct the typical convex hull.")
             
-            Z_support_all = torch.cat(z_list, dim=0).to(device)
-            latent_shape = Z_support_all.shape[1:]
-            Z_flat = Z_support_all.flatten(start_dim=1)  # [N_support, D]
+            # Construction de la matrice d'enveloppe
+            Z_flat = torch.cat(z_list, dim=0).to(device)
             N_support, D_latent = Z_flat.shape
+            print(f"[info] Encoded matrix shape: {Z_flat.shape}")
 
             # Génération de poids de Dirichlet (coefficients convexes somme=1, >=0)
             dirichlet = torch.distributions.Dirichlet(torch.ones(args.hull_k, device=device))
             alpha = dirichlet.sample((total,))  # [total, hull_k]
             idx = torch.randint(0, N_support, (total, args.hull_k), device=device)
-            Z_picked = Z_flat[idx]  # [total, hull_k, D]
+            Z_picked = Z_flat[idx]  # [total, hull_k, D_latent]
 
             empirical_radius = torch.mean(torch.norm(Z_flat, p=2, dim=-1))
 
@@ -1361,22 +1394,40 @@ def main_sample(argv=None):
                 
                 z_sample_flat = z_geo * empirical_radius
 
-            # Redimensionnement vers la topologie du tenseur latent natif du réseau
-            z_sample = z_sample_flat.view(total, *latent_shape)
+            # --- RECONSTRUCTION TOPOLOGIQUE ---
+            if isinstance(saved_latent_shape, list):
+                z_sample_list = []
+                current_idx = 0
+                for shape in saved_latent_shape:
+                    target_shape = (total,) + tuple(shape)[1:] 
+                    num_elements = torch.prod(torch.tensor(target_shape[1:])).item()
+                    zl_flat = z_sample_flat[:, current_idx : current_idx + num_elements]
+                    z_sample_list.append(zl_flat.view(*target_shape).to(device))
+                    current_idx += num_elements
+                
+                if saved_is_tuple:
+                    z_sample = tuple(z_sample_list)
+                else:
+                    z_sample = z_sample_list
+            else:
+                target_shape = (total,) + tuple(saved_latent_shape)[1:]
+                z_sample = z_sample_flat.view(*target_shape).to(device)
 
-            # Décodage via la passe inverse bijective
+            # --- DÉCODAGE ROBUSTE (Latent -> Image via 'forward') ---
             try:
                 with torch.no_grad():
-                    if hasattr(model, 'inverse'):
-                        x = model.inverse(z_sample)
-                    elif hasattr(model, 'decode'):
-                        x = model.decode(z_sample)
+                    # L'inversion (génération d'images) se fait via 'forward' dans ce framework
+                    if hasattr(model, "forward_and_log_det"):
+                        x_out, _ = model.forward_and_log_det(z_sample)
                     else:
-                        x = model(z_sample, reverse=True)
-                    if isinstance(x, (list, tuple)):
-                        x = x[0]
+                        x_out = model(z_sample)
+                        
+                    if isinstance(x_out, (list, tuple)):
+                        x = x_out[0]
+                    else:
+                        x = x_out
             except Exception as e:
-                raise RuntimeError(f"Decoding typical hull samples failed: {e}. Ensure the inverse mapping method is correct.")
+                raise RuntimeError(f"Decoding (Latent -> Image) failed: {e}")
 
         # Recalage optionnel ANTs
         if args.resample_spacing is not None:
@@ -1428,7 +1479,7 @@ def main_sample(argv=None):
             print(f"[ok] wrote: {out_path.with_suffix('.json')}")
         except Exception as e:
             print(f"[warn] could not write metadata json: {e}")
-
+            
 
 def main_recon(argv=None):
     ap = argparse.ArgumentParser("LAM‑Flow reconstruction tool (recon)")
