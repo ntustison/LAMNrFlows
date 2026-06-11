@@ -3200,8 +3200,9 @@ def main_sample(argv=None):
 
             z_list = []
             print(f"[info] Projecting {len(support_paths)} volumetric scans into latent space...")
-            
-            for pth in support_paths:
+                        
+            # --- NOUVEAU : Enveloppement de la boucle avec tqdm ---
+            for pth in tqdm(support_paths, desc="Encoding Volumes", unit="scan"):
                 
                 # --- ÉTAPE 1 : Lecture de l'image via ANTs ---
                 try:
@@ -3214,7 +3215,7 @@ def main_sample(argv=None):
                     elif xi.dim() == 4 and xi.shape[0] > 1:
                         xi = xi[0:1, ...] # Sécurité : force un canal unique si image multicible
                 except Exception as e:
-                    print(f"[warn] Failed to read image {pth}: {e}")
+                    print(f"\n[warn] Failed to read image {pth}: {e}")
                     continue
                 
                 # --- ÉTAPE 2 : Redimensionnement spatial Trilinéaire ---
@@ -3223,7 +3224,7 @@ def main_sample(argv=None):
                     xi_resized = F.interpolate(xi.unsqueeze(0), size=(Dc, Hc, Wc), mode="trilinear", align_corners=False)
                     xi_resized = xi_resized.to(device=device, dtype=torch.float32)
                 except Exception as e:
-                    print(f"[warn] Failed to interpolate {pth}: {e}")
+                    print(f"\n[warn] Failed to interpolate {pth}: {e}")
                     continue
                 
                 # --- ÉTAPE 3 : Projection inverse dans l'espace latent ---
@@ -3233,9 +3234,9 @@ def main_sample(argv=None):
                         z = res[0] if isinstance(res, (list, tuple)) else res
                         z_list.append(z.cpu())
                 except Exception as e:
-                    print(f"[warn] Failed to encode {pth}: {e}")
+                    print(f"\n[warn] Failed to encode {pth}: {e}")
                     continue
-                            
+                                            
             if not z_list:
                 raise SystemExit("Could not encode any 3D support vectors to construct the typical convex hull.")
             
