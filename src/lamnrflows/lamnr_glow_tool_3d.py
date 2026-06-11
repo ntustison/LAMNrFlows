@@ -158,6 +158,24 @@ def _mps_safe_double(self, *args, **kwargs):
 torch.Tensor.double = _mps_safe_double
 # -----------------------------------------
 
+def parse_hw(spec: str) -> Tuple[int, int]:
+    try:
+        a, b = spec.lower().split("x")
+        H, W = int(a), int(b)
+        assert H > 0 and W > 0
+        return H, W
+    except Exception:
+        raise argparse.ArgumentTypeError(f"Invalid HxW spec '{spec}'. Expected like '128x128'.")
+
+def parse_hw_float(spec: str) -> Tuple[float, float]:
+    try:
+        a, b = spec.lower().split("x")
+        H, W = float(a), float(b)
+        assert H > 0 and W > 0
+        return H, W
+    except Exception:
+        raise argparse.ArgumentTypeError(f"Invalid spacing spec '{spec}'. Expected like '0.8x0.8'.")
+
 def parse_hwd(spec: str) -> Tuple[int, int, int]:
     try:
         parts = spec.lower().split("x")
@@ -3021,21 +3039,50 @@ def sample_with_temperature(model, n: int, temp: float):
     return model.sample(n)
     
 def main_sample(argv=None):
-    ap = argparse.ArgumentParser("LAM‑Flow 3D sample tool")
-    ap.add_argument("--ckpt", type=str, required=True)
-    ap.add_argument("--view-index", type=int, default=0)
-    ap.add_argument("--n-samples", type=int, default=1)
-    ap.add_argument("--volume-size", type=parse_hwd, default="64x64x64")
-    ap.add_argument("--reference-image", type=str, default=None, help="Optional 3D image to define the header.")
-    ap.add_argument("--temperature", type=float, default=1.0)
-    ap.add_argument("--ema", action=argparse.BooleanOptionalAction, default=True)
-    ap.add_argument("--seed", type=int, default=12345)
-    ap.add_argument("--devices", type=str, default="cuda:0")
-    ap.add_argument("--out-dir", type=str, default="samples_3d")
+    ap = argparse.ArgumentParser("LAM‑Flow 3D sample grid tool")
+    ap.add_argument("--version", action="store_true", help="Print version and exit")
+    ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint file or directory")
+    ap.add_argument("--view-index", type=int, default=0, help="Which view to sample (0-based)")
+    ap.add_argument("--sample-grid-size", type=parse_mn, default=None, help="Grid as MxN (rows×cols), e.g., 4x4")
+    ap.add_argument("--image-size", type=parse_hw, default="128x128", help="Per-tile 2D size HxW for the saved snapshot PNG")
+    ap.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature (prior noise scale)")
+    ap.add_argument("--ema", action=argparse.BooleanOptionalAction, default=True, help="Prefer EMA weights if present")
+    ap.add_argument("--seed", type=int, default=12345, help="Random seed for reproducible sampling")
+    ap.add_argument("--devices", type=str, default="cuda:0", help='Device like "cuda:0" or "cpu"')
+    ap.add_argument("--sample-grid-out", type=str, default="", help="Output PNG filename (default auto next to ckpt)")
+    
+    # Paramètres de coupe pour la visualisation 2D des volumes 3D
+    ap.add_argument("--slice-axis", type=int, default=0, help="Axis for NIfTI slicing (0: Sagittal/Axial depending on orient, etc.)")
+    ap.add_argument("--slice-index", type=int, default=32, help="Slice index for extracting the 2D snapshot from 3D volume")
+    
+    # Options pour l'échantillonnage de l'enveloppe convexe typique 3D
+    ap.add_argument("--sampling-strategy", type=str, default="pure", choices=["pure", "projected-hull", "geodesic-hull"],
+                    help="Sampling strategy: standard Gaussian (pure), normalized linear convex hull (projected-hull), or Riemannian Frechet mean hull (geodesic-hull).")
+    ap.add_argument("--hull-k", type=int, default=3, help="Number of empirical support samples to mix per generated point.")
+
+    # Reconstruction sanity check options
+    ap.add_argument("--recon", type=int, default=0, help="If >0, run reconstruction sanity check on N validation volumes.")
+    ap.add_argument("--val-list", type=str, nargs="+", default=None, help="One or more inputs: globs (quoted) and/or files (txt lists or volume files).")
+    ap.add_argument("--recon-out", type=str, default="", help="Output PNG for recon panel (default auto next to ckpt).")
+
+    # ANTs 3D resampling options
+    ap.add_argument("--resample-spacing", type=parse_hwd_float, default=None,
+                    help="Physical spacing DxSxT (e.g., 1.0x0.8x0.8 mm). Uses ANTs resample_image.")
+    ap.add_argument("--resample-size", type=parse_hwd, default=None,
+                    help="Voxel size DxHxW (e.g., 48x64x56). Uses ANTs resample_image.")
+    ap.add_argument("--native-spacing", type=parse_hwd_float, default=None,
+                    help="Override native spacing DxSxT (mm) if not present in checkpoint config.")
+
     args = ap.parse_args(argv)
+    if args.version:
+        print(__version__)
+        return
+
+    if args.resample_spacing is not None and args.resample_size is not None:
+        raise SystemExit("Specify only one of --resample-spacing or --resample-size (not both).")
 
     ckpt_path = resolve_ckpt_path(Path(args.ckpt))
-    out_dir = Path(args.out_dir)
+    out_dir = ckpt_path.parent
 
     device = torch.device("cpu") if args.devices.lower() == "cpu" else torch.device(args.devices.split(",")[0])
     set_deterministic(args.seed)
@@ -3043,55 +3090,233 @@ def main_sample(argv=None):
     print(f"[info] lamnr_glow_tool_3d {__version__}")
     print(f"[info] loading checkpoint: {ckpt_path}")
 
-    blob = torch.load(ckpt_path, map_location=device, weights_only=False)
+    try:
+        blob = torch.load(ckpt_path, map_location=device, weights_only=True)
+    except TypeError:
+        blob = torch.load(ckpt_path, map_location=device)
+
     cfg = blob.get("config", {})
     
-    model = build_model_from_config(cfg, device, target_hwd=args.volume_size)
-    
+    # Construction du modèle à partir des configurations 3D natives
+    model = build_model_from_config(cfg, device=device)
+
+    # Extraction du spacing 3D natif
+    native_spacing = None
+    if args.native_spacing is not None:
+        native_spacing = (float(args.native_spacing[0]), float(args.native_spacing[1]), float(args.native_spacing[2]))
+    else:
+        for key in ("spacing", "pixdim", "voxel_spacing", "voxel_size"):
+            if key in cfg:
+                val = cfg[key]
+                try:
+                    if isinstance(val, (list, tuple)) and len(val) >= 3:
+                        native_spacing = (float(val[0]), float(val[1]), float(val[2]))
+                        break
+                except Exception:
+                    pass
+    if native_spacing is None:
+        native_spacing = (1.0, 1.0, 1.0)
+
     ok, src_note = load_weights_into_model(model, blob, view_idx=int(args.view_index), prefer_ema=bool(args.ema))
     if not ok:
         raise RuntimeError(f"Could not load weights from checkpoint ({src_note})")
     which_src, note = src_note
-    if note:
-        print(f"[warn] weight load note: {note}")
     print(f"[info] weights loaded from: {which_src} (view {args.view_index})")
 
-    # Dimensions spatiales du tenseur 3D (Profondeur, Hauteur, Largeur)
+    # Amorce (Prime) du réseau avec la taille spatiale 3D native
     Dc, Hc, Wc = model.input_shape[-3], model.input_shape[-2], model.input_shape[-1]
     _prime_if_needed(model, Dc, Hc, Wc, device)
 
-    # Échantillonnage
-    if args.n_samples > 0:
-        total = args.n_samples
-        print(f"[info] sampling {total} volumes @ temp={args.temperature} (seed={args.seed})")
+    # Helper interne pour extraire une coupe 2D d'un tenseur 3D (B, C, D, H, W)
+    def _extract_2d_slice(tensor_5d, axis, index):
+        idx = min(max(0, int(index)), tensor_5d.shape[axis + 2] - 1)
+        if axis == 0:
+            return tensor_5d[:, :, idx, :, :]
+        elif axis == 1:
+            return tensor_5d[:, :, :, idx, :]
+        else:
+            return tensor_5d[:, :, :, :, idx]
 
+    # Reconstruction sanity check (volumes 3D complets)
+    if int(args.recon) > 0:
+        val_paths = _gather_val_paths(getattr(args, "val_list", None), limit=int(args.recon))
+        if not val_paths:
+            raise SystemExit("Recon requested but no validation images found.")
+        print(f"[info] recon: loading {len(val_paths)} volume(s) for 3D round-trip test")
+        xs = []
+        for pth in val_paths:
+            try:
+                # Lecture du volume 3D complet (pas d'extraction de coupe ici pour respecter la SVD)
+                xi = _read_image_3d(pth)  # Doit retourner un tenseur (1, D, H, W) ou similaire
+            except Exception as e:
+                print(f"[warn] skipping {pth}: {e}")
+                continue
+            # Redimensionnement volumétrique Trilinéraire pour correspondre au domaine du flux
+            xi = F.interpolate(xi.unsqueeze(0), size=(Dc, Hc, Wc), mode="trilinear", align_corners=False).squeeze(0)
+            xs.append(xi)
+        if not xs:
+            raise SystemExit("Recon: no readable volumes after parsing inputs.")
+        xb = torch.stack(xs, dim=0).to(device=device, dtype=torch.float32)  # [N, C, Dc, Hc, Wc]
+        
         try:
-            # Note : Attention à la VRAM si 'total' est grand (générer 10 volumes 3D d'un coup peut causer un OOM)
-            s_out = sample_with_temperature(model, total, float(args.temperature))
-            x = s_out[0] if isinstance(s_out, (list, tuple)) else s_out
+            xh = reconstruct_batch(model, xb)
         except Exception as e:
-            raise RuntimeError(f"sampling failed: {e}")
-
-        it = blob.get("iter", None)
-        it_str = (f"_it{int(it)-1:06d}" if isinstance(it, int) and it > 0 else "")
-        
-        # Correction : Utilisation de volume_size (qui est déjà un tuple H, W, D si paré correctement)
-        vol_sz = args.volume_size
-        base_name = f"samples{it_str}_view{int(args.view_index)}_temp{float(args.temperature):.2f}_{vol_sz[0]}x{vol_sz[1]}x{vol_sz[2]}"
-        
-        for s in range(args.n_samples):
-            # 1 & 3. Ajout de l'index unique et de l'extension NIfTI
-            file_name = f"{base_name}_{s:04d}.nii.gz"
-            file_path = out_dir / file_name
+            raise SystemExit(f"Recon failed: {e}")
             
-            # Extraction du volume individuel (on garde la dimension du batch avec le slicing)
-            vol_tensor = x[s:s+1] 
-            if args.reference_image is not None:
-                save_nifti(vol_tensor, file_path, ants.image_read(args.reference_image))
-            else:
-                save_nifti(vol_tensor, file_path)                
-            print(f"[ok] Sample {s+1}/{args.n_samples} saved to {file_path}")
+        # Extraction de la coupe 2D sur le batch réel et reconstruit pour le panneau PNG de diagnostic
+        xb_slice = _extract_2d_slice(xb, args.slice_axis, args.slice_index)
+        xh_slice = _extract_2d_slice(xh, args.slice_axis, args.slice_index)
+        panel = make_recon_panel(xb_slice, xh_slice)
+        
+        if args.recon_out:
+            recon_out = Path(args.recon_out)
+            if not recon_out.is_absolute():
+                recon_out = out_dir / recon_out
+        else:
+            recon_out = out_dir / f"recon_view{int(args.view_index)}_N{panel.shape[0]//3}_{Dc}x{Hc}x{Wc}_slice{args.slice_index}.png"
+        save_grid(panel, recon_out, nrow=3, target_hw=(Hc, Wc))
+        print(f"[ok] 3D recon slice panel saved: {recon_out}")
 
+    # Section Échantillonnage 3D
+    if args.sample_grid_size is not None:
+        M, N = args.sample_grid_size
+        total = int(M) * int(N)
+
+        if args.sampling_strategy == "pure":
+            print(f"[info] sampling {total} volumes @ temp={args.temperature} as {M}x{N}")
+            try:
+                s = sample_with_temperature(model, total, float(args.temperature))
+                x = s[0] if isinstance(s, (list, tuple)) else s
+            except Exception as e:
+                raise RuntimeError(f"sampling failed: {e}")
+        else:
+            print(f"[info] sampling {total} volumes via 3D Typical Convex Hull '{args.sampling_strategy}' (k={args.hull_k})")
+            support_paths = _gather_val_paths(getattr(args, "val_list", None), limit=9999)
+            if not support_paths:
+                raise SystemExit("Hull sampling requested but no 3D support cohort found in --val-list.")
+            
+            # Encodage complet des volumes de la cohorte dans le sous-espace latent 3D
+            z_list = []
+            print(f"[info] Projecting {len(support_paths)} volumetric scans into latent space...")
+            for pth in support_paths:
+                try:
+                    xi = _read_image_3d(pth)
+                except Exception:
+                    continue
+                xi = F.interpolate(xi.unsqueeze(0), size=(Dc, Hc, Wc), mode="trilinear", align_corners=False).to(device=device, dtype=torch.float32)
+                with torch.no_grad():
+                    res = model(xi)
+                    z = res[0] if isinstance(res, (list, tuple)) else res
+                    z_list.append(z.cpu())
+            
+            if not z_list:
+                raise SystemExit("Could not encode any 3D support vectors to construct the typical convex hull.")
+            
+            Z_support_all = torch.cat(z_list, dim=0).to(device)
+            latent_shape = Z_support_all.shape[1:]
+            Z_flat = Z_support_all.flatten(start_dim=1)  # L'immense vecteur 3D est aplati : [N_support, D_latent]
+            N_support, D_latent = Z_flat.shape
+
+            dirichlet = torch.distributions.Dirichlet(torch.ones(args.hull_k, device=device))
+            alpha = dirichlet.sample((total,))
+            idx = torch.randint(0, N_support, (total, args.hull_k), device=device)
+            Z_picked = Z_flat[idx]
+
+            empirical_radius = torch.mean(torch.norm(Z_flat, p=2, dim=-1))
+
+            if args.sampling_strategy == "projected-hull":
+                z_linear = torch.sum(alpha.unsqueeze(-1) * Z_picked, dim=1)
+                z_sample_flat = empirical_radius * (z_linear / torch.norm(z_linear, p=2, dim=-1, keepdim=True))
+                
+            elif args.sampling_strategy == "geodesic-hull":
+                Z_picked_unit = Z_picked / torch.norm(Z_picked, p=2, dim=-1, keepdim=True)
+                z_init = torch.sum(alpha.unsqueeze(-1) * Z_picked_unit, dim=1)
+                z_geo = z_init / torch.norm(z_init, p=2, dim=-1, keepdim=True)
+                
+                for _ in range(8):
+                    cos_theta = torch.bmm(Z_picked_unit, z_geo.unsqueeze(-1)).squeeze(-1)
+                    cos_theta = torch.clamp(cos_theta, -0.9999, 0.9999)
+                    theta = torch.acos(cos_theta)
+                    sin_theta = torch.sin(theta)
+                    scale = torch.where(sin_theta > 1e-5, theta / sin_theta, torch.ones_like(theta))
+                    tangent_vectors = (Z_picked_unit - cos_theta.unsqueeze(-1) * z_geo.unsqueeze(1)) * scale.unsqueeze(-1)
+                    mean_tangent = torch.sum(alpha.unsqueeze(-1) * tangent_vectors, dim=1)
+                    norm_tangent = torch.norm(mean_tangent, p=2, dim=-1, keepdim=True)
+                    norm_tangent = torch.clamp(norm_tangent, min=1e-5)
+                    z_geo = z_geo * torch.cos(0.5 * norm_tangent) + (mean_tangent / norm_tangent) * torch.sin(0.5 * norm_tangent)
+                    z_geo = z_geo / torch.norm(z_geo, p=2, dim=-1, keepdim=True)
+                
+                z_sample_flat = z_geo * empirical_radius
+
+            z_sample = z_sample_flat.view(total, *latent_shape)
+
+            # Inversion vers l'espace image 3D
+            try:
+                with torch.no_grad():
+                    if hasattr(model, 'inverse'):
+                        x = model.inverse(z_sample)
+                    elif hasattr(model, 'decode'):
+                        x = model.decode(z_sample)
+                    else:
+                        x = model(z_sample, reverse=True)
+                    if isinstance(x, (list, tuple)):
+                        x = x[0]
+            except Exception as e:
+                raise RuntimeError(f"Decoding failed: {e}")
+
+        # Recalage optionnel ANTs (Versions 3D des fonctions de rééchantillonnage)
+        if args.resample_spacing is not None:
+            target_spacing = (float(args.resample_spacing[0]), float(args.resample_spacing[1]), float(args.resample_spacing[2]))
+            print(f"[info] ANTs 3D resample by spacing: {native_spacing} -> {target_spacing}")
+            x = resample_with_ants_spacing_3d(x, native_spacing=native_spacing, target_spacing=target_spacing)
+        elif args.resample_size is not None:
+            target_size = (int(args.resample_size[0]), int(args.resample_size[1]), int(args.resample_size[2]))
+            print(f"[info] ANTs 3D resample by voxel size -> {target_size}")
+            x = resample_with_ants_size_3d(x, target_size=target_size, native_spacing=native_spacing)
+
+        # Extraction de la coupe 2D cible du volume généré pour composer la grille PNG finale
+        print(f"[info] Slicing generated 3D volumes (axis={args.slice_axis}, index={args.slice_index}) for grid visualization.")
+        x_slice = _extract_2d_slice(x, args.slice_axis, args.slice_index)
+
+        # Détermination du chemin de sortie
+        if args.sample_grid_out:
+            out_path = Path(args.sample_grid_out)
+            if not out_path.is_absolute():
+                out_path = out_dir / out_path
+        else:
+            it = blob.get("iter", None)
+            it_str = (f"_it{int(it)-1:06d}" if isinstance(it, int) and it > 0 else "")
+            out_name = (f"samples3d{it_str}_view{int(args.view_index)}_{args.sampling_strategy}_"
+                        f"slice{args.slice_index}_{int(M)}x{int(N)}.png")
+            out_path = out_dir / out_name
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Enregistrement de la grille bidimensionnelle des coupes extraites
+        save_grid(x_slice, out_path, nrow=int(N), target_hw=(int(args.image_size[0]), int(args.image_size[1])))
+        print(f"[ok] wrote summary grid PNG: {out_path}")
+
+        # Métadonnées JSON enrichies pour la traçabilité 3D
+        meta = {
+            "version": __version__,
+            "ckpt": str(ckpt_path),
+            "view_index": int(args.view_index),
+            "sampling_strategy": args.sampling_strategy,
+            "hull_k": int(args.hull_k) if args.sampling_strategy != "pure" else None,
+            "slice_axis": int(args.slice_axis),
+            "slice_index": int(args.slice_index),
+            "sample_grid_size": [int(M), int(N)],
+            "ckpt_native_shape_3d": [int(Dc), int(Hc), int(Wc)],
+            "seed": int(args.seed),
+            "out": str(out_path),
+            "native_spacing_3d": list(native_spacing),
+        }
+        try:
+            with open(out_path.with_suffix(".json"), "w") as f:
+                json.dump(meta, f, indent=2)
+            print(f"[ok] wrote: {out_path.with_suffix('.json')}")
+        except Exception as e:
+            print(f"[warn] could not write metadata json: {e}")
 
 if __name__ == "__main__":
     table = {

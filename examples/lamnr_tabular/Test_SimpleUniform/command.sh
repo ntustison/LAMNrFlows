@@ -3,7 +3,7 @@
 python3 ../../../src/lamnrflows/train_lamnr_flows_tabular.py \
   --views UniformSimulatedData/uniform_10000x4.csv \
   --output-prefix ./runs/uniform_singleview \
-  --cuda-device "cpu" \
+  --cuda-device "mps" \
   \
   --base-distribution DiagGaussian \
   --base-sigma 1.0 \

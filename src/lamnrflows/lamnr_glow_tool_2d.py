@@ -1161,7 +1161,7 @@ def resolve_ckpt_path(p: Path) -> Path:
 
 
 # --------------------------- main ---------------------------
-def main_sample():
+def main_sample(argv=None):
     ap = argparse.ArgumentParser("LAM‑Flow sample grid tool")
     ap.add_argument("--version", action="store_true", help="Print version and exit")
     ap.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint file or directory")
@@ -1175,11 +1175,15 @@ def main_sample():
     ap.add_argument("--sample-grid-out", type=str, default="", help="Output PNG filename (default auto next to ckpt)")
     ap.add_argument("--slice-axis", type=int, default=0, help="Axis for NIfTI slicing with ANTs (default: 0)")
     ap.add_argument("--slice-index", type=int, default=120, help="Slice index for NIfTI slicing with ANTs (default: 120)")
+    
+    # Options pour l'échantillonnage de l'enveloppe convexe typique
+    ap.add_argument("--sampling-strategy", type=str, default="pure", choices=["pure", "projected-hull", "geodesic-hull"],
+                    help="Sampling strategy: standard Gaussian (pure), normalized linear convex hull (projected-hull), or Riemannian Frechet mean hull (geodesic-hull).")
+    ap.add_argument("--hull-k", type=int, default=3, help="Number of empirical support samples to mix per generated point.")
+
     # Reconstruction sanity check options
     ap.add_argument("--recon", type=int, default=0, help="If >0, run reconstruction sanity check on N validation images.")
     ap.add_argument("--val-list", type=str, nargs="+", default=None, help="One or more inputs: globs (quoted) and/or files (txt lists or image files). Examples: '/data/*/T1.nii.gz' or list.txt")
-    
-    
     ap.add_argument("--recon-out", type=str, default="", help="Output PNG for recon panel (default auto next to ckpt).")
 
     # ANTs resampling options
@@ -1190,12 +1194,11 @@ def main_sample():
     ap.add_argument("--native-spacing", type=parse_hw_float, default=None,
                     help="Override native spacing SxT (mm) if not present in checkpoint config.")
 
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if args.version:
         print(__version__)
         return
 
-    # sanity: disallow specifying both spacing & size simultaneously
     if args.resample_spacing is not None and args.resample_size is not None:
         raise SystemExit("Specify only one of --resample-spacing or --resample-size (not both).")
 
@@ -1208,16 +1211,14 @@ def main_sample():
     print(f"[info] lamnr_glow_tool {__version__}")
     print(f"[info] loading checkpoint: {ckpt_path}")
 
-    # torch.load with safe default when possible
     try:
-        blob = torch.load(ckpt_path, map_location=device, weights_only=True)  # PyTorch >=2.5
+        blob = torch.load(ckpt_path, map_location=device, weights_only=True)
     except TypeError:
         blob = torch.load(ckpt_path, map_location=device)
 
     cfg = blob.get("config", {})
     model = build_model_from_config(cfg if cfg else {"H": args.image_size[0], "W": args.image_size[1]}, device=device)
 
-    # Determine native spacing from ckpt if available or CLI override
     native_spacing = None
     if args.native_spacing is not None:
         native_spacing = (float(args.native_spacing[0]), float(args.native_spacing[1]))
@@ -1245,7 +1246,6 @@ def main_sample():
         print(f"[warn] weight load note: {note}")
     print(f"[info] weights loaded from: {which_src} (view {args.view_index})")
 
-    # Prime using ckpt-native spatial size
     Hc, Wc = model.input_shape[-2], model.input_shape[-1]
     _prime_if_needed(model, Hc, Wc, device)
 
@@ -1254,7 +1254,6 @@ def main_sample():
                f"{Hc}x{Wc}. Sampling at ckpt size; any ANTs resampling will be applied after sampling, "
                f"then the grid tiles will be resized to --image-size for saving.")
         print(msg)
-
 
     # Reconstruction sanity check (optional)
     if int(args.recon) > 0:
@@ -1265,24 +1264,20 @@ def main_sample():
         xs = []
         for pth in val_paths:
             try:
-                xi = _read_image_any(pth, args.slice_axis, args.slice_index)  # (1,H,W) in [0,1]
+                xi = _read_image_any(pth, args.slice_axis, args.slice_index)
             except Exception as e:
                 print(f"[warn] skipping {pth}: {e}")
                 continue
-            # Resize to ckpt-native size for a valid bijective mapping
             xi = F.interpolate(xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False).squeeze(0)
             xs.append(xi)
         if not xs:
             raise SystemExit("Recon: no readable images after parsing inputs.")
-        xb = torch.stack(xs, dim=0).to(device=device, dtype=torch.float32)  # (N,1,Hc,Wc)
-        # Forward -> latents -> reconstruct
+        xb = torch.stack(xs, dim=0).to(device=device, dtype=torch.float32)
         try:
             xh = reconstruct_batch(model, xb)
         except Exception as e:
             raise SystemExit(f"Recon failed: {e}")
-        # Build 3-column panel
-        panel = make_recon_panel(xb, xh)  # (3N,1,Hc,Wc)
-        # Determine output path
+        panel = make_recon_panel(xb, xh)
         if args.recon_out:
             recon_out = Path(args.recon_out)
             if not recon_out.is_absolute():
@@ -1292,37 +1287,110 @@ def main_sample():
         save_grid(panel, recon_out, nrow=3, target_hw=(Hc, Wc))
         print(f"[ok] recon panel saved: {recon_out}")
 
-    # Sample
+    # Section Échantillonnage (Mise à jour avec enveloppe convexe typique)
     if args.sample_grid_size is not None:
-
         M, N = args.sample_grid_size
         total = int(M) * int(N)
-        print(f"[info] sampling {total} images @ temp={args.temperature} as {M}x{N} (seed={args.seed})")
 
-        try:
-            s = sample_with_temperature(model, total, float(args.temperature))
-            x = s[0] if isinstance(s, (list, tuple)) else s
-        except Exception as e:
-            raise RuntimeError(f"sampling failed: {e}")
+        if args.sampling_strategy == "pure":
+            print(f"[info] sampling {total} images @ temp={args.temperature} as {M}x{N} (seed={args.seed})")
+            try:
+                s = sample_with_temperature(model, total, float(args.temperature))
+                x = s[0] if isinstance(s, (list, tuple)) else s
+            except Exception as e:
+                raise RuntimeError(f"sampling failed: {e}")
+        else:
+            print(f"[info] sampling {total} images using constrained strategy '{args.sampling_strategy}' (k={args.hull_k})")
+            support_paths = _gather_val_paths(getattr(args, "val_list", None), limit=9999)
+            if not support_paths:
+                raise SystemExit("Hull sampling requested but no support cohort found in --val-list.")
+            
+            # Encodage des patients de référence en vecteurs latents
+            z_list = []
+            print(f"[info] Projecting {len(support_paths)} support images into latent space...")
+            for pth in support_paths:
+                try:
+                    xi = _read_image_any(pth, args.slice_axis, args.slice_index)
+                except Exception:
+                    continue
+                xi = F.interpolate(xi.unsqueeze(0), size=(Hc, Wc), mode="bilinear", align_corners=False).to(device=device, dtype=torch.float32)
+                with torch.no_grad():
+                    res = model(xi)
+                    z = res[0] if isinstance(res, (list, tuple)) else res
+                    z_list.append(z.cpu())
+            
+            if not z_list:
+                raise SystemExit("Could not encode any support vectors to construct the typical convex hull.")
+            
+            Z_support_all = torch.cat(z_list, dim=0).to(device)
+            latent_shape = Z_support_all.shape[1:]
+            Z_flat = Z_support_all.flatten(start_dim=1)  # [N_support, D]
+            N_support, D_latent = Z_flat.shape
 
-        # Optional ANTs resampling
+            # Génération de poids de Dirichlet (coefficients convexes somme=1, >=0)
+            dirichlet = torch.distributions.Dirichlet(torch.ones(args.hull_k, device=device))
+            alpha = dirichlet.sample((total,))  # [total, hull_k]
+            idx = torch.randint(0, N_support, (total, args.hull_k), device=device)
+            Z_picked = Z_flat[idx]  # [total, hull_k, D]
+
+            empirical_radius = torch.mean(torch.norm(Z_flat, p=2, dim=-1))
+
+            if args.sampling_strategy == "projected-hull":
+                # Combinaison linéaire convexe suivie d'une projection radiale corrective
+                z_linear = torch.sum(alpha.unsqueeze(-1) * Z_picked, dim=1)
+                z_sample_flat = empirical_radius * (z_linear / torch.norm(z_linear, p=2, dim=-1, keepdim=True))
+                
+            elif args.sampling_strategy == "geodesic-hull":
+                # Algorithme de calcul du barycentre intrinsèque (Moyenne de Fréchet) sur la Sphère
+                Z_picked_unit = Z_picked / torch.norm(Z_picked, p=2, dim=-1, keepdim=True)
+                z_init = torch.sum(alpha.unsqueeze(-1) * Z_picked_unit, dim=1)
+                z_geo = z_init / torch.norm(z_init, p=2, dim=-1, keepdim=True)
+                
+                for _ in range(8):  # Descente riemannienne locale
+                    cos_theta = torch.bmm(Z_picked_unit, z_geo.unsqueeze(-1)).squeeze(-1)
+                    cos_theta = torch.clamp(cos_theta, -0.9999, 0.9999)
+                    theta = torch.acos(cos_theta)
+                    sin_theta = torch.sin(theta)
+                    scale = torch.where(sin_theta > 1e-5, theta / sin_theta, torch.ones_like(theta))
+                    tangent_vectors = (Z_picked_unit - cos_theta.unsqueeze(-1) * z_geo.unsqueeze(1)) * scale.unsqueeze(-1)
+                    mean_tangent = torch.sum(alpha.unsqueeze(-1) * tangent_vectors, dim=1)
+                    norm_tangent = torch.norm(mean_tangent, p=2, dim=-1, keepdim=True)
+                    norm_tangent = torch.clamp(norm_tangent, min=1e-5)
+                    z_geo = z_geo * torch.cos(0.5 * norm_tangent) + (mean_tangent / norm_tangent) * torch.sin(0.5 * norm_tangent)
+                    z_geo = z_geo / torch.norm(z_geo, p=2, dim=-1, keepdim=True)
+                
+                z_sample_flat = z_geo * empirical_radius
+
+            # Redimensionnement vers la topologie du tenseur latent natif du réseau
+            z_sample = z_sample_flat.view(total, *latent_shape)
+
+            # Décodage via la passe inverse bijective
+            try:
+                with torch.no_grad():
+                    if hasattr(model, 'inverse'):
+                        x = model.inverse(z_sample)
+                    elif hasattr(model, 'decode'):
+                        x = model.decode(z_sample)
+                    else:
+                        x = model(z_sample, reverse=True)
+                    if isinstance(x, (list, tuple)):
+                        x = x[0]
+            except Exception as e:
+                raise RuntimeError(f"Decoding typical hull samples failed: {e}. Ensure the inverse mapping method is correct.")
+
+        # Recalage optionnel ANTs
         if args.resample_spacing is not None:
             target_spacing = (float(args.resample_spacing[0]), float(args.resample_spacing[1]))
             if tuple(round(s, 6) for s in target_spacing) != tuple(round(s, 6) for s in native_spacing):
                 print(f"[info] ANTs resample by spacing: {native_spacing} -> {target_spacing}")
-                x = resample_with_ants_spacing(x, native_spacing=native_spacing,
-                                            target_spacing=target_spacing)
-            else:
-                print("[info] Requested spacing equals native spacing; skipping ANTs resampling.")
+                x = resample_with_ants_spacing(x, native_spacing=native_spacing, target_spacing=target_spacing)
         elif args.resample_size is not None:
             target_size = (int(args.resample_size[0]), int(args.resample_size[1]))
             if tuple(target_size) != (int(x.shape[-2]), int(x.shape[-1])):
                 print(f"[info] ANTs resample by voxel size: {(int(x.shape[-2]), int(x.shape[-1]))} -> {target_size}")
                 x = resample_with_ants_size(x, target_size=target_size, native_spacing=native_spacing)
-            else:
-                print("[info] Requested voxel size equals current; skipping ANTs resampling.")
 
-        # Compose and save grid
+        # Enregistrement de la grille PNG
         if args.sample_grid_out:
             out_path = Path(args.sample_grid_out)
             if not out_path.is_absolute():
@@ -1330,7 +1398,7 @@ def main_sample():
         else:
             it = blob.get("iter", None)
             it_str = (f"_it{int(it)-1:06d}" if isinstance(it, int) and it > 0 else "")
-            out_name = (f"samples{it_str}_view{int(args.view_index)}_temp{float(args.temperature):.2f}_"
+            out_name = (f"samples{it_str}_view{int(args.view_index)}_{args.sampling_strategy}_"
                         f"{int(M)}x{int(N)}_{int(args.image_size[0])}x{int(args.image_size[1])}.png")
             out_path = out_dir / out_name
 
@@ -1338,24 +1406,21 @@ def main_sample():
         save_grid(x, out_path, nrow=int(N), target_hw=(int(args.image_size[0]), int(args.image_size[1])))
         print(f"[ok] wrote: {out_path}")
 
-        # Metadata JSON
+        # Métadonnées JSON pour garder une trace rigoureuse
         meta = {
             "version": __version__,
             "ckpt": str(ckpt_path),
             "weights_source": which_src,
             "view_index": int(args.view_index),
+            "sampling_strategy": args.sampling_strategy,
+            "hull_k": int(args.hull_k) if args.sampling_strategy != "pure" else None,
             "sample_grid_size": [int(M), int(N)],
             "image_size_saved": [int(args.image_size[0]), int(args.image_size[1])],
-            "ckpt_native_size": [int(Hc), int(Wc)],
-            "temperature": float(args.temperature),
+            "temperature": float(args.temperature) if args.sampling_strategy == "pure" else None,
             "seed": int(args.seed),
-            "devices": args.devices,
             "out": str(out_path),
-            "iter": int(blob.get("iter", -1)) if isinstance(blob.get("iter", None), int) else None,
             "config": cfg if isinstance(cfg, dict) else None,
             "native_spacing": list(native_spacing) if native_spacing is not None else None,
-            "resample_spacing": list(args.resample_spacing) if args.resample_spacing is not None else None,
-            "resample_size": list(args.resample_size) if args.resample_size is not None else None
         }
         try:
             with open(out_path.with_suffix(".json"), "w") as f:
@@ -1363,7 +1428,6 @@ def main_sample():
             print(f"[ok] wrote: {out_path.with_suffix('.json')}")
         except Exception as e:
             print(f"[warn] could not write metadata json: {e}")
-
 
 
 def main_recon(argv=None):
