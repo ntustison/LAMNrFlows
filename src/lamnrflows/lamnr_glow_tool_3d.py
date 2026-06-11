@@ -3203,25 +3203,37 @@ def main_sample(argv=None):
             if not support_paths:
                 raise SystemExit("Hull sampling requested but no 3D support cohort found in --val-list.")
 
-            print(f"[info] Projecting {len(support_paths)} volumetric scans into latent space...")
+            import random
+
+            total_required_anchors = total * args.hull_k
             
-            # --- ENCODAGE CORRECT (Image -> Latent via 'inverse') ---
+            if total_required_anchors > len(support_paths):
+                # Tirage avec remise si on a un tout petit dataset
+                chosen_paths = random.choices(support_paths, k=total_required_anchors)
+            else:
+                # Tirage sans remise normal
+                chosen_paths = random.sample(support_paths, k=total_required_anchors)
+                
+            print(f"[info] Lazy sampling: Selected {len(chosen_paths)} random scans out of {len(support_paths)} for encoding.")
+
+            # --- 2. ENCODAGE (Seulement pour les chemins choisis) ---
             z_list = []
             saved_latent_shape = None
             saved_is_tuple = False
             
-            for pth in tqdm(support_paths, desc="Encoding Volumes", unit="scan"):
+            for pth in tqdm(chosen_paths, desc="Encoding Vectors", unit="scan"):
                 try:
-                    # Lecture et redimensionnement à la volée (comme dans votre bloc gauss-fit)
-                    xi = _read_image_3d(pth, target_hwd=(Hc, Wc, Dc), mask_background=False) 
-                    xb = xi.unsqueeze(0).to(device=device, dtype=torch.float32) # (1, C, H, W, D)
+                    xi = _read_image_3d(pth, target_hwd=(Hc, Wc, Dc)) 
+                    xb = xi.unsqueeze(0).to(device=device, dtype=torch.float32)
                 except Exception as e:
                     print(f"\n[warn] Failed to read/interpolate {pth}: {e}")
+                    # Si une image échoue, on compense pour garder le bon compte
+                    fallback = random.choice(support_paths)
+                    chosen_paths.append(fallback)
                     continue
                 
                 try:
                     with torch.no_grad():
-                        # L'encodage se fait via 'inverse' dans ce framework
                         if hasattr(model, "inverse_and_log_det"):
                             z_raw, _ = model.inverse_and_log_det(xb) 
                         elif hasattr(model, "inverse"):
@@ -3229,10 +3241,8 @@ def main_sample(argv=None):
                         else:
                             raise RuntimeError("Model lacks inverse mapping for encoding")
                         
-                        # Sauvegarde et aplatissement (similaire à _flatten_latents_by_level)
                         if isinstance(z_raw, (list, tuple)):
                             latent_shape = [zl.shape for zl in z_raw]
-                            # Aplatit chaque niveau à partir de la dimension 1, puis concatène
                             z_flat_subject = torch.cat([zl.flatten(start_dim=1) for zl in z_raw], dim=1)
                             if saved_latent_shape is None:
                                 saved_latent_shape = latent_shape
@@ -3243,7 +3253,7 @@ def main_sample(argv=None):
                             if saved_latent_shape is None:
                                 saved_latent_shape = latent_shape
                         
-                        z_list.append(z_flat_subject.cpu()) # Ajoute un (1, D_total)
+                        z_list.append(z_flat_subject.cpu())
                 except Exception as e:
                     print(f"\n[warn] Failed to encode {pth}: {e}")
                     continue
@@ -3251,16 +3261,10 @@ def main_sample(argv=None):
             if not z_list:
                 raise SystemExit("Could not encode any 3D support vectors.")
 
-            # Construction de la matrice d'enveloppe (N_support, D_total)
+            # --- 3. RESTRUCTURATION POUR LE BARYCENTRE ---
             Z_flat = torch.cat(z_list, dim=0).to(device)
-            N_support, D_latent = Z_flat.shape
-            print(f"[info] Encoded matrix shape: {Z_flat.shape}")
 
-            # --- MANIPULATION LATENTE (Enveloppe Convexe) ---
-            dirichlet = torch.distributions.Dirichlet(torch.ones(args.hull_k, device=device))
-            alpha = dirichlet.sample((total,))
-            idx = torch.randint(0, N_support, (total, args.hull_k), device=device)
-            Z_picked = Z_flat[idx]
+            Z_picked = Z_flat[:total * args.hull_k].view(total, args.hull_k, -1)
 
             empirical_radius = torch.mean(torch.norm(Z_flat, p=2, dim=-1))
 
