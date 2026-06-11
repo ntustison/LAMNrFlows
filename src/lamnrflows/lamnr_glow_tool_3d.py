@@ -307,7 +307,7 @@ def resample_with_ants_spacing_3d(x: torch.Tensor,
             xs.append(torch.from_numpy(img_r.numpy()).to(device=device, dtype=dtype))
         outs.append(torch.stack(xs, dim=0))
         
-    y = torch.stack(outs, dim=1)  # (N, C, d, h, w)
+    y = torch.stack(outs, dim=1)  # (N, C, h, w, d)
     return y
 
 @torch.no_grad()
@@ -315,7 +315,7 @@ def resample_with_ants_size_3d(x: torch.Tensor,
                                target_size: Tuple[int, int, int],
                                native_spacing: Optional[Tuple[float, float, float]] = None) -> torch.Tensor:
     """
-    Resample 5D tensor (N, C, D, H, W) to a target voxel size (D, H, W) using ANTsPy (use_voxels=True).
+    Resample 5D tensor (N, C, H, W, D) to a target voxel size (H, W, D) using ANTsPy (use_voxels=True).
     """
     device, dtype = x.device, x.dtype
     N, C = x.shape[0], x.shape[1]
@@ -447,6 +447,8 @@ def _read_image_3d(path: Path, target_hwd: tuple[int, int, int]) -> torch.Tensor
     
     img = ants.resample_image(img, spacing, use_voxels=False, interp_type=0)
     img = ants.pad_or_crop_image_to_size(img, (H, W, D))
+    
+    img = img * ants.get_mask(img) 
     
     arr = img.numpy()
     if arr.ndim == 3: 
@@ -3051,6 +3053,8 @@ def main_sample(argv=None):
     ap.add_argument("--seed", type=int, default=12345, help="Random seed for reproducible sampling")
     ap.add_argument("--devices", type=str, default="cuda:0", help='Device like "cuda:0" or "cpu"')
     ap.add_argument("--sample-grid-out", type=str, default="", help="Output PNG filename (default auto next to ckpt)")
+    ap.add_argument("--save-volumes-dir", type=str, default="", 
+                    help="If specified, saves each generated 3D sample as an individual NIfTI volume in this directory.")
     
     # Paramètres de coupe pour la visualisation 2D des volumes 3D
     ap.add_argument("--slice-axis", type=int, default=0, help="Axis for NIfTI slicing (0: Sagittal/Axial depending on orient, etc.)")
@@ -3332,6 +3336,40 @@ def main_sample(argv=None):
             print(f"[info] ANTs 3D resample by voxel size -> {target_size}")
             x = resample_with_ants_size_3d(x, target_size=target_size, native_spacing=native_spacing)
 
+        
+        # --- NOUVEAU BLOC : Sauvegarde des Volumes 3D (NIfTI) ---
+        if args.save_volumes_dir:
+            import ants
+            import os
+            vol_out_dir = Path(args.save_volumes_dir)
+            if not vol_out_dir.is_absolute():
+                vol_out_dir = out_dir / vol_out_dir
+            vol_out_dir.mkdir(parents=True, exist_ok=True)
+            
+            print(f"[info] Saving {total} generated 3D volumes to {vol_out_dir} ...")
+            # x a la forme (Batch, Channels, H, W, D)
+            for i in range(total):
+                # Extraction du volume individuel. On prend le premier canal [i, 0]
+                vol_tensor = x[i, 0].cpu().numpy()
+                
+                # Création de l'image ANTs
+                ants_img = ants.from_numpy(vol_tensor)
+                
+                # Application de l'espacement physique correct (natif ou redimensionné)
+                if args.resample_spacing is not None:
+                    ants_img.set_spacing((float(args.resample_spacing[0]), float(args.resample_spacing[1]), float(args.resample_spacing[2])))
+                else:
+                    ants_img.set_spacing(native_spacing)
+                
+                # Nommage du fichier
+                it = blob.get("iter", None)
+                it_str = (f"_it{int(it)-1:06d}" if isinstance(it, int) and it > 0 else "")
+                vol_name = f"sample{it_str}_view{int(args.view_index)}_{args.sampling_strategy}_idx{i:03d}.nii.gz"
+                
+                ants.image_write(ants_img, str(vol_out_dir / vol_name))
+            print(f"[ok] Volumes saved successfully.")
+        # --------------------------------------------------------
+
         # Extraction de la coupe 2D cible
         from torchvision.utils import save_image  # <-- Import direct de la fonction officielle
 
@@ -3383,7 +3421,7 @@ def main_sample(argv=None):
             "slice_axis": int(args.slice_axis),
             "slice_index": int(args.slice_index),
             "sample_grid_size": [int(M), int(N)],
-            "ckpt_native_shape_3d": [int(Dc), int(Hc), int(Wc)],
+            "ckpt_native_shape_3d": [int(Hc), int(Wc), int(Dc)],
             "seed": int(args.seed),
             "out": str(out_path),
             "native_spacing_3d": list(native_spacing),
