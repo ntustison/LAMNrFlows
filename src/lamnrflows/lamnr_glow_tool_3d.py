@@ -3213,7 +3213,7 @@ def main_sample(argv=None):
             for pth in tqdm(support_paths, desc="Encoding Volumes", unit="scan"):
                 try:
                     # Lecture et redimensionnement à la volée (comme dans votre bloc gauss-fit)
-                    xi = _read_image_3d(pth, target_hwd=(Hc, Wc, Dc), mask_background=True) 
+                    xi = _read_image_3d(pth, target_hwd=(Hc, Wc, Dc), mask_background=False) 
                     xb = xi.unsqueeze(0).to(device=device, dtype=torch.float32) # (1, C, H, W, D)
                 except Exception as e:
                     print(f"\n[warn] Failed to read/interpolate {pth}: {e}")

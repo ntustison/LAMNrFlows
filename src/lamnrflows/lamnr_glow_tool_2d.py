@@ -1288,7 +1288,6 @@ def main_sample(argv=None):
         print(f"[ok] recon panel saved: {recon_out}")
 
     # Section Échantillonnage (Mise à jour avec enveloppe convexe typique)
-# Section Échantillonnage (Mise à jour avec enveloppe convexe typique)
     if args.sample_grid_size is not None:
         M, N = args.sample_grid_size
         total = int(M) * int(N)
@@ -1479,7 +1478,7 @@ def main_sample(argv=None):
             print(f"[ok] wrote: {out_path.with_suffix('.json')}")
         except Exception as e:
             print(f"[warn] could not write metadata json: {e}")
-            
+
 
 def main_recon(argv=None):
     ap = argparse.ArgumentParser("LAM‑Flow reconstruction tool (recon)")
