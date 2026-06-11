@@ -429,7 +429,7 @@ def save_grid(x: torch.Tensor, out_path: Path | str, nrow: int, slice_axis: int 
     
     tv.utils.save_image(x_2d, str(out_path), nrow=int(nrow))
 
-def _read_image_3d(path: Path, target_hwd: tuple[int, int, int]) -> torch.Tensor:
+def _read_image_3d(path: Path, target_hwd: tuple[int, int, int], mask_background: bool = False) -> torch.Tensor:
     import ants
     path = Path(path)
     if not path.exists(): raise FileNotFoundError(f"{path}")
@@ -448,7 +448,8 @@ def _read_image_3d(path: Path, target_hwd: tuple[int, int, int]) -> torch.Tensor
     img = ants.resample_image(img, spacing, use_voxels=False, interp_type=0)
     img = ants.pad_or_crop_image_to_size(img, (H, W, D))
     
-    img = img * ants.get_mask(img) 
+    if mask_background:
+        img = img * ants.get_mask(img) 
     
     arr = img.numpy()
     if arr.ndim == 3: 
@@ -3212,7 +3213,7 @@ def main_sample(argv=None):
             for pth in tqdm(support_paths, desc="Encoding Volumes", unit="scan"):
                 try:
                     # Lecture et redimensionnement à la volée (comme dans votre bloc gauss-fit)
-                    xi = _read_image_3d(pth, target_hwd=(Hc, Wc, Dc)) 
+                    xi = _read_image_3d(pth, target_hwd=(Hc, Wc, Dc), mask_background=True) 
                     xb = xi.unsqueeze(0).to(device=device, dtype=torch.float32) # (1, C, H, W, D)
                 except Exception as e:
                     print(f"\n[warn] Failed to read/interpolate {pth}: {e}")
