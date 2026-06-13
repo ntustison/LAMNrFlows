@@ -55,9 +55,9 @@ p1_a <- ggplot(base_data, aes(x = z, y = density)) +
 
 # set.seed()
 if( view == 1 ) {
-  samples <- c(rnorm(250, mean = -1.5, sd = 0.3), 
-               rnorm(150, mean = 0.2, sd = 0.4),
-               rnorm(100, mean = 1.2, sd = 0.1))
+  samples <- c(rnorm(225, mean = -3.5, sd = 0.1), 
+               rnorm(120, mean = 1.2, sd = 0.3),
+               rnorm(80, mean = -1.2, sd = 0.2))
 } else if( view == 2 ) {              
   samples <- c(rnorm(250, mean = -0.5, sd = 0.2), 
                rnorm(100, mean = 0.75, sd = 0.2))
@@ -81,7 +81,7 @@ p2_a <- ggplot(complex_samples, aes(x = x)) +
     panel.background = element_rect(fill = "transparent", colour = NA))
 
 row_1 <- p2_a + p1_a + 
-  plot_annotation(title = paste( "View", view ),
+  plot_annotation(title = "",
                   theme = theme(plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
                   plot.background = element_rect(fill = "transparent", colour = NA),
                   panel.background = element_rect(fill = "transparent", colour = NA)))
@@ -106,10 +106,10 @@ blocks_data <- rbind(
 labels_data <- data.frame(
   x = c(2, 6, 10, 14),
   y = c(0, 0, 0, 0),
-  label = c(paste0( "$T_1^{(", view, ")}$" ), 
-            paste0( "$T_2^{(", view, ")}$" ),
+  label = c(paste0( "$T_1$" ), 
+            paste0( "$T_2$" ),
             "$\\dots$",  
-            paste0( "$T_n^{(", view, ")}$" )))
+            paste0( "$T_n$" )))
 
 
 arrows_fwd <- data.frame(
@@ -129,7 +129,7 @@ arrows_bwd <- data.frame(
 io_data <- data.frame(
   x = c(-1, 17.0),
   y = c(0, 0),
-  label = c(paste0( "$x^{(", view, ")}$" ), paste0( "$z^{(", view, " )}$" ))
+  label = c(paste0( "$x$" ), paste0( "$z$" ))
 )
 
 row_2 <- ggplot() +
@@ -143,7 +143,7 @@ row_2 <- ggplot() +
   geom_segment(data = arrows_bwd, aes(x = x, y = y, xend = xend, yend = yend),
                arrow = arrow(length = unit(0.25, "cm"), type = "closed"), 
                linewidth = 0.8, color = p1a_color) +
-  annotate("text", x = 8, y = 2.25, label = paste0( "$f^{(", view, ")}_{\\theta} : \\mathcal{X}^{(", view, ")} \\to \\mathcal{Z}^{(", view, ")}$" ), size = 8) +
+  annotate("text", x = 8, y = 2.25, label = paste0( "$f_{\\theta} : \\mathcal{X} \\to \\mathcal{Z}$" ), size = 8) +
   annotate("text", x = 8, y = 4.0, label = "$\\Longrightarrow$", size = 17, color="black") +
   coord_fixed(ratio = 1, xlim = c(-1, 17), ylim = c(-2.2, 1.3), clip = "off") +
   theme_void() +
@@ -175,7 +175,7 @@ combined_final <- wrap_elements(row_1) / wrap_elements(row_2_resized) +
 
 # Génération PDF
 
-tex_file <- paste0( "normflows_single_view", view, ".tex" )
+tex_file <- paste0( "normflows_single_view.tex" )
 
 tikz(tex_file, width = 10, height = 6, standAlone = TRUE, bg = "transparent" )
 print(combined_final)

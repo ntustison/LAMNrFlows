@@ -2,5 +2,10 @@
 
 stitched.md
 stitched.tex
+stitched.aux
+stitched.fdb_latexmk
+stitched.fls
+stitched.log
+stitched.synctex.gz
 .RData
 .Rhistory
