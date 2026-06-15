@@ -1128,7 +1128,7 @@ def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch
         train_ds = PNGMultiViewDataset(
             images_list=images_train,
             target_size=(H, W),
-            do_aug=True
+            do_aug=False
         )
         # L'attribut global_step_ref peut toujours être attaché dynamiquement
         train_ds.global_step_ref = global_step
