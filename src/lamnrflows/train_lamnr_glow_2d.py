@@ -929,7 +929,7 @@ class PNGMultiViewDataset(Dataset):
         stacked_views = torch.stack(tensors)
         
         if self.do_aug:
-            stacked_views = self.spatial_transforms(stacked_views)
+            # stacked_views = self.spatial_transforms(stacked_views)
             
             # Réplique de additivegaussian noise (indépendant par canal/vue)
             noise = torch.randn_like(stacked_views) * 0.05
@@ -1128,7 +1128,7 @@ def build_loaders_from_globs(view_specs, H, W, train_samples, val_samples, batch
         train_ds = PNGMultiViewDataset(
             images_list=images_train,
             target_size=(H, W),
-            do_aug=False
+            do_aug=True
         )
         # L'attribut global_step_ref peut toujours être attaché dynamiquement
         train_ds.global_step_ref = global_step
@@ -1467,6 +1467,11 @@ def main():
     input_shape = (C, args.H, args.W)
     n_dims = int(np.prod(input_shape))
     print(f"[info] Modèle instancié avec {C} canal/canaux.")
+
+    # Attachement explicite au namespace args pour garantir la sauvegarde
+    args.C = C
+    args.channels = C
+    args.input_shape = input_shape
 
     input_data_sampled = False
 

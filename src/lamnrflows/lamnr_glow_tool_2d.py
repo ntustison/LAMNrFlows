@@ -497,7 +497,7 @@ import torch.nn.functional as F
 
 def _read_image_any(path: Path, slice_axis: int, slice_index: int, target_hw: Optional[Tuple[int, int]] = None, mask_background: bool=False) -> torch.Tensor:
     """
-    Read a 2D image from disk and return a tensor (1,H,W) in float32.
+    Read a 2D image from disk and return a tensor (3, H, W) in float32 for RGB histology.
     """
     path = Path(path)
     ext = path.suffix.lower()
@@ -539,38 +539,46 @@ def _read_image_any(path: Path, slice_axis: int, slice_index: int, target_hw: Op
             img2d = ants.resample_image(img2d, spacing, use_voxels=False, interp_type=0)
             img2d = ants.pad_or_crop_image_to_size(img2d, (H, W))
 
-        # --- 3. Conversion en Tenseur ---
+        # --- 3. Conversion en Tenseur (Compatible RGB/Multi-composantes) ---
         arr = img2d.numpy()
-        if arr.ndim > 2:
-            arr = np.squeeze(arr)
+        
+        if img2d.components > 1 or (arr.ndim == 3 and arr.shape[-1] in [3, 4]):
+            # Cas NIfTI RGB (ex: (H, W, 3))
+            if arr.shape[-1] == 4:
+                arr = arr[..., :3]  # Ignorer le canal alpha si présent
+            t = torch.from_numpy(arr).permute(2, 0, 1).float() # Transformation en (3, H, W)
+        else:
+            # Cas NIfTI niveaux de gris (on le duplique 3 fois pour correspondre au modèle RGB)
             if arr.ndim > 2:
-                arr = arr[..., 0]
-                
-        t = torch.from_numpy(arr).float()
-        t = t.unsqueeze(0) # (1, H, W)
+                arr = np.squeeze(arr)
+            t = torch.from_numpy(arr).float().unsqueeze(0) # (1, H, W)
+            t = t.repeat(3, 1, 1) # Force (3, H, W)
         
-        # --- 4. Normalisation ---
-        # ATTENTION : Remplacez ceci par la logique exacte de votre Dataset d'entraînement !
-        # Exemple courant en IRM : t = (t - t.mean()) / (t.std() + 1e-8)
-        
+        # Normalisation NIfTI (à vérifier selon votre entraînement)
+        # t = (t - t.mean()) / (t.std() + 1e-8)
         return t
 
     else:
-        # --- Gestion des images 2D standards (PNG/JPG) ---
-        img = Image.open(path).convert("L")
-        arr = torch.from_numpy(np.array(img)).float()
-        t = arr.unsqueeze(0) # (1, H, W)
+        # --- Gestion des images 2D standards (PNG/JPG/TIFF pour l'histologie) ---
         
-        # Redimensionnement PyTorch (car pas de spacing physique)
+        # 1. On force la lecture en RGB (3 canaux) au lieu de "L" (1 canal)
+        img = Image.open(path).convert("RGB")
+        arr = np.array(img) # arr est maintenant de forme (H, W, 3)
+        
+        # 2. PyTorch s'attend à [Canaux, Hauteur, Largeur]. On permute (H,W,C) -> (C,H,W)
+        t = torch.from_numpy(arr).permute(2, 0, 1).float() # (3, H, W)
+        
+        # 3. Redimensionnement PyTorch
         if target_hw is not None:
-            t = t.unsqueeze(0) # (1, 1, H, W) pour F.interpolate
+            t = t.unsqueeze(0) # (1, 3, H, W) pour F.interpolate
             t = F.interpolate(t, size=target_hw, mode='bilinear', align_corners=False)
-            t = t.squeeze(0) # Retour à (1, H, W)
+            t = t.squeeze(0) # Retour à (3, H, W)
             
-        # Normalisation (à adapter selon le trainer)
-        # Exemple classique : t = t / 255.0
-        return t
-    
+        # 4. Normalisation standard (0 à 1) pour les images RGB. 
+        # (Assurez-vous que c'était la même dans votre train_lamnr_glow_2d.py !)
+        t = t / 255.0
+        
+        return t    
 
 def _gather_val_paths(val_list: Optional[list[str]], limit: int) -> list[Path]:
     """
@@ -3291,6 +3299,14 @@ def main_gauss_fit(argv: List[str] | None = None):
             view_name=vname, cfg_views=cfg_views
         )
         if not ok:
+
+            print("\n--- DEBUG MISMATCH ---")
+            t_keys = list(model.state_dict().keys())
+            b_keys = list(state_blob.keys())
+            print(f"L'Outil attend   : '{t_keys[0]}' | shape: {model.state_dict()[t_keys[0]].shape}")
+            print(f"Le Blob contient : '{b_keys[0]}' | shape: {state_blob[b_keys[0]].shape}")
+            print("----------------------\n")
+
             raise RuntimeError(f"Failed to load weights for view {v_idx} ({vname}): {note}")
         else:
             try:
