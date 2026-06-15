@@ -628,7 +628,8 @@ def _gather_val_paths(val_list: Optional[list[str]], limit: int) -> list[Path]:
 def build_model_from_config(cfg: dict, device: torch.device):
     H = int(cfg.get("H", 128))
     W = int(cfg.get("W", 128))
-    input_shape = (1, H, W)
+    C = int(cfg.get("C", 128))
+    input_shape = (C, H, W)
 
     raw_k = cfg.get("K", 32)
     parsed_k = [int(x) for x in raw_k] if isinstance(raw_k, (list, tuple)) else int(raw_k)
@@ -3243,7 +3244,8 @@ def main_gauss_fit(argv: List[str] | None = None):
         ok, note = load_weights_into_model(model, state_blob, view_idx=view_idx, prefer_ema=True)
         if not ok:
             raise RuntimeError(f"load_weights_into_model failed for view {view_idx}: {note}")
-        x0 = torch.zeros(1, 1, int(Hc), int(Wc), device=device, dtype=torch.float32)
+        C = state_blob.get("config", {}).get("C", 1)
+        x0 = torch.zeros(1, C, Hc, Wc, device=device)
         if hasattr(model, "inverse_and_log_det"):
             z, _ = model.inverse_and_log_det(x0)
         elif hasattr(model, "inverse"):
@@ -3503,7 +3505,8 @@ def main_gauss_fit(argv: List[str] | None = None):
         "cov_lam": float(args.cov_lam),
         "jitter": float(args.jitter),
         "views": view_names,
-        "N": int(N),             # <-- now reflects the kept cohort
+        "N": int(N),  
+        "C": int(cfg.get("C", 1)),
         "H": int(Hc),
         "W": int(Wc),
         "L": int(L),
