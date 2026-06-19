@@ -585,8 +585,85 @@ def main():
     ap.add_argument("--save-whitened", default="pca", choices=["pca","full"])
     ap.add_argument("--save-recon", action="store_true", help="Export inverse reconstructions recon_view{i}.csv (observed scale)")
 
+    # ── New-trainer bridge ────────────────────────────────────────────────────
+    # Pass --use-new-trainer to route to TabularLAMNrTrainer (BaseLAMNrTrainer
+    # subclass) instead of the legacy lamnr_flows_whitener() delegation.
+    # All flags below are only used by the new trainer; the legacy path ignores them.
+    ap.add_argument("--use-new-trainer", action="store_true", default=False,
+        help="Route to TabularLAMNrTrainer (BaseLAMNrTrainer subclass) "
+             "instead of the legacy lamnr_flows_whitener() wrapper.")
+    ap.add_argument("--out-dir", type=str, default="runs_tabular",
+        help="[new trainer] Output directory.")
+    ap.add_argument("--align", default="none",
+        choices=["none", "infonce", "barlow", "vicreg", "hsic", "pearson", "mse"],
+        help="[new trainer] Latent alignment objective.")
+    ap.add_argument("--align-weight",  type=float, default=0.05)
+    ap.add_argument("--align-warmup",  type=int,   default=200)
+    ap.add_argument("--proj-dim",      type=int,   default=64)
+    ap.add_argument("--proj-hidden",   type=int,   default=128)
+    ap.add_argument("--weighting",     default="fixed", choices=["fixed", "kendall"])
+    ap.add_argument("--vicreg-inv",    type=float, default=25.0)
+    ap.add_argument("--vicreg-cov",    type=float, default=1.0)
+    ap.add_argument("--vicreg-var",    type=float, nargs="+", default=[25.0])
+    ap.add_argument("--vicreg-gamma",  type=float, nargs="+", default=[1.0])
+    ap.add_argument("--screen",        default="none", choices=["none", "cca", "hsic"])
+    ap.add_argument("--screen-warmup", type=int,   default=500)
+    ap.add_argument("--screen-refresh",type=int,   default=0)
+    ap.add_argument("--screen-frac",   type=float, default=0.5)
+    ap.add_argument("--cca-ridge",     type=float, default=1e-3)
+    ap.add_argument("--prefilter-frac",type=float, default=0.5)
+    ap.add_argument("--eval-interval", type=int,   default=500)
+    ap.add_argument("--grad-accum",    type=int,   default=1)
+    ap.add_argument("--warmup-iters",  type=int,   default=200)
+    ap.add_argument("--lr-decay-gamma",type=float, default=1.0)
+    ap.add_argument("--lr-decay-steps",type=int,   default=0)
+    ap.add_argument("--plateau-factor",type=float, default=0.5)
+    ap.add_argument("--plateau-patience",type=int, default=5)
+    ap.add_argument("--plateau-threshold",type=float, default=1e-4)
+    ap.add_argument("--min-lr",        type=float, default=1e-6)
+    ap.add_argument("--grad-clip",     type=float, default=5.0)
+    ap.add_argument("--smooth-alpha",  type=float, default=0.1)
+    ap.add_argument("--extra-iters",   type=int,   default=0)
+    ap.add_argument("--ema",           action="store_true")
+    ap.add_argument("--ema-decay",     type=float, default=0.9995)
+    ap.add_argument("--auto-resume",   action="store_true")
+    ap.add_argument("--use-ckpt-config",action="store_true")
+    ap.add_argument("--devices",       type=str, default="cpu")
+    ap.add_argument("--normalization", type=str, default="0mean",
+        choices=["0mean", "01", "none"])
+    ap.add_argument("--temperature",   type=float, default=0.1)
+    ap.add_argument("--barlow-lambda", type=float, default=5e-3)
+    ap.add_argument("--hsic-sigma",    type=float, default=0.0)
+    ap.add_argument("--init-logvar-nll",   type=float, default=0.0)
+    ap.add_argument("--init-logvar-align", type=float, default=0.0)
+    ap.add_argument("--num-workers",   type=int,   default=0)
+    # ─────────────────────────────────────────────────────────────────────────
+
     args = ap.parse_args()
     verbose = args.verbose
+
+    # ── New-trainer dispatch (early return) ───────────────────────────────────
+    if args.use_new_trainer:
+        from train_lamnr_flows_tabular_v2 import TabularLAMNrTrainer
+        # Remap legacy arg names to the new trainer's convention
+        args.batch_size   = args.batch_size        # already consistent
+        args.val_fraction = args.val_fraction       # already consistent
+        # --output-prefix → --out-dir (use prefix dir if out_dir not explicitly set)
+        if not args.out_dir or args.out_dir == "runs_tabular":
+            args.out_dir = str(Path(args.output_prefix).parent)
+        # max_iter already set
+        # Unused image-specific attrs that BaseLAMNrTrainer may reference
+        args.H = None; args.W = None; args.D = None
+        args.sample_mode = "off"
+        args.sample_temp = 1.0
+        args.sample_grid_norm = "to01"
+        args.resume = getattr(args, "resume_checkpoint", "") or ""
+        trainer = TabularLAMNrTrainer()
+        trainer.setup(args)
+        trainer.train()
+        return
+    # ─────────────────────────────────────────────────────────────────────────
+
 
     # Parse per-view marginal transform specs, e.g. ['2:rank_gaussian'].
     marginal_transforms = {}
