@@ -939,6 +939,134 @@ class TabularLAMNrTrainer(BaseLAMNrTrainer):
         for vi, m in enumerate(self.models):
             print(f"  view {vi}: D={self._view_dims[vi]}, params={n_params(m):,}")
 
+    # ------------------------------------------------------------------
+    # Export: latents z, whitened ε, reconstructions
+    # ------------------------------------------------------------------
+
+    @torch.no_grad()
+    def export(self) -> None:
+        """
+        Post-training export of per-view latents and/or reconstructions.
+
+        Controlled by args flags:
+          --save-z         : raw flow latents z  → {out_dir}/z_view{i}.csv
+          --save-whitened  : PCA/whitened coords → {out_dir}/whitened_view{i}.csv
+                             (only meaningful with base_distribution='GaussianPCA')
+          --save-recon     : inverse-flow recon  → {out_dir}/recon_view{i}.csv
+                             de-normalized via TabularNormalizer (observed scale)
+
+        All outputs are produced from the full dataset (train + val concatenated)
+        in inference mode (no dropout, no jitter).
+        Uses EMA models when available, otherwise base models.
+        """
+        args = self.args
+        do_z      = getattr(args, "save_z",       False)
+        do_wh     = getattr(args, "save_whitened", False)
+        do_recon  = getattr(args, "save_recon",   False)
+
+        if not (do_z or do_wh or do_recon):
+            return
+
+        print("[export] Running post-training export...")
+        dev     = self.dev
+        models  = self.ema_models if self.ema_models else self.models
+        n_views = len(models)
+
+        for m in models:
+            m.eval()
+
+        # Build a full (train+val) inference dataset — no jitter, no shuffle
+        # We reload the original CSVs so no rows are excluded.
+        raw_dfs = _load_views(args.views)
+        infer_ds = CSVMultiViewDataset(
+            raw_dfs, self.normalizers, noise_std=0.0
+        )
+        infer_loader = DataLoader(
+            infer_ds,
+            batch_size=min(2048, max(args.batch_size, 256)),
+            shuffle=False,
+            num_workers=int(getattr(args, "num_workers", 0)),
+            collate_fn=_tabular_collate,
+        )
+
+        # Accumulators
+        z_acc:    List[List[np.ndarray]] = [[] for _ in range(n_views)]
+        wh_acc:   List[List[np.ndarray]] = [[] for _ in range(n_views)]
+        rec_acc:  List[List[np.ndarray]] = [[] for _ in range(n_views)]
+
+        for batch in tqdm(infer_loader, desc="export", leave=False):
+            for vi, m in enumerate(models):
+                x_v = self.extract_view(batch, vi, dev)   # (B, D) float32
+
+                # Forward: x → z
+                z_v, _ = _inverse_with_guard(m, x_v)      # (B, D)
+
+                if do_z:
+                    z_acc[vi].append(z_v.cpu().float().numpy())
+
+                if do_wh:
+                    wh = _extract_whitened(m, z_v)        # (B, L) or (B, D)
+                    wh_acc[vi].append(wh.cpu().float().numpy())
+
+                if do_recon:
+                    # Inverse flow: z → x_hat (normalized space)
+                    try:
+                        out = m.forward(z_v)
+                        x_hat = out[0] if isinstance(out, (list, tuple)) else out
+                    except Exception:
+                        # fallback: use q0.sample() if forward() not available
+                        x_hat = z_v
+
+                    # De-normalize: bring back to observed scale
+                    x_hat_np = x_hat.cpu().float().numpy()
+                    x_hat_denorm = self.normalizers[vi].inverse_transform(
+                        torch.from_numpy(x_hat_np)
+                    ).numpy()
+                    rec_acc[vi].append(x_hat_denorm)
+
+                del x_v, z_v
+
+            gc.collect()
+
+        # Write CSVs
+        out_dir = self.run_dir
+        for vi in range(n_views):
+            if do_z and z_acc[vi]:
+                arr = np.concatenate(z_acc[vi], axis=0)
+                cols = [f"z{j}" for j in range(arr.shape[1])]
+                pd.DataFrame(arr, columns=cols).to_csv(
+                    out_dir / f"z_view{vi}.csv", index=False
+                )
+                print(f"[export] z_view{vi}.csv  shape={arr.shape}")
+
+            if do_wh and wh_acc[vi]:
+                arr = np.concatenate(wh_acc[vi], axis=0)
+                cols = [f"eps{j}" for j in range(arr.shape[1])]
+                pd.DataFrame(arr, columns=cols).to_csv(
+                    out_dir / f"whitened_view{vi}.csv", index=False
+                )
+                print(f"[export] whitened_view{vi}.csv  shape={arr.shape}")
+
+            if do_recon and rec_acc[vi]:
+                arr = np.concatenate(rec_acc[vi], axis=0)
+                # Reuse original column names from the input CSV
+                orig_cols = list(raw_dfs[vi].columns)
+                if len(orig_cols) == arr.shape[1]:
+                    cols = orig_cols
+                else:
+                    cols = [f"feat{j}" for j in range(arr.shape[1])]
+                pd.DataFrame(arr, columns=cols).to_csv(
+                    out_dir / f"recon_view{vi}.csv", index=False
+                )
+                print(f"[export] recon_view{vi}.csv  shape={arr.shape}")
+
+        print(f"[export] Done. Files written to: {out_dir}")
+
+        # Restore training mode
+        for m in self.models:
+            m.train()
+
+
 
 # ---------------------------------------------------------------------------
 # Collate function — ensures batch is a list of stacked view tensors
@@ -1080,6 +1208,7 @@ def main():
     trainer = TabularLAMNrTrainer()
     trainer.setup(args)
     trainer.train()
+    trainer.export()
 
 
 if __name__ == "__main__":
