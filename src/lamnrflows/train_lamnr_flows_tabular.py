@@ -1,1028 +1,1214 @@
-#!/usr/bin/env python3
 """
-Train SIMR normalizing-flow whiteners using ANTsTorch and (optionally) export latents/reconstructions.
+train_lamnr_flows_tabular.py
+================================
+TabularLAMNrTrainer — thin subclass of BaseLAMNrTrainer for multi-view
+tabular normalizing-flow whiteners (RealNVP, nn.Linear-based).
 
-Patched to work with dataset-owned normalization & the new apply() API.
-- Adds CLI flags to control dataset normalization/jitter.
-- Saves/loads per-view normalization stats ("dataset_normalizers").
-- Backward compatible with older antstorch apply() that expects "use_training_standardization".
+Key differences vs. the Glow 2D/3D trainers
+---------------------------------------------
+* Input shape is (D,) — a flat feature vector, no spatial dimensions.
+  ``args.H / args.W / args.D`` are NOT required.
+* Models use ``create_real_nvp_normalizing_flow_model`` (MLP coupling layers)
+  instead of Glow (conv coupling layers).
+* Data comes from CSV files / DataFrames via ``CSVMultiViewDataset``.
+  No ANTsImage objects → no nanobind memory leaks, but gc.collect() is still
+  called at iteration boundaries to release large numpy temporaries.
+* ``TabularNormalizer`` (z-score or min-max) is saved inside the checkpoint
+  blob under ``"dataset_normalizers"`` to guarantee inference reproducibility.
+* No DataParallel: tabular flows are lightweight; ``GlowDataParallel`` and
+  ``GlowStepWrapper`` are NOT used.
+* All tensors passed to models are cast to ``torch.float32`` to avoid the
+  classic ``RuntimeError: expected scalar type Double but found Float`` on
+  GPU/MPS (pandas DataFrames often produce float64 arrays).
 
-Exports (optional via flags):
-  --save-z          : raw flow latents z (one CSV per view)
-  --save-whitened   : PCA-projected / standardized latents (eps) (one CSV per view)
-  --save-recon      : inverse-transformed reconstructions in observed scale (one CSV per view)
+Usage
+-----
+Standalone:
+    python train_lamnr_flows_tabular.py \\
+        --views view0.csv view1.csv \\
+        --out-dir runs_tabular --max-iter 5000 \\
+        --align vicreg --norm 0mean
 
+As a library:
+    from train_lamnr_flows_tabular import TabularLAMNrTrainer
+    trainer = TabularLAMNrTrainer()
+    trainer.setup(args)
+    trainer.train()
 """
+
+from __future__ import annotations
 
 import argparse
-import pandas as pd
-import numpy as np
-import torch
-from pathlib import Path
-import time
-import math
-import inspect
-import warnings
-import os
+import copy
+import gc
 import json
+import math
+from multiprocessing import Value
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
-from antstorch import lamnr_flows_whitener, apply_lamnr_flows_whitener
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset
+from tqdm.auto import tqdm
+
+import antsnormflows as nf
+
+from antstorch.architectures.create_normalizing_flow_model import (
+    create_real_nvp_normalizing_flow_model as create_rnvp,
+)
+from antstorch.utilities.dataframe_dataset import MultiViewDataFrameDataset
+
+from base_trainer import (
+    BaseLAMNrTrainer,
+    bits_per_dim,
+    make_warmup,
+    n_params,
+    set_deterministic,
+    _save_metric_plots,
+)
+from latent_alignment import (
+    LatentAlignmentLossManager,
+    Projector,
+)
 
 
+# ---------------------------------------------------------------------------
+# TabularNormalizer — persistent, checkpoint-safe scaler
+# ---------------------------------------------------------------------------
 
-def _format_seconds(seconds: float) -> str:
+class TabularNormalizer:
     """
-    Pretty-print seconds as Hh Mm Ss.
+    Column-wise normalizer for tabular data.
+
+    Modes
+    -----
+    '0mean' : z-score  (mean=0, std=1 per column, std floor at 1e-8)
+    '01'    : min-max  ([0, 1] per column, range floor at 1e-8)
+    'none'  : identity (no transformation)
+
+    All ``transform()`` outputs are ``torch.float32`` regardless of input dtype.
+    This prevents ``RuntimeError: expected scalar type Double but found Float``
+    on GPU/MPS when pandas produces float64 arrays.
     """
-    seconds = int(max(0, round(seconds)))
-    h, rem = divmod(seconds, 3600)
-    m, s = divmod(rem, 60)
-    parts = []
-    if h:
-        parts.append(f"{h}h")
-    if m or (h and s):
-        parts.append(f"{m}m")
-    parts.append(f"{s}s")
-    return " ".join(parts)
+
+    def __init__(self, mode: str = "0mean"):
+        mode = str(mode).lower()
+        if mode not in ("0mean", "01", "none"):
+            raise ValueError(f"TabularNormalizer mode must be '0mean', '01', or 'none'; got '{mode}'")
+        self.mode    = mode
+        self._mean:  Optional[np.ndarray] = None
+        self._std:   Optional[np.ndarray] = None
+        self._vmin:  Optional[np.ndarray] = None
+        self._vrng:  Optional[np.ndarray] = None
+        self._fitted = False
+
+    # ------------------------------------------------------------------
+    def fit(self, X: np.ndarray) -> "TabularNormalizer":
+        """Fit statistics on the training split (called once, on CPU numpy)."""
+        X = np.asarray(X, dtype=np.float64)
+        # Impute NaN with column mean before computing stats
+        col_means = np.nanmean(X, axis=0)
+        col_means = np.where(np.isfinite(col_means), col_means, 0.0)
+        nan_mask  = ~np.isfinite(X)
+        if nan_mask.any():
+            col_idx = np.where(nan_mask)[1]
+            X[nan_mask] = col_means[col_idx]
+
+        if self.mode == "0mean":
+            self._mean = col_means.astype(np.float32)
+            std        = X.std(axis=0)
+            self._std  = np.where(std > 1e-8, std, 1.0).astype(np.float32)
+        elif self.mode == "01":
+            vmin       = X.min(axis=0)
+            vmax       = X.max(axis=0)
+            rng        = vmax - vmin
+            self._vmin = vmin.astype(np.float32)
+            self._vrng = np.where(rng > 1e-8, rng, 1.0).astype(np.float32)
+
+        self._fitted = True
+        return self
+
+    def transform(self, X: np.ndarray) -> torch.Tensor:
+        """
+        Apply the fitted normalization.
+
+        Returns a ``torch.float32`` tensor — always, regardless of input dtype.
+        """
+        X = np.asarray(X, dtype=np.float64)
+        # Impute NaN
+        if not np.all(np.isfinite(X)):
+            col_means = (
+                self._mean.astype(np.float64)
+                if self._mean is not None
+                else np.zeros(X.shape[1])
+            )
+            nan_mask = ~np.isfinite(X)
+            X[nan_mask] = col_means[np.where(nan_mask)[1]]
+
+        if self.mode == "0mean" and self._fitted:
+            X = (X - self._mean) / self._std
+        elif self.mode == "01" and self._fitted:
+            X = (X - self._vmin) / self._vrng
+            X = np.clip(X, 0.0, 1.0)
+
+        # Explicit float32 cast — critical for GPU/MPS correctness
+        return torch.from_numpy(X.astype(np.float32, copy=False))
+
+    def inverse_transform(self, t: torch.Tensor) -> torch.Tensor:
+        """Invert the normalization (for reconstruction export)."""
+        X = t.detach().cpu().float().numpy()
+        if self.mode == "0mean" and self._fitted:
+            X = X * self._std + self._mean
+        elif self.mode == "01" and self._fitted:
+            X = X * self._vrng + self._vmin
+        return torch.from_numpy(X.astype(np.float32))
+
+    # ------------------------------------------------------------------
+    # Checkpoint serialization
+    # ------------------------------------------------------------------
+
+    def state_dict(self) -> dict:
+        return {
+            "mode":    self.mode,
+            "mean":    self._mean.tolist()  if self._mean  is not None else None,
+            "std":     self._std.tolist()   if self._std   is not None else None,
+            "vmin":    self._vmin.tolist()  if self._vmin  is not None else None,
+            "vrng":    self._vrng.tolist()  if self._vrng  is not None else None,
+            "fitted":  self._fitted,
+        }
+
+    def load_state_dict(self, d: dict) -> None:
+        self.mode    = d["mode"]
+        self._mean   = np.array(d["mean"],  dtype=np.float32) if d["mean"]  else None
+        self._std    = np.array(d["std"],   dtype=np.float32) if d["std"]   else None
+        self._vmin   = np.array(d["vmin"],  dtype=np.float32) if d["vmin"]  else None
+        self._vrng   = np.array(d["vrng"],  dtype=np.float32) if d["vrng"]  else None
+        self._fitted = bool(d.get("fitted", False))
+
+    def __repr__(self) -> str:
+        return (
+            f"TabularNormalizer(mode='{self.mode}', "
+            f"fitted={self._fitted}, "
+            f"D={len(self._mean) if self._mean is not None else 'N/A'})"
+        )
 
 
-def _estimate_seconds_per_iter_tabular(batch_size: int, total_dims: int, K: int) -> float:
+# ---------------------------------------------------------------------------
+# CSVMultiViewDataset — PyTorch Dataset for tabular multi-view data
+# ---------------------------------------------------------------------------
+
+class CSVMultiViewDataset(Dataset):
     """
-    Very rough heuristic for seconds/iteration for tabular flows.
+    Multi-view tabular dataset backed by CSV files or pre-loaded DataFrames.
 
-    Scales with batch_size, total feature dimensionality, and flow depth (K).
-    This is intentionally conservative and only meant to provide an order-of-magnitude ETA.
-    """
-    total_dims = max(1, int(total_dims))
-    batch_size = max(1, int(batch_size))
-    K = max(1, int(K))
-
-    base = 0.002  # baseline overhead
-    dim_term = 1e-5 * batch_size * total_dims
-    depth_term = 5e-4 * (K / 32.0)
-    return base + dim_term + depth_term
-
-
-def _print_screen_dump(args, views):
-    """
-    Print a configuration screen dump similar to the Glow-based trainer.
-    """
-    n_views = len(views)
-    n_samples = len(views[0]) if views else 0
-    dims_per_view = [df.shape[1] for df in views]
-    total_dims = sum(dims_per_view)
-
-    print("\n=== Training configuration (tabular LAMNR flows) ===")
-    print(f"Output prefix     : {args.output_prefix}")
-    print(f"Number of views   : {n_views}")
-    print(f"Samples per view  : {n_samples}")
-    print(f"Dims per view     : {dims_per_view} (total={total_dims})")
-    print(f"Base distribution : {args.base_distribution}")
-    print(f"Flow depth K      : {args.K}")
-    print(f"Scale cap         : {args.scale_cap}")
-    print(f"Penalty type      : {args.penalty_type}")
-    print(f"Tradeoff mode     : {args.tradeoff_mode}")
-    print(f"Lambda penalty    : {args.lambda_penalty}")
-    print(f"Batch size        : {args.batch_size}")
-    print(f"Max iterations    : {args.max_iter}")
-    print(f"Val interval      : {args.val_interval}")
-    print(f"CUDA device       : {args.cuda_device}")
-    print(f"Seed              : {args.seed}")
-    print("\nAll parsed arguments:")
-    for k in sorted(vars(args).keys()):
-        print(f"  {k}: {getattr(args, k)}")
-
-    return n_samples, dims_per_view, total_dims
-
-
-def _standardize_np(X: np.ndarray) -> np.ndarray:
-    """
-    Column-wise standardization with NaN handling: mean 0, std 1.
-    Columns that are all-NaN are dropped.
-    """
-    X = np.asarray(X, dtype=float)
-    # Impute NaNs with column means
-    col_means = np.nanmean(X, axis=0)
-    # Identify all-NaN columns (nanmean -> nan)
-    valid = np.isfinite(col_means)
-    if not np.all(valid):
-        X = X[:, valid]
-        col_means = col_means[valid]
-    # Impute remaining NaNs
-    inds = np.where(np.isnan(X))
-    if inds[0].size > 0:
-        X[inds] = np.take(col_means, inds[1])
-    # Standardize
-    mean = X.mean(axis=0, keepdims=True)
-    std = X.std(axis=0, keepdims=True)
-    std[std < 1e-8] = 1.0
-    X = (X - mean) / std
-    return X
-
-
-def _rbf_gram(X: np.ndarray, sigma: float | None = None) -> np.ndarray:
-    """
-    RBF kernel Gram matrix with optional median heuristic for sigma.
-    """
-    X = np.asarray(X, dtype=float)
-    sq_norms = np.sum(X * X, axis=1, keepdims=True)
-    dist2 = sq_norms + sq_norms.T - 2.0 * (X @ X.T)
-    # Numerical safety
-    np.maximum(dist2, 0.0, out=dist2)
-
-    if sigma is None or sigma <= 0.0:
-        # Median heuristic on upper triangle
-        triu = dist2[np.triu_indices_from(dist2, k=1)]
-        triu = triu[np.isfinite(triu) & (triu > 0)]
-        if triu.size == 0:
-            sigma = 1.0
-        else:
-            med = np.median(triu)
-            sigma = math.sqrt(0.5 * med) if med > 0 else 1.0
-
-    K = np.exp(-dist2 / (2.0 * sigma * sigma))
-    return K
-
-
-def _center_gram(K: np.ndarray) -> np.ndarray:
-    """
-    Double-center a Gram matrix.
-    """
-    n = K.shape[0]
-    H = np.eye(n) - np.ones((n, n)) / float(n)
-    return H @ K @ H
-
-
-def _hsic_value(X: np.ndarray, Y: np.ndarray, sigma: float | None = None) -> float:
-    """
-    Unnormalized HSIC estimator with RBF kernels.
-    """
-    n = X.shape[0]
-    if n < 3:
-        return 0.0
-    K = _rbf_gram(X, sigma=sigma)
-    L = _rbf_gram(Y, sigma=sigma)
-    Kc = _center_gram(K)
-    Lc = _center_gram(L)
-    # Biased estimator is fine for screening
-    hsic = np.trace(Kc @ Lc) / ((n - 1.0) ** 2)
-    return float(max(hsic, 0.0))
-
-
-def _hsic_normalized(X: np.ndarray, Y: np.ndarray, sigma: float | None = None) -> float:
-    """
-    Normalized HSIC in [0, 1] via HSIC(X,Y) / sqrt(HSIC(X,X) * HSIC(Y,Y)).
-    """
-    h_xy = _hsic_value(X, Y, sigma=sigma)
-    if h_xy <= 0.0:
-        return 0.0
-    h_xx = _hsic_value(X, X, sigma=sigma)
-    h_yy = _hsic_value(Y, Y, sigma=sigma)
-    denom = math.sqrt(max(h_xx, 1e-12) * max(h_yy, 1e-12))
-    val = h_xy / denom if denom > 0 else 0.0
-    return float(max(min(val, 1.0), 0.0))
-
-
-def _cca_max_corr(X: np.ndarray, Y: np.ndarray, reg: float = 1e-4) -> float:
-    """
-    Max canonical correlation between standardized X and Y via eigendecomposition.
-
-    X, Y: shape [n, d1], [n, d2].
-    """
-    X = np.asarray(X, dtype=float)
-    Y = np.asarray(Y, dtype=float)
-    n = X.shape[0]
-    if n < 3:
-        return 0.0
-
-    # Covariance matrices
-    Cxx = (X.T @ X) / (n - 1.0)
-    Cyy = (Y.T @ Y) / (n - 1.0)
-    Cxy = (X.T @ Y) / (n - 1.0)
-
-    # Regularization
-    d1 = Cxx.shape[0]
-    d2 = Cyy.shape[0]
-    Cxx = Cxx + reg * np.eye(d1)
-    Cyy = Cyy + reg * np.eye(d2)
-
-    # Inverse square roots via eigen-decomposition
-    ex, Ux = np.linalg.eigh(Cxx)
-    ey, Uy = np.linalg.eigh(Cyy)
-    ex[ex < 1e-12] = 1e-12
-    ey[ey < 1e-12] = 1e-12
-    Cxx_inv_sqrt = (Ux / np.sqrt(ex)) @ Ux.T
-    Cyy_inv_sqrt = (Uy / np.sqrt(ey)) @ Uy.T
-
-    T = Cxx_inv_sqrt @ Cxy @ Cyy_inv_sqrt
-    # Singular values of T are canonical correlations
-    u, s, v = np.linalg.svd(T, full_matrices=False)
-    if s.size == 0:
-        return 0.0
-    val = float(np.max(s))
-    # Numerical clipping
-    return float(max(min(val, 1.0), 0.0))
-
-
-def _screen_views_for_alignment(args, views, verbose: bool = False):
-    """
-    Optional pre-training dependence screening using HSIC or CCA.
-
-    If the average pairwise dependence across views is below args.screening_threshold,
-    this function sets args.penalty_type = "none" (disabling latent alignment).
-    """
-    mode = getattr(args, "screening_mode", "none")
-    if mode == "none":
-        return
-    if args.penalty_type == "none":
-        return
-    if len(views) < 2:
-        return
-
-    n = len(views[0])
-    if n < 3:
-        return
-
-    frac = float(getattr(args, "screening_fraction", 0.2))
-    frac = min(max(frac, 0.0), 1.0)
-    max_samples = int(getattr(args, "screening_max_samples", 5000))
-    thresh = float(getattr(args, "screening_threshold", 0.1))
-
-    n_sample = max(10, min(n, max_samples, int(round(frac * n)) if frac > 0 else n))
-    idx = np.random.choice(n, size=n_sample, replace=False)
-
-    labels = [Path(p).stem for p in args.views]
-    Xs = []
-    for v in views:
-        X = v.values
-        X = X[idx, :]
-        X = _standardize_np(X)
-        Xs.append(X)
-
-    scores = []
-    pair_labels = []
-    for i in range(len(Xs)):
-        for j in range(i + 1, len(Xs)):
-            Xi = Xs[i]
-            Xj = Xs[j]
-            if Xi.shape[0] < 3 or Xj.shape[0] < 3:
-                s = 0.0
-            else:
-                if mode == "hsic":
-                    s = _hsic_normalized(Xi, Xj, sigma=None)
-                elif mode == "cca":
-                    s = _cca_max_corr(Xi, Xj)
-                else:
-                    return  # unknown mode, silently skip
-            scores.append(s)
-            pair_labels.append(f"{labels[i]} vs {labels[j]}")
-
-    if not scores:
-        return
-
-    scores = np.asarray(scores, dtype=float)
-    mean_score = float(scores.mean())
-
-    if verbose:
-        print(f"=== Screening cross-view dependence (mode={mode}) ===")
-        print(f"Using {n_sample} subjects (out of {n}) for screening.")
-        for lbl, s in zip(pair_labels, scores):
-            print(f"  {lbl}: {s:.4f}")
-        print(f"  Average score: {mean_score:.4f}")
-        print(f"  Threshold    : {thresh:.4f}")
-
-    if mean_score < thresh:
-        if verbose:
-            print("  -> Average dependence below threshold; disabling alignment penalty (penalty_type='none').")
-        args.penalty_type = "none"
-    else:
-        if verbose:
-            print("  -> Dependence above threshold; keeping alignment penalty.")
-
-def _rank_gaussianize_series(col: pd.Series) -> pd.Series:
-    """Rank-based Gaussianization: map empirical CDF to N(0,1).
-
-    NaNs are left as NaN. Uses torch.erfinv to avoid a SciPy dependency.
-    """
-    mask = col.notna().values
-    if not mask.any():
-        return col
-    x = col.values[mask].astype(float)
-
-    # ranks: 1..m
-    order = np.argsort(x)
-    ranks = np.empty_like(order, dtype=float)
-    ranks[order] = np.arange(1, len(x) + 1, dtype=float)
-
-    m = float(len(x))
-    # Convert ranks to uniform in (0,1), then to Gaussian via erfinv
-    u = (ranks - 0.5) / m
-    u = np.clip(u, 1e-6, 1.0 - 1e-6)
-    u_t = torch.from_numpy(u)
-    z_t = torch.erfinv(2.0 * u_t - 1.0) * math.sqrt(2.0)
-    z = z_t.numpy()
-
-    out = col.copy()
-    out.values[mask] = z
-    return out
-
-
-def _apply_marginal_transform(df: pd.DataFrame, kind: str) -> pd.DataFrame:
-    """Apply a per-feature marginal transform to all numeric columns of a view.
-
-    Supported kinds:
-      - 'asinh'          : elementwise arcsinh(x)
-      - 'rank_gaussian'  : rank-based Gaussianization
-      - 'none' / '' / None: no-op
-    """
-    if kind is None:
-        return df
-    kind = str(kind).lower()
-    if kind in ["none", "", "null"]:
-        return df
-
-    if kind == "asinh":
-        return df.apply(lambda s: np.arcsinh(s))
-    elif kind == "rank_gaussian":
-        return df.apply(_rank_gaussianize_series)
-    else:
-        raise ValueError(f"Unknown marginal transform kind: {kind}")
-
-
-def load_views(view_paths, marginal_transforms=None):
-    """Load CSV views and optionally apply per-view marginal transforms.
+    Returns a list of per-view ``torch.float32`` tensors (one per view).
+    The ``TabularNormalizer`` is fit on the data passed to the constructor
+    and applied in ``__getitem__``.
 
     Parameters
     ----------
-    view_paths : list[str]
-        CSV paths for each view.
-    marginal_transforms : dict[int,str] or None
-        Optional mapping from view index (0-based) to a marginal transform
-        kind ('asinh', 'rank_gaussian', 'none').
+    dfs       : list of pd.DataFrame — one per view, same row count.
+    normalizers : list of TabularNormalizer — already fitted on train split.
+    noise_std : float — additive Gaussian jitter in normalized space (0 = off).
     """
-    views = []
-    for i, p in enumerate(view_paths):
+
+    def __init__(
+        self,
+        dfs:         List[pd.DataFrame],
+        normalizers: List[TabularNormalizer],
+        noise_std:   float = 0.0,
+    ):
+        if len(dfs) != len(normalizers):
+            raise ValueError("dfs and normalizers must have the same length.")
+        n_rows = {len(df) for df in dfs}
+        if len(n_rows) != 1:
+            raise ValueError(f"All views must have equal row counts; got {n_rows}.")
+
+        # Store raw numpy arrays to avoid DataFrame overhead in __getitem__
+        self._arrays = [df.to_numpy(dtype=np.float64) for df in dfs]
+        self.normalizers = normalizers
+        self.noise_std   = float(noise_std)
+        self._n          = len(dfs[0])
+
+    def __len__(self) -> int:
+        return self._n
+
+    def __getitem__(self, idx: int) -> List[torch.Tensor]:
+        out = []
+        for arr, norm in zip(self._arrays, self.normalizers):
+            row = arr[idx : idx + 1]      # shape (1, D) — 2-D for transform()
+            t   = norm.transform(row)     # always float32
+            t   = t.squeeze(0)            # → (D,)
+            if self.noise_std > 0.0:
+                t = t + torch.randn_like(t) * self.noise_std
+            out.append(t)
+        return out
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _load_views(view_paths: List[str]) -> List[pd.DataFrame]:
+    """Load CSV views, coercing all columns to numeric (non-numeric → NaN)."""
+    dfs = []
+    for p in view_paths:
         df = pd.read_csv(p)
-        # Force numeric; non-numeric will become NaN → trainer/dataset handles imputation/normalization
         df = df.apply(pd.to_numeric, errors="coerce")
-
-        if marginal_transforms is not None and i in marginal_transforms:
-            df = _apply_marginal_transform(df, marginal_transforms[i])
-
-        views.append(df)
-    # Basic shape check
-    nset = {len(df) for df in views}
-    if len(nset) != 1:
-        raise ValueError(f"All views must have equal row counts; got {nset}")
-    return views
+        dfs.append(df)
+    n_rows = {len(df) for df in dfs}
+    if len(n_rows) != 1:
+        raise ValueError(f"All CSV views must have the same number of rows; got {n_rows}")
+    return dfs
 
 
-def save_views(dfs, base_prefix: Path, tag: str):
-    paths = []
-    for i, df in enumerate(dfs):
-        out = Path(f"{base_prefix}_{tag}_view{i}.csv")
-        df.to_csv(out, index=False)
-        paths.append(str(out))
-    return paths
+def _build_base_distribution(
+    D: int,
+    base: str = "GaussianPCA",
+    pca_latent_dim: int = 4,
+    base_min_log: float = -5.0,
+    base_max_log: float = 5.0,
+    base_sigma: float = 0.1,
+) -> nn.Module:
+    b = base.lower()
+    if b in ("gaussianpca", "pca"):
+        return nf.distributions.GaussianPCA(
+            D, latent_dim=int(pca_latent_dim), sigma=base_sigma
+        )
+    elif b in ("diag", "diaggaussian"):
+        try:
+            return nf.distributions.DiagGaussian(
+                D, trainable=True, min_log=base_min_log, max_log=base_max_log
+            )
+        except TypeError:
+            return nf.distributions.DiagGaussian(D, trainable=True)
+    else:
+        raise ValueError(f"Unknown base distribution: '{base}'")
+
+
+def _inverse_with_guard(
+    model: nn.Module, xb: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Run model.inverse() handling various output shapes."""
+    out = model.inverse(xb)
+    if isinstance(out, (list, tuple)):
+        z, log_det = out[0], out[1]
+    else:
+        z       = out
+        log_det = torch.zeros(z.size(0), device=z.device, dtype=z.dtype)
+    return z, log_det
+
+
+def _extract_whitened(model: nn.Module, z: torch.Tensor) -> torch.Tensor:
+    """Extract whitened / PCA-projected latents from base distribution."""
+    q0 = model.q0
+    if hasattr(q0, "W") and hasattr(q0, "loc"):
+        W, loc = q0.W, q0.loc
+        if isinstance(loc, torch.Tensor) and loc.dim() == 2:
+            loc = loc.squeeze(0)
+        return torch.matmul(z - loc, W.T).to(z.dtype)
+    loc   = getattr(q0, "loc",   None)
+    scale = getattr(q0, "scale", None)
+    if isinstance(loc, torch.Tensor) and isinstance(scale, torch.Tensor):
+        if loc.dim()   == 2: loc   = loc.squeeze(0)
+        if scale.dim() == 2: scale = scale.squeeze(0)
+        return ((z - loc) / (scale + 1e-12)).to(z.dtype)
+    return z.to(z.dtype)
+
+
+# ---------------------------------------------------------------------------
+# TabularLAMNrTrainer
+# ---------------------------------------------------------------------------
+
+class TabularLAMNrTrainer(BaseLAMNrTrainer):
+    """
+    Tabular flow trainer as a subclass of BaseLAMNrTrainer.
+
+    Overrides
+    ---------
+    build_models   → create_real_nvp_normalizing_flow_model (MLP coupling layers)
+    build_loaders  → CSVMultiViewDataset backed DataLoaders (no ANTsImage)
+    extract_view   → returns tensor[vi] from list-batch, cast to float32
+    save_checkpoint → adds "dataset_normalizers" key to checkpoint blob
+    train()        → tabular-specific loop (NLL + alignment, no spatial dims)
+
+    float32 safety
+    --------------
+    Both CSVMultiViewDataset.normalizers.transform() and extract_view() guarantee
+    float32 output.  The explicit .to(dtype=torch.float32) call in extract_view()
+    is a belt-and-suspenders guard against upstream dtype surprises.
+
+    Spatial dimensions
+    ------------------
+    args.H / args.W / args.D are NOT used and are never required.
+    input_shape = (D_view,) — a flat vector of feature dimension D_view.
+    BaseLAMNrTrainer._check_hw_divisible() is NOT called.
+    """
+
+    # ------------------------------------------------------------------
+    # Abstract interface
+    # ------------------------------------------------------------------
+
+    def build_models(self, args) -> List[nn.Module]:
+        dev     = self.dev
+        models  = []
+        for vi, D in enumerate(self._view_dims):
+            q0 = _build_base_distribution(
+                D               = D,
+                base            = args.base_distribution,
+                pca_latent_dim  = args.pca_latent_dimension,
+                base_min_log    = args.base_min_log,
+                base_max_log    = args.base_max_log,
+                base_sigma      = args.base_sigma,
+            )
+            m = create_rnvp(
+                latent_size              = D,
+                K                        = args.K,
+                q0                       = q0,
+                leaky_relu_negative_slope= args.leaky_relu_negative_slope,
+                mlp_width                = args.hidden_channels,
+                scale_cap                = args.scale_cap,
+                spectral_norm_scales     = args.spectral_norm_scales,
+                additive_first_n         = args.additive_first_n,
+                actnorm_every            = args.actnorm_every,
+                mask_mode                = args.mask_mode,
+            ).to(device=dev, dtype=torch.float32)
+            m.train()
+            print(
+                f"[init] view {vi}: D={D}, params={n_params(m):,}, "
+                f"base={args.base_distribution}"
+            )
+            models.append(m)
+        return models
+
+    def build_loaders(self, args):
+        """
+        Load CSV views → fit TabularNormalizer on train split →
+        build CSVMultiViewDataset → DataLoader.
+
+        Sets self._view_dims and self.normalizers for use by build_models()
+        and save_checkpoint().
+        """
+        rng   = np.random.default_rng(args.seed)
+        dfs   = _load_views(args.views)
+        N     = len(dfs[0])
+        idx   = np.arange(N)
+        rng.shuffle(idx)
+        n_val = min(max(0, int(round(float(args.val_fraction) * N))), N - 1)
+        val_idx   = set(idx[:n_val].tolist())
+        train_idx = [i for i in idx if i not in val_idx]
+        val_idx   = list(val_idx)
+
+        dfs_train = [df.iloc[train_idx].reset_index(drop=True) for df in dfs]
+        dfs_val   = [df.iloc[val_idx].reset_index(drop=True)   for df in dfs]
+
+        # Fit one normalizer per view (on train split only)
+        self.normalizers: List[TabularNormalizer] = []
+        for df_tr in dfs_train:
+            n = TabularNormalizer(mode=args.normalization)
+            n.fit(df_tr.to_numpy(dtype=np.float64))
+            self.normalizers.append(n)
+
+        self._view_dims: List[int] = [df.shape[1] for df in dfs_train]
+
+        # Store as args.input_shape — flat tuple, no spatial dims
+        args.input_shape = tuple(self._view_dims)
+        args.num_views   = len(dfs)
+
+        train_ds = CSVMultiViewDataset(
+            dfs_train, self.normalizers,
+            noise_std=float(getattr(args, "jitter_alpha", 0.0)),
+        )
+        val_ds = CSVMultiViewDataset(
+            dfs_val if dfs_val[0].shape[0] > 0 else dfs_train,
+            self.normalizers,
+            noise_std=0.0,
+        )
+
+        global_step = Value("i", 0)
+
+        if torch.cuda.is_available():
+            pin = True
+        elif torch.backends.mps.is_available():
+            pin = False
+        else:
+            pin = False
+
+        train_loader = DataLoader(
+            train_ds, batch_size=args.batch_size, shuffle=True,
+            num_workers=int(getattr(args, "num_workers", 0)),
+            pin_memory=pin, collate_fn=_tabular_collate,
+        )
+        val_loader = DataLoader(
+            val_ds,
+            batch_size=min(2048, max(args.batch_size, 256)),
+            shuffle=False,
+            num_workers=int(getattr(args, "num_workers", 0)),
+            pin_memory=pin, collate_fn=_tabular_collate,
+        )
+
+        print(
+            f"[data] {len(dfs)} views | "
+            f"train={len(train_ds)} val={len(val_ds)} | "
+            f"dims={self._view_dims}"
+        )
+        return train_loader, val_loader, global_step
+
+    def extract_view(
+        self, batch: object, vi: int, dev: torch.device
+    ) -> torch.Tensor:
+        """
+        Extract view vi from a list-batch and guarantee float32.
+
+        CSVMultiViewDataset already returns float32, but the explicit cast is
+        a safety net against any upstream dtype change (e.g. collate_fn).
+        """
+        if isinstance(batch, (list, tuple)):
+            return batch[vi].to(device=dev, dtype=torch.float32)
+        raise TypeError(f"Unexpected batch type: {type(batch)}")
+
+    # ------------------------------------------------------------------
+    # Checkpoint — add dataset_normalizers key
+    # ------------------------------------------------------------------
+
+    def save_checkpoint(self, it: int) -> None:
+        """
+        Override: inject 'dataset_normalizers' into the blob so that
+        inference code can reproduce the exact same normalization as training.
+        """
+        blob = {
+            "iter":    it + 1,
+            "opt":     self.opt.state_dict(),
+            "warm":    (self.warm.state_dict() if self.warm else None),
+            "models":  [self._strip_dp_prefix(m.state_dict()) for m in self.models],
+            "ema":     (
+                [self._strip_dp_prefix(em.state_dict()) for em in self.ema_models]
+                if self.ema_models else None
+            ),
+            "proj":    (self.projectors.state_dict() if self.projectors else None),
+            "kendall": {
+                "s_nll":   float(self.s_nll.detach().cpu())   if self.s_nll   else None,
+                "s_align": float(self.s_align.detach().cpu()) if self.s_align else None,
+            },
+            "config":  vars(self.args),
+            "scaler":  (
+                self.scaler.state_dict()
+                if self.scaler is not None and self.scaler.is_enabled()
+                else None
+            ),
+            # ── Tabular-specific ──────────────────────────────────────
+            "dataset_normalizers": [n.state_dict() for n in self.normalizers],
+            "view_dims":           list(self._view_dims),
+        }
+        torch.save(blob, self.state_path)
+        iter_path = self.run_dir / f"training_state_it{it:06d}.pt"
+        torch.save(blob, iter_path)
+        self.cleanup_checkpoints()
+        tqdm.write(f"[ckpt] saved {iter_path.name} (normalizers included)")
+
+    def _maybe_resume(self, args) -> int:
+        """Extend parent resume to also reload TabularNormalizer stats."""
+        start_iter = super()._maybe_resume(args)
+
+        # Reload normalizer stats if present in the checkpoint
+        resume_path = None
+        if args.resume:
+            resume_path = Path(args.resume)
+        elif args.auto_resume and self.state_path.exists():
+            resume_path = self.state_path
+
+        if resume_path is not None and resume_path.exists():
+            try:
+                blob = torch.load(resume_path, map_location="cpu", weights_only=False)
+                if "dataset_normalizers" in blob and hasattr(self, "normalizers"):
+                    for norm_obj, d in zip(self.normalizers, blob["dataset_normalizers"]):
+                        norm_obj.load_state_dict(d)
+                    tqdm.write("[resume] TabularNormalizer stats restored from checkpoint.")
+                if "view_dims" in blob:
+                    self._view_dims = list(blob["view_dims"])
+            except Exception as e:
+                tqdm.write(f"[resume] Could not restore normalizers: {e}")
+
+        return start_iter
+
+    @torch.no_grad()
+    def export_tabular_results(self):
+        """
+        Calcule et exporte z, les données blanchies et les reconstructions 
+        au format CSV pour chaque vue à la fin de l'entraînement.
+        """
+        args = self.args
+        if not (args.save-z or args.save_whitened or args.save_recon):
+            return
+
+        print("\n📊 Initialisation de l'exportation des résultats tabulaires...")
+        for model in self.models:
+            model.eval()
+
+        # Dictionnaires pour accumuler les données à travers les batchs
+        accum_z = {vi: [] for vi in range(args.num_views)}
+        accum_whitened = {vi: [] for vi in range(args.num_views)}
+        accum_recon = {vi: [] for vi in range(args.num_views)}
+
+        # Passer sur l'ensemble du train_loader pour collecter les transformations
+        for batch in self.train_loader:
+            # v2 utilise _extract_views_from_batch pour séparer les vues tabulaires
+            xs = [batch[vi].to(device=self.dev, dtype=torch.float32) for vi in range(args.num_views)]
+            
+            for vi in range(args.num_views):
+                model = self.models[vi]
+                x_v = xs[vi]
+
+                # 1. Calcul de z (Latent brut) via la passe inverse du flux
+                z, _ = model.inverse_and_log_det(x_v)
+                if args.save_z:
+                    accum_z[vi].append(z.detach().cpu().numpy())
+
+                # 2. Calcul des latents blanchis (standardisés)
+                if args.save_whitened:
+                    # Récupération du normaliseur sauvegardé dans le v2 pour cette vue
+                    if hasattr(self, "dataset_normalizers") and self.dataset_normalizers[vi] is not None:
+                        # Si votre normaliseur a une fonction spécifique ou VICReg
+                        z_norm = self.dataset_normalizers[vi].normalize(z)
+                    else:
+                        z_norm = (z - z.mean(dim=0)) / (z.std(dim=0) + 1e-6)
+                    accum_whitened[vi].append(z_norm.detach().cpu().numpy())
+
+                # 3. Calcul de la reconstruction (Retour vers l'espace observé)
+                if args.save_recon:
+                    x_rec, _ = model.forward_and_log_det(z)
+                    accum_recon[vi].append(x_rec.detach().cpu().numpy())
+
+        # Sauvegarde effective sur le disque dans le dossier de sortie
+        out_dir = Path(args.out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        for vi in range(args.num_views):
+            view_name = args.view[vi] if hasattr(args, "view") else f"view_{vi}"
+            
+            if args.save_z and len(accum_z[vi]) > 0:
+                full_z = np.concatenate(accum_z[vi], axis=0)
+                df_z = pd.DataFrame(full_z)
+                path_z = out_dir / f"{view_name}_latent_z.csv"
+                df_z.to_csv(path_z, index=False)
+                print(f"  [Export] Coordonnées z sauvées : {path_z}")
+
+            if args.save_whitened and len(accum_whitened[vi]) > 0:
+                full_w = np.concatenate(accum_whitened[vi], axis=0)
+                df_w = pd.DataFrame(full_w)
+                path_w = out_dir / f"{view_name}_whitened_epsilon.csv"
+                df_w.to_csv(path_w, index=False)
+                print(f"  [Export] Données blanchies sauvées : {path_w}")
+
+            if args.save_recon and len(accum_recon[vi]) > 0:
+                full_r = np.concatenate(accum_recon[vi], axis=0)
+                df_r = pd.DataFrame(full_r)
+                path_r = out_dir / f"{view_name}_reconstructed_x.csv"
+                df_r.to_csv(path_r, index=False)
+                print(f"  [Export] Reconstructions sauvées : {path_r}")
+
+    # ------------------------------------------------------------------
+    # Tabular training loop
+    # ------------------------------------------------------------------
+
+    def train(self) -> None:  # noqa: C901
+        """
+        Tabular training loop.
+
+        Differences from BaseLAMNrTrainer.train():
+        - Input tensors are flat (D,) vectors — no spatial pooling.
+        - NLL computed via model.log_prob(x) where x is (B, D) float32.
+        - Latent z extracted via model.inverse() for alignment manager.
+        - No EMA ActNorm warmup (RealNVP actnorm is data-independent).
+        - No input grid saving (no image output).
+        - gc.collect() at every iteration to free large numpy temporaries.
+        """
+        args     = self.args
+        dev      = self.dev
+        models   = self.models
+        n_views  = len(models)
+        alpha    = float(args.smooth_alpha)
+
+        ema_loss_disp    = None
+        ema_bpd_disp: List[Optional[float]] = [None] * n_views
+
+        train_iter = iter(self.train_loader)
+
+        pbar = tqdm(
+            total=args.max_iter,
+            initial=self.start_iter - 1,
+            dynamic_ncols=True,
+            desc="train-tab",
+        )
+
+        for it in range(self.start_iter, args.max_iter + 1):
+            grad_accum = max(1, int(getattr(args, "grad_accum", 1)))
+            self.opt.zero_grad(set_to_none=True)
+
+            loss_acc  = torch.tensor(0.0, device=dev, dtype=torch.float32)
+            align_acc = torch.tensor(0.0, device=dev, dtype=torch.float32)
+            bpd_acc:   List[float] = [0.0] * n_views
+            bad_update = False
+            x_last     = None
+            w_nll, w_align = 1.0, 0.0
+
+            # ── Gradient accumulation micro-steps ──────────────────────
+            for _micro in range(grad_accum):
+                try:
+                    batch = next(train_iter)
+                except StopIteration:
+                    train_iter = iter(self.train_loader)
+                    batch = next(train_iter)
+                    gc.collect()
+
+                x_last = batch
+
+                L_nll      = torch.tensor(0.0, device=dev, dtype=torch.float32)
+                lat_flat:  List[torch.Tensor] = []
+                bad_batch  = False
+
+                for vi, m in enumerate(models):
+                    # ── Strict float32 cast — GPU/MPS safety ─────────
+                    x_v = self.extract_view(batch, vi, dev)   # (B, D) float32
+
+                    logp_v = m.log_prob(x_v)                  # (B,)
+                    if not torch.isfinite(logp_v).all():
+                        tqdm.write(f"[nan] non-finite logp view {vi} @ iter {it}")
+                        bad_batch = True
+                        del x_v, logp_v
+                        gc.collect()
+                        break
+
+                    # NLL as bits-per-dim (D is the feature dimension)
+                    D     = float(x_v.shape[1])
+                    bpd_v = (-logp_v / (math.log(2.0) * D)).mean()
+                    L_nll = L_nll + bpd_v
+                    bpd_acc[vi] += bpd_v.item()
+
+                    # Latent for alignment
+                    z_v, _ = _inverse_with_guard(m, x_v)
+                    # Tabular: z is already flat (B, D) — no pooling needed
+                    lat_flat.append(torch.nan_to_num(z_v.float()))
+
+                    del x_v, z_v, logp_v
+
+                if bad_batch or not torch.isfinite(L_nll) or abs(L_nll.item()) > 1e7:
+                    tqdm.write(f"[anomaly] skipping iter {it}")
+                    bad_update = True
+                    del lat_flat
+                    gc.collect()
+                    break
+
+                # Alignment loss
+                loss_total, L_align, w_nll, w_align = self.align_mgr.compute(
+                    lat_flat=lat_flat,
+                    L_nll=L_nll,
+                    it=it,
+                    s_nll=self.s_nll,
+                    s_align=self.s_align,
+                )
+
+                if not torch.isfinite(loss_total):
+                    tqdm.write(f"[nan] loss_total non-finite @ iter {it}")
+                    bad_update = True
+                    del lat_flat
+                    gc.collect()
+                    break
+
+                (loss_total / float(grad_accum)).backward()
+
+                loss_acc  = loss_acc  + loss_total.detach().float()
+                align_acc = align_acc + L_align.detach().float()
+
+                # ── Strict per-micro-step cleanup ─────────────────────
+                del lat_flat
+                gc.collect()
+                # ─────────────────────────────────────────────────────
+
+            # ── End grad-accum ─────────────────────────────────────────
+
+            if bad_update:
+                self.opt.zero_grad(set_to_none=True)
+                continue
+
+            # Gradient clip + step
+            all_params = [p for g in self.opt.param_groups for p in g["params"]]
+            torch.nn.utils.clip_grad_norm_(
+                all_params, max_norm=float(getattr(args, "grad_clip", 5.0))
+            )
+            self.opt.step()
+
+            # LR warmup
+            if self.warm is not None and it <= args.warmup_iters:
+                self.warm.step()
+
+            with self.global_step.get_lock():
+                self.global_step.value += 1
+
+            lr_now = self.opt.param_groups[0]["lr"]
+
+            # Averaged metrics
+            curr_loss  = float(loss_acc.item()) / float(grad_accum)
+            L_align_log= float(align_acc.item()) / float(grad_accum)
+            curr_bpd   = [b / float(grad_accum) for b in bpd_acc]
+
+            # EMA display
+            if ema_loss_disp is None:
+                ema_loss_disp = curr_loss
+                ema_bpd_disp  = list(curr_bpd)
+            else:
+                a = alpha
+                ema_loss_disp = (1.0 - a) * ema_loss_disp + a * curr_loss
+                for i in range(n_views):
+                    ema_bpd_disp[i] = (1.0 - a) * ema_bpd_disp[i] + a * curr_bpd[i]
+
+            postfix = {
+                "loss":  f"{curr_loss:.4f}",
+                "loss~": f"{ema_loss_disp:.4f}",
+                "align": f"{L_align_log:.4f}",
+                "mode":  args.align,
+                "lr":    f"{lr_now:.2e}",
+            }
+            for i in range(n_views):
+                postfix[f"bpd{i}"] = f"{curr_bpd[i]:.3f}"
+            pbar.set_postfix(postfix)
+            pbar.update(1)
+
+            # CSV row
+            with open(self.csv_path, "a") as f:
+                f.write(f"{it},{curr_loss:.6f},{sum(curr_bpd):.6f},{lr_now:.6g}\n")
+
+            # Eval + checkpoint
+            if it % args.eval_interval == 0:
+                self._run_val_tabular(it)
+                _save_metric_plots(self.csv_path, self.run_dir, remove_spikes=True)
+                self.save_checkpoint(it)
+
+            # ── End-of-iteration cleanup ──────────────────────────────
+            del x_last, batch
+            gc.collect()
+            # ─────────────────────────────────────────────────────────
+
+        pbar.close()
+        print("Done. Run dir:", str(self.run_dir))
+
+    def _run_val_tabular(self, it: int) -> None:
+        """Run one validation pass and update the LR plateau scheduler."""
+        dev    = self.dev
+        models = self.models
+        bpd_vals: List[float] = []
+        with torch.no_grad():
+            for j, batch_val in enumerate(self.val_loader):
+                for vi, m in enumerate(models):
+                    x_v   = self.extract_view(batch_val, vi, dev)  # float32
+                    logp  = m.log_prob(x_v)
+                    logp  = torch.nan_to_num(logp, nan=-1e9, posinf=-1e9, neginf=-1e9)
+                    D     = float(x_v.shape[1])
+                    bpd   = (-logp / (math.log(2.0) * D)).mean().item()
+                    bpd_vals.append(bpd)
+                    del x_v
+                if j >= 9:
+                    break
+        avg_bpd = float(np.mean(bpd_vals)) if bpd_vals else float("nan")
+        self.plateau.step(avg_bpd)
+        lr_now = self.opt.param_groups[0]["lr"]
+        tqdm.write(f"[eval] iter={it} avg_bpd={avg_bpd:.4f} lr={lr_now:.2e}")
+
+    # ------------------------------------------------------------------
+    # Override setup() to skip image-specific initialization
+    # ------------------------------------------------------------------
+
+    def setup(self, args) -> None:
+        """
+        Tabular-safe setup.
+
+        - Calls build_loaders() first (to populate self._view_dims).
+        - Skips _check_hw_divisible() (no spatial dims).
+        - Skips ActNorm warmup with dummy images.
+        - Projector dim = view feature dim D (no flatten_latents pooling needed).
+        """
+        import platform, datetime
+        from pathlib import Path
+
+        self.args = args
+        set_deterministic(args.seed)
+
+        # Device
+        if args.devices.lower() == "cpu":
+            dev = torch.device("cpu")
+        elif args.devices == "mps" and torch.backends.mps.is_available():
+            dev = torch.device("mps")
+        else:
+            dev = torch.device(args.devices.split(",")[0])
+        self.dev = dev
+
+        # AMP — tabular flows are small, mixed precision rarely helps but is
+        # supported for consistency with the base class.
+        self.model_dtype = torch.float32
+        self.amp_enabled = False
+        self.amp_dtype   = None
+        self.scaler = torch.amp.GradScaler(enabled=False)
+
+        # Data loaders (also sets self._view_dims + self.normalizers)
+        self.train_loader, self.val_loader, self.global_step = self.build_loaders(args)
+
+        # Models
+        self.models: List[nn.Module] = self.build_models(args)
+        self.ema_models = None
+
+        # Projectors (for alignment; one per view; dim = feature dim D_v)
+        self.projectors: Optional[nn.ModuleList] = None
+        if args.align != "none":
+            self.projectors = nn.ModuleList([
+                Projector(D, args.proj_hidden, args.proj_dim)
+                .to(dtype=torch.float32, device=dev)
+                .train()
+                for D in self._view_dims
+            ])
+
+        self.align_mgr = LatentAlignmentLossManager(
+            args=args,
+            projectors=self.projectors,
+            device=dev,
+        )
+
+        # Kendall scalars
+        self.s_nll = self.s_align = None
+        if args.weighting == "kendall" and args.align != "none":
+            self.s_nll   = nn.Parameter(
+                torch.tensor([0.0], device=dev, dtype=torch.float32)
+            )
+            self.s_align = nn.Parameter(
+                torch.tensor([0.0], device=dev, dtype=torch.float32)
+            )
+
+        # Optimizer
+        param_groups = [{"params": [p for m in self.models for p in m.parameters()]}]
+        if self.projectors:
+            param_groups.append({"params": list(self.projectors.parameters())})
+        if self.s_nll is not None:
+            param_groups.append(
+                {"params": [self.s_nll, self.s_align], "weight_decay": 0.0}
+            )
+        self.opt = torch.optim.AdamW(
+            param_groups, lr=args.lr,
+            betas=getattr(args, "betas", (0.9, 0.98)),
+            weight_decay=args.weight_decay,
+        )
+        self.warm = make_warmup(
+            self.opt, args.warmup_iters,
+            getattr(args, "lr_decay_gamma", 1.0),
+            getattr(args, "lr_decay_steps", 0),
+        )
+        self.plateau = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.opt, mode="min",
+            factor=getattr(args, "plateau_factor", 0.5),
+            patience=getattr(args, "plateau_patience", 5),
+            threshold=getattr(args, "plateau_threshold", 1e-4),
+            min_lr=getattr(args, "min_lr", 1e-6),
+        )
+
+        # Paths
+        self.run_dir    = Path(args.out_dir)
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.state_path = self.run_dir / "training_state.pt"
+        self.csv_path   = self.run_dir / "metrics.csv"
+
+        # Resume
+        self.start_iter = self._maybe_resume(args)
+        if args.extra_iters > 0:
+            args.max_iter = (self.start_iter - 1) + args.extra_iters
+
+        with self.global_step.get_lock():
+            self.global_step.value = int(self.start_iter)
+
+        # CSV header
+        if not self.csv_path.exists():
+            with open(self.csv_path, "w") as f:
+                f.write("iter,loss,sum_bpd,lr\n")
+
+        # Screen dump
+        print(f"\n[tabular trainer] {len(self.models)} view(s), dims={self._view_dims}")
+        print(f"  norm={args.normalization}  align={args.align}  "
+              f"batch={args.batch_size}  max_iter={args.max_iter}")
+        print(f"  out_dir={self.run_dir}")
+        for vi, m in enumerate(self.models):
+            print(f"  view {vi}: D={self._view_dims[vi]}, params={n_params(m):,}")
+
+    # ------------------------------------------------------------------
+    # Export: latents z, whitened ε, reconstructions
+    # ------------------------------------------------------------------
+
+    @torch.no_grad()
+    def export(self) -> None:
+        """
+        Post-training export of per-view latents and/or reconstructions.
+
+        Controlled by args flags:
+          --save-z         : raw flow latents z  → {out_dir}/z_view{i}.csv
+          --save-whitened  : PCA/whitened coords → {out_dir}/whitened_view{i}.csv
+                             (only meaningful with base_distribution='GaussianPCA')
+          --save-recon     : inverse-flow recon  → {out_dir}/recon_view{i}.csv
+                             de-normalized via TabularNormalizer (observed scale)
+
+        All outputs are produced from the full dataset (train + val concatenated)
+        in inference mode (no dropout, no jitter).
+        Uses EMA models when available, otherwise base models.
+        """
+        args = self.args
+        do_z      = getattr(args, "save_z",       False)
+        do_wh     = getattr(args, "save_whitened", False)
+        do_recon  = getattr(args, "save_recon",   False)
+
+        if not (do_z or do_wh or do_recon):
+            return
+
+        print("[export] Running post-training export...")
+        dev     = self.dev
+        models  = self.ema_models if self.ema_models else self.models
+        n_views = len(models)
+
+        for m in models:
+            m.eval()
+
+        # Build a full (train+val) inference dataset — no jitter, no shuffle
+        # We reload the original CSVs so no rows are excluded.
+        raw_dfs = _load_views(args.views)
+        infer_ds = CSVMultiViewDataset(
+            raw_dfs, self.normalizers, noise_std=0.0
+        )
+        infer_loader = DataLoader(
+            infer_ds,
+            batch_size=min(2048, max(args.batch_size, 256)),
+            shuffle=False,
+            num_workers=int(getattr(args, "num_workers", 0)),
+            collate_fn=_tabular_collate,
+        )
+
+        # Accumulators
+        z_acc:    List[List[np.ndarray]] = [[] for _ in range(n_views)]
+        wh_acc:   List[List[np.ndarray]] = [[] for _ in range(n_views)]
+        rec_acc:  List[List[np.ndarray]] = [[] for _ in range(n_views)]
+
+        for batch in tqdm(infer_loader, desc="export", leave=False):
+            for vi, m in enumerate(models):
+                x_v = self.extract_view(batch, vi, dev)   # (B, D) float32
+
+                # Forward: x → z
+                z_v, _ = _inverse_with_guard(m, x_v)      # (B, D)
+
+                if do_z:
+                    z_acc[vi].append(z_v.cpu().float().numpy())
+
+                if do_wh:
+                    wh = _extract_whitened(m, z_v)        # (B, L) or (B, D)
+                    wh_acc[vi].append(wh.cpu().float().numpy())
+
+                if do_recon:
+                    # Inverse flow: z → x_hat (normalized space)
+                    try:
+                        out = m.forward(z_v)
+                        x_hat = out[0] if isinstance(out, (list, tuple)) else out
+                    except Exception:
+                        # fallback: use q0.sample() if forward() not available
+                        x_hat = z_v
+
+                    # De-normalize: bring back to observed scale
+                    x_hat_np = x_hat.cpu().float().numpy()
+                    x_hat_denorm = self.normalizers[vi].inverse_transform(
+                        torch.from_numpy(x_hat_np)
+                    ).numpy()
+                    rec_acc[vi].append(x_hat_denorm)
+
+                del x_v, z_v
+
+            gc.collect()
+
+        # Write CSVs
+        out_dir = self.run_dir
+        for vi in range(n_views):
+            if do_z and z_acc[vi]:
+                arr = np.concatenate(z_acc[vi], axis=0)
+                cols = [f"z{j}" for j in range(arr.shape[1])]
+                pd.DataFrame(arr, columns=cols).to_csv(
+                    out_dir / f"z_view{vi}.csv", index=False
+                )
+                print(f"[export] z_view{vi}.csv  shape={arr.shape}")
+
+            if do_wh and wh_acc[vi]:
+                arr = np.concatenate(wh_acc[vi], axis=0)
+                cols = [f"eps{j}" for j in range(arr.shape[1])]
+                pd.DataFrame(arr, columns=cols).to_csv(
+                    out_dir / f"whitened_view{vi}.csv", index=False
+                )
+                print(f"[export] whitened_view{vi}.csv  shape={arr.shape}")
+
+            if do_recon and rec_acc[vi]:
+                arr = np.concatenate(rec_acc[vi], axis=0)
+                # Reuse original column names from the input CSV
+                orig_cols = list(raw_dfs[vi].columns)
+                if len(orig_cols) == arr.shape[1]:
+                    cols = orig_cols
+                else:
+                    cols = [f"feat{j}" for j in range(arr.shape[1])]
+                pd.DataFrame(arr, columns=cols).to_csv(
+                    out_dir / f"recon_view{vi}.csv", index=False
+                )
+                print(f"[export] recon_view{vi}.csv  shape={arr.shape}")
+
+        print(f"[export] Done. Files written to: {out_dir}")
+
+        # Restore training mode
+        for m in self.models:
+            m.train()
+
+
+
+# ---------------------------------------------------------------------------
+# Collate function — ensures batch is a list of stacked view tensors
+# ---------------------------------------------------------------------------
+
+def _tabular_collate(samples: List[List[torch.Tensor]]) -> List[torch.Tensor]:
+    """
+    Each sample is a list of per-view float32 tensors of shape (D_v,).
+    Returns a list of per-view batched tensors of shape (B, D_v).
+    """
+    n_views = len(samples[0])
+    return [
+        torch.stack([s[vi] for s in samples], dim=0)
+        for vi in range(n_views)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def _build_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser("LAMNr tabular flow trainer (BaseLAMNrTrainer subclass)")
+
+    # Input
+    ap.add_argument("--views", nargs="+", required=True,
+        help="CSV file paths, one per view.")
+    ap.add_argument("--out-dir", type=str, default="runs_tabular",
+        help="Output directory.")
+
+    # Normalization
+    ap.add_argument("--normalization", default="0mean", choices=["0mean", "01", "none"],
+        help="Per-view feature normalization (z-score | min-max | none).")
+    ap.add_argument("--jitter-alpha", type=float, default=0.0,
+        help="Additive Gaussian noise std in normalized space (0 = off).")
+
+    # Architecture
+    ap.add_argument("--base-distribution", default="GaussianPCA",
+        choices=["GaussianPCA", "DiagGaussian"])
+    ap.add_argument("--pca-latent-dimension", type=int, default=4)
+    ap.add_argument("--base-min-log", type=float, default=-5.0)
+    ap.add_argument("--base-max-log", type=float, default=5.0)
+    ap.add_argument("--base-sigma",   type=float, default=0.1)
+    ap.add_argument("--K",             type=int,   default=64)
+    ap.add_argument("--hidden-channels", type=int, default=None)
+    ap.add_argument("--leaky-relu-negative-slope", type=float, default=0.0)
+    ap.add_argument("--scale-cap",         type=float, default=3.0)
+    ap.add_argument("--spectral-norm-scales", action="store_true")
+    ap.add_argument("--additive-first-n",  type=int, default=0)
+    ap.add_argument("--actnorm-every",     type=int, default=1)
+    ap.add_argument("--mask-mode", default="alternating",
+        choices=["alternating", "rolling"])
+
+    # Training loop
+    ap.add_argument("--batch-size",    type=int,   default=256,  dest="batch_size")
+    ap.add_argument("--val-fraction",  type=float, default=0.20, dest="val_fraction")
+    ap.add_argument("--max-iter",      type=int,   default=5000)
+    ap.add_argument("--extra-iters",   type=int,   default=0)
+    ap.add_argument("--eval-interval", type=int,   default=500)
+    ap.add_argument("--num-workers",   type=int,   default=0)
+
+    # Hardware
+    ap.add_argument("--devices", type=str, default="cpu",
+        help="Device string, e.g. 'cpu', 'cuda:0', 'mps'.")
+    ap.add_argument("--seed",    type=int, default=0)
+
+    # Optimizer & scheduler
+    ap.add_argument("--lr",               type=float, default=2e-4)
+    ap.add_argument("--weight-decay",     type=float, default=0.0)
+    ap.add_argument("--warmup-iters",     type=int,   default=200)
+    ap.add_argument("--lr-decay-gamma",   type=float, default=1.0)
+    ap.add_argument("--lr-decay-steps",   type=int,   default=0)
+    ap.add_argument("--plateau-factor",   type=float, default=0.5)
+    ap.add_argument("--plateau-patience", type=int,   default=5)
+    ap.add_argument("--plateau-threshold",type=float, default=1e-4)
+    ap.add_argument("--min-lr",           type=float, default=1e-6)
+
+    # Gradients & accum
+    ap.add_argument("--grad-clip",  type=float, default=5.0)
+    ap.add_argument("--grad-accum", type=int,   default=1)
+
+    # EMA (optional — off by default for tabular)
+    ap.add_argument("--ema",       action="store_true")
+    ap.add_argument("--ema-decay", type=float, default=0.9995)
+
+    # Checkpointing
+    ap.add_argument("--resume",          type=str,  default="")
+    ap.add_argument("--auto-resume",     action="store_true")
+    ap.add_argument("--use-ckpt-config", action="store_true")
+
+    # EMA display smoothing
+    ap.add_argument("--smooth-alpha", type=float, default=0.1)
+
+    # Alignment
+    ap.add_argument("--align", default="none",
+        choices=["none", "infonce", "barlow", "vicreg", "hsic", "pearson", "mse"])
+    ap.add_argument("--align-weight",      type=float, default=0.05)
+    ap.add_argument("--align-warmup",      type=int,   default=200)
+    ap.add_argument("--proj-dim",          type=int,   default=64)
+    ap.add_argument("--proj-hidden",       type=int,   default=128)
+    ap.add_argument("--temperature",       type=float, default=0.1)
+    ap.add_argument("--barlow-lambda",     type=float, default=5e-3)
+    ap.add_argument("--weighting",         default="fixed", choices=["fixed", "kendall"])
+    ap.add_argument("--init-logvar-nll",   type=float, default=0.0)
+    ap.add_argument("--init-logvar-align", type=float, default=0.0)
+    ap.add_argument("--vicreg-inv",   type=float, default=25.0)
+    ap.add_argument("--vicreg-cov",   type=float, default=1.0)
+    ap.add_argument("--vicreg-var",   type=float, nargs="+", default=[25.0])
+    ap.add_argument("--vicreg-gamma", type=float, nargs="+", default=[1.0])
+    ap.add_argument("--hsic-sigma",   type=float, default=0.0)
+
+    # Screening (CCA / HSIC subspace selection)
+    ap.add_argument("--screen",         default="none", choices=["none", "cca", "hsic"])
+    ap.add_argument("--screen-warmup",  type=int,   default=500)
+    ap.add_argument("--screen-refresh", type=int,   default=0)
+    ap.add_argument("--screen-frac",    type=float, default=0.5)
+    ap.add_argument("--cca-ridge",      type=float, default=1e-3)
+    ap.add_argument("--prefilter-frac", type=float, default=0.5)
+
+    ap.add_argument("--save-z", action="store_true", 
+                    help="Exporter les coordonnées latentes brutes z (un CSV par vue)")
+    ap.add_argument("--save-whitened", action="store_true", 
+                    help="Exporter les coordonnées latentes standardisées/blanchies (un CSV par vue)")
+    ap.add_argument("--save-recon", action="store_true", 
+                    help="Exporter les reconstructions inversées dans l'échelle observée")
+
+    # Image-specific args set to None (unused but needed by BaseLAMNrTrainer)
+    ap.set_defaults(H=None, W=None, D=None, sample_mode="off",
+                    sample_temp=1.0, sample_grid_norm="to01")
+
+    args = ap.parse_args()
+    args.num_views = len(args.views)  # updated in build_loaders anyway
+
+    return args
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--views", nargs="+", required=True, help="CSV paths for one or more views")
-    ap.add_argument("--output-prefix", required=True, help="Prefix for saving models/metrics/config")
-
-    # Model/base
-    ap.add_argument("--base-distribution", default="GaussianPCA", choices=["GaussianPCA", "DiagGaussian"])
-    ap.add_argument("--pca-latent-dimension", type=int, default=4)
-    ap.add_argument("--K", type=int, default=64)
-    ap.add_argument("--hidden-channels", type=int, default=None,
-                   help="Hidden width for coupling nets inside lamnr_flows_whitener (if supported).")
-    ap.add_argument("--hidden", type=int, default=None,
-                   help="Alias for --hidden-channels (if supported).")
-    ap.add_argument("--leaky-relu-negative-slope", type=float, default=0.2)
-
-
-    # Optional per-view marginal transforms (applied before normalization).
-    # Format: --marginal-transform VIEW:KIND  (can be passed multiple times),
-    # where VIEW is 0-based index into the views list and KIND is one of:
-    #   asinh, rank_gaussian, none
-    ap.add_argument(
-        "--marginal-transform",
-        type=str,
-        nargs="*",
-        default=[],
-        help="Optional per-view marginal transforms, e.g. '2:rank_gaussian' to transform view 2.",
-    )
-
-    # Flow/builder stability knobs
-    ap.add_argument("--scale-cap", type=float, default=3.0, help="Bound for log-scale s via tanh; exp(s) in [e^-cap, e^cap]")
-    ap.add_argument("--spectral-norm-scales", action="store_true", default=False, help="Apply spectral norm in scale MLP (if supported)")
-    ap.add_argument("--additive-first-n", type=int, default=0, help="Use additive (no-scaling) couplings for first N layers")
-    ap.add_argument("--actnorm-every", type=int, default=1, help="Insert ActNorm after every N couplings (1=after each)")
-    ap.add_argument("--mask-mode", type=str, default="alternating", choices=["alternating", "rolling"], help="Mask alternation strategy")
-
-    # Base distribution stability knobs
-    ap.add_argument("--base-min-log", type=float, default=-2.0, help="Lower clamp for base log-scales (if supported)")
-    ap.add_argument("--base-max-log", type=float, default=2.0, help="Upper clamp for base log-scales (if supported)")
-    ap.add_argument("--base-sigma", type=float, default=0.1, help="Noise for GaussianPCA (if used)")
-
-    # === Dataset normalization & jitter (new) ===
-    ap.add_argument("--normalization", type=str, default="0mean", choices=["0mean","01","none"],
-                    help="Per-view normalization mode: 0mean | 01 | none (None)")
-    ap.add_argument("--add-noise-in", type=str, default="normalized", choices=["raw","normalized","none"],
-                    help="Domain for alpha-jitter if enabled: raw/normalized/none")
-    ap.add_argument("--impute", type=str, default="mean", choices=["none","mean","zero"],
-                    help="Imputation applied after normalization")
-    ap.add_argument("--dataset-normalizers-json", type=str, default=None,
-                    help="If set, dump dataset normalization stats to this JSON file (one list item per view)")
-
-    # Jitter schedule
-    ap.add_argument("--jitter-alpha", type=float, default=0.0)
-    ap.add_argument("--jitter-alpha-end", type=float, default=0.0)
-    ap.add_argument("--jitter-alpha-mode", type=str, default="cosine", choices=["cosine", "linear", "exp"])
-    ap.add_argument("--jitter-alpha-total-steps", type=int, default=None)
-
-    # Optimization
-    ap.add_argument("--lr", type=float, default=1e-4)
-    ap.add_argument("--batch-size", type=int, default=256)
-    ap.add_argument("--weight-decay", type=float, default=0.0)
-    ap.add_argument("--max-iter", type=int, default=1000)
-    ap.add_argument("--cuda-device", default="cpu")
-    ap.add_argument("--seed", type=int, default=0)
-
-    # Penalty/tradeoff
-    ap.add_argument("--tradeoff-mode", default="uncertainty", choices=["ema", "uncertainty", "fixed"])
-    ap.add_argument("--target-ratio", type=float, default=4.0)
-    ap.add_argument("--lambda-penalty", type=float, default=1.0)
-    ap.add_argument("--ema-beta", type=float, default=0.98)
-
-    # Latent alignment penalty / multi-view coupling
-    ap.add_argument(
-        "--penalty-type",
-        default="barlow_twins_align",
-        choices=[
-            "decorrelate",
-            "correlate",
-            "barlow_twins_align",
-            "pearson",
-            "barlow_twins_multi",
-            "vicreg",
-            "info_nce",
-            "hsic",
-            "none",
-        ],
-    )
-
-    # Barlow Twins (legacy + multi-view)
-    ap.add_argument("--bt-lambda-diag", type=float, default=1.0)
-    ap.add_argument("--bt-lambda-offdiag", type=float, default=5e-3)
-    ap.add_argument("--bt-eps", type=float, default=1e-6)
-
-    # InfoNCE temperature
-    ap.add_argument(
-        "--info-nce-T",
-        type=float,
-        default=0.2,
-        help="Temperature for InfoNCE / NT-Xent when penalty_type='info_nce'.",
-    )
-
-    # VICReg weights
-    ap.add_argument(
-        "--vicreg-w-inv",
-        type=float,
-        default=25.0,
-        help="Invariance (MSE) weight for VICReg when penalty_type='vicreg'.",
-    )
-    ap.add_argument(
-        "--vicreg-w-var",
-        type=float,
-        default=25.0,
-        help="Variance floor weight for VICReg when penalty_type='vicreg'.",
-    )
-    ap.add_argument(
-        "--vicreg-w-cov",
-        type=float,
-        default=1.0,
-        help="Covariance off-diagonal weight for VICReg when penalty_type='vicreg'.",
-    )
-    ap.add_argument(
-        "--vicreg-gamma",
-        type=float,
-        default=1.0,
-        help="Target std (gamma) for VICReg variance floor when penalty_type='vicreg'.",
-    )
-
-    # HSIC bandwidth
-    ap.add_argument(
-        "--hsic-sigma",
-        type=float,
-        default=0.0,
-        help=(
-            "RBF kernel bandwidth for HSIC when penalty_type='hsic'; "
-            "0.0 = median heuristic per batch."
-        ),
-    )
-
-    ap.add_argument("--penalty-warmup-iters", type=int, default=400)
-
-    # Optional pre-training screening of cross-view dependence
-    ap.add_argument(
-        "--screening-mode",
-        type=str,
-        default="none",
-        choices=["none", "hsic", "cca"],
-        help="Optional pre-training dependence screening; may disable alignment if views are weakly related.",
-    )
-    ap.add_argument(
-        "--screening-fraction",
-        type=float,
-        default=0.2,
-        help="Fraction of subjects to sample for screening (0-1].",
-    )
-    ap.add_argument(
-        "--screening-max-samples",
-        type=int,
-        default=5000,
-        help="Maximum number of subjects to use for screening.",
-    )
-    ap.add_argument(
-        "--screening-threshold",
-        type=float,
-        default=0.1,
-        help="Minimum average dependence score required to keep alignment active. "
-             "For 'cca' this is max canonical corr (0-1); for 'hsic' this is normalized HSIC (0-1).",
-    )
-
-
-
-
-# Scale regularizer
-    ap.add_argument("--scale-penalty-weight", type=float, default=None,
-                    help="Weight for mean|s| regularizer; passed only if whitener supports it")
-
-    # Validation / early stopping
-    ap.add_argument("--val-fraction", type=float, default=0.2)
-    ap.add_argument("--val-interval", type=int, default=200)
-    ap.add_argument("--val-batch-size", type=int, default=2048)
-    ap.add_argument("--early-stop-enabled", action="store_true", default=False)
-    ap.add_argument("--early-stop-patience", type=int, default=300)
-    ap.add_argument("--early-stop-min-delta", type=float, default=1e-4)
-    ap.add_argument("--early-stop-min-iters", type=int, default=600)
-    ap.add_argument("--early-stop-beta", type=float, default=0.98)
-
-    # Misc
-    ap.add_argument("--best-selection-metric", default="val_bpd", choices=["val_bpd","smooth_total"])
-
-    # Checkpointing / resume
-    ap.add_argument("--resume-checkpoint", type=str, default=None)
-    ap.add_argument("--save-checkpoint-dir", type=str, default=None)
-    ap.add_argument("--checkpoint-interval", type=int, default=None, help="Defaults to --val-interval if omitted")
-    ap.add_argument("--restore-best-for-final-eval", action="store_true", default=True)
-    ap.add_argument("--verbose", action="store_true", default=False)
-
-    # Optional exports
-    ap.add_argument("--save-z", action="store_true", help="Export raw flow latents z_*_view{i}.csv")
-    ap.add_argument("--save-whitened", default="pca", choices=["pca","full"])
-    ap.add_argument("--save-recon", action="store_true", help="Export inverse reconstructions recon_view{i}.csv (observed scale)")
-
-    # ── New-trainer bridge ────────────────────────────────────────────────────
-    # Pass --use-new-trainer to route to TabularLAMNrTrainer (BaseLAMNrTrainer
-    # subclass) instead of the legacy lamnr_flows_whitener() delegation.
-    # All flags below are only used by the new trainer; the legacy path ignores them.
-    ap.add_argument("--use-new-trainer", action="store_true", default=False,
-        help="Route to TabularLAMNrTrainer (BaseLAMNrTrainer subclass) "
-             "instead of the legacy lamnr_flows_whitener() wrapper.")
-    ap.add_argument("--out-dir", type=str, default="runs_tabular",
-        help="[new trainer] Output directory.")
-    ap.add_argument("--align", default="none",
-        choices=["none", "infonce", "barlow", "vicreg", "hsic", "pearson", "mse"],
-        help="[new trainer] Latent alignment objective.")
-    ap.add_argument("--align-weight",  type=float, default=0.05)
-    ap.add_argument("--align-warmup",  type=int,   default=200)
-    ap.add_argument("--proj-dim",      type=int,   default=64)
-    ap.add_argument("--proj-hidden",   type=int,   default=128)
-    ap.add_argument("--weighting",     default="fixed", choices=["fixed", "kendall"])
-    ap.add_argument("--vicreg-inv",    type=float, default=25.0)
-    ap.add_argument("--vicreg-cov",    type=float, default=1.0)
-    ap.add_argument("--vicreg-var",    type=float, nargs="+", default=[25.0])
-    ap.add_argument("--vicreg-gamma",  type=float, nargs="+", default=[1.0])
-    ap.add_argument("--screen",        default="none", choices=["none", "cca", "hsic"])
-    ap.add_argument("--screen-warmup", type=int,   default=500)
-    ap.add_argument("--screen-refresh",type=int,   default=0)
-    ap.add_argument("--screen-frac",   type=float, default=0.5)
-    ap.add_argument("--cca-ridge",     type=float, default=1e-3)
-    ap.add_argument("--prefilter-frac",type=float, default=0.5)
-    ap.add_argument("--eval-interval", type=int,   default=500)
-    ap.add_argument("--grad-accum",    type=int,   default=1)
-    ap.add_argument("--warmup-iters",  type=int,   default=200)
-    ap.add_argument("--lr-decay-gamma",type=float, default=1.0)
-    ap.add_argument("--lr-decay-steps",type=int,   default=0)
-    ap.add_argument("--plateau-factor",type=float, default=0.5)
-    ap.add_argument("--plateau-patience",type=int, default=5)
-    ap.add_argument("--plateau-threshold",type=float, default=1e-4)
-    ap.add_argument("--min-lr",        type=float, default=1e-6)
-    ap.add_argument("--grad-clip",     type=float, default=5.0)
-    ap.add_argument("--smooth-alpha",  type=float, default=0.1)
-    ap.add_argument("--extra-iters",   type=int,   default=0)
-    ap.add_argument("--ema",           action="store_true")
-    ap.add_argument("--ema-decay",     type=float, default=0.9995)
-    ap.add_argument("--auto-resume",   action="store_true")
-    ap.add_argument("--use-ckpt-config",action="store_true")
-    ap.add_argument("--devices",       type=str, default="cpu")
-    ap.add_argument("--normalization", type=str, default="0mean",
-        choices=["0mean", "01", "none"])
-    ap.add_argument("--temperature",   type=float, default=0.1)
-    ap.add_argument("--barlow-lambda", type=float, default=5e-3)
-    ap.add_argument("--hsic-sigma",    type=float, default=0.0)
-    ap.add_argument("--init-logvar-nll",   type=float, default=0.0)
-    ap.add_argument("--init-logvar-align", type=float, default=0.0)
-    ap.add_argument("--num-workers",   type=int,   default=0)
-    # ─────────────────────────────────────────────────────────────────────────
-
-    args = ap.parse_args()
-    verbose = args.verbose
-
-    # ── New-trainer dispatch (early return) ───────────────────────────────────
-    if args.use_new_trainer:
-        from train_lamnr_flows_tabular_v2 import TabularLAMNrTrainer
-        # Remap legacy arg names to the new trainer's convention
-        args.batch_size   = args.batch_size        # already consistent
-        args.val_fraction = args.val_fraction       # already consistent
-        # --output-prefix → --out-dir (use prefix dir if out_dir not explicitly set)
-        if not args.out_dir or args.out_dir == "runs_tabular":
-            args.out_dir = str(Path(args.output_prefix).parent)
-        # max_iter already set
-        # Unused image-specific attrs that BaseLAMNrTrainer may reference
-        args.H = None; args.W = None; args.D = None
-        args.sample_mode = "off"
-        args.sample_temp = 1.0
-        args.sample_grid_norm = "to01"
-        args.resume = getattr(args, "resume_checkpoint", "") or ""
-        trainer = TabularLAMNrTrainer()
-        trainer.setup(args)
-        trainer.train()
-        return
-    # ─────────────────────────────────────────────────────────────────────────
-
-
-    # Parse per-view marginal transform specs, e.g. ['2:rank_gaussian'].
-    marginal_transforms = {}
-    for spec in getattr(args, "marginal_transform", []) or []:
-        try:
-            view_str, kind = spec.split(":", 1)
-        except ValueError:
-            raise ValueError(f"Invalid --marginal-transform spec '{spec}'. Expected format VIEW:KIND, e.g. '2:rank_gaussian'.")
-        view_idx = int(view_str)
-        if view_idx < 0:
-            raise ValueError(f"View index in --marginal-transform must be non-negative; got {view_idx}")
-        marginal_transforms[view_idx] = kind
-
-
-    if len(args.views) == 1 and args.penalty_type != "none":
-        args.penalty_type = "none"
-
-    # Determinism
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-
-    # Load CSV views
-    views = load_views(args.views, marginal_transforms=marginal_transforms)
-
-    # Optional pre-training dependence screening (may disable alignment)
-    _screen_views_for_alignment(args, views, verbose=verbose)
-
-    # Screen dump of configuration & basic data stats
-    if verbose:
-        n_samples, dims_per_view, total_dims = _print_screen_dump(args, views)
-    else:
-        n_samples = len(views[0]) if views else 0
-        dims_per_view = [df.shape[1] for df in views]
-        total_dims = sum(dims_per_view)
-
-    # Rough ETA based on a simple heuristic, similar in spirit to the Glow trainer
-    if verbose and args.max_iter is not None and args.max_iter > 0:
-        sec_per_iter = _estimate_seconds_per_iter_tabular(
-            batch_size=args.batch_size,
-            total_dims=total_dims,
-            K=args.K,
-        )
-        eta_seconds = sec_per_iter * args.max_iter
-        eta_str = _format_seconds(eta_seconds)
-        finish_time = time.localtime(time.time() + eta_seconds)
-        finish_str = time.strftime("%Y-%m-%d %H:%M:%S", finish_time)
-        print(f"Estimated total training time (heuristic): ~{eta_str} (finish around {finish_str})")
-
-
-    # === Prepare kwargs and filter by whitener signature for backward compatibility ===
-    base_kwargs = dict(
-        base_distribution=args.base_distribution,
-        pca_latent_dimension=args.pca_latent_dimension,
-        base_min_log=args.base_min_log,
-        base_max_log=args.base_max_log,
-        base_sigma=args.base_sigma,
-    )
-
-    flow_kwargs = dict(
-        K=args.K,
-        leaky_relu_negative_slope=args.leaky_relu_negative_slope,
-        scale_cap=args.scale_cap,
-        spectral_norm_scales=args.spectral_norm_scales,
-        additive_first_n=args.additive_first_n,
-        actnorm_every=args.actnorm_every,
-        mask_mode=args.mask_mode,
-    )
-
-    # Optional coupling network width (swept as hidden_channels).
-    _hidden_val = args.hidden_channels if args.hidden_channels is not None else args.hidden
-    if _hidden_val is not None:
-        # Pass both common spellings; unsupported keys will be dropped by signature filtering below.
-        flow_kwargs["hidden_channels"] = int(_hidden_val)
-        flow_kwargs["hidden"] = int(_hidden_val)
-
-    # Normalization flags → trainer kwargs
-    norm_mode = None if args.normalization == "none" else args.normalization
-    train_kwargs = dict(
-        jitter_alpha=args.jitter_alpha,
-        jitter_alpha_end=args.jitter_alpha_end,
-        jitter_alpha_mode=args.jitter_alpha_mode,
-        jitter_alpha_total_steps=args.jitter_alpha_total_steps,
-
-        lr=args.lr,
-        batch_size=args.batch_size,
-        weight_decay=args.weight_decay,
-        max_iter=args.max_iter,
-        cuda_device=args.cuda_device,
-        seed=args.seed,
-
-        tradeoff_mode=args.tradeoff_mode,
-        target_ratio=args.target_ratio,
-        lambda_penalty=args.lambda_penalty,
-        ema_beta=args.ema_beta,
-
-        # Latent alignment configuration
-        penalty_type=args.penalty_type,
-        bt_lambda_diag=args.bt_lambda_diag,
-        bt_lambda_offdiag=args.bt_lambda_offdiag,
-        bt_eps=args.bt_eps,
-        info_nce_T=getattr(args, "info_nce_T", None),
-        vicreg_w_inv=getattr(args, "vicreg_w_inv", None),
-        vicreg_w_var=getattr(args, "vicreg_w_var", None),
-        vicreg_w_cov=getattr(args, "vicreg_w_cov", None),
-        vicreg_gamma=getattr(args, "vicreg_gamma", None),
-        hsic_sigma=getattr(args, "hsic_sigma", None),
-        penalty_warmup_iters=args.penalty_warmup_iters,
-
-        val_fraction=args.val_fraction,
-        val_interval=args.val_interval,
-        val_batch_size=args.val_batch_size,
-
-        early_stop_enabled=args.early_stop_enabled,
-        early_stop_patience=args.early_stop_patience,
-        early_stop_min_delta=args.early_stop_min_delta,
-        early_stop_min_iters=args.early_stop_min_iters,
-        early_stop_beta=args.early_stop_beta,
-
-        best_selection_metric=args.best_selection_metric,
-        restore_best_for_final_eval=args.restore_best_for_final_eval,
-        resume_checkpoint=args.resume_checkpoint,
-        save_checkpoint_dir=args.save_checkpoint_dir,
-        checkpoint_interval=args.checkpoint_interval,
-        verbose=verbose,
-
-        # New dataset-owned normalization/jitter knobs (only passed if supported)
-        normalization=norm_mode,
-        add_noise_in=args.add_noise_in,
-        impute=args.impute,
-        dataset_normalizers_dump_path=args.dataset_normalizers_json,
-    )
-
-    # Optional: scale penalty weight
-    if args.scale_penalty_weight is not None:
-        train_kwargs["scale_penalty_weight"] = args.scale_penalty_weight
-
-    # Merge kwargs and filter by signature
-    call_kwargs = dict(views=views)
-    call_kwargs.update(base_kwargs)
-    call_kwargs.update(flow_kwargs)
-    call_kwargs.update(train_kwargs)
-
-    sig = inspect.signature(lamnr_flows_whitener)
-    filtered_kwargs = {k: v for k, v in call_kwargs.items() if k in sig.parameters}
-
-    # Train
-    if verbose:
-        print("\n=== Train ===")
-        missing = sorted(set(call_kwargs) - set(filtered_kwargs))
-        if missing:
-            print("Note: the following knobs are not supported by your installed whitener and were omitted:")
-            for k in missing:
-                print("  -", k)
-
-    start_time = time.perf_counter()
-    result = lamnr_flows_whitener(**filtered_kwargs)
-    end_time = time.perf_counter()
-    elapsed_time = end_time - start_time
-
-    print(f"Time elapsed: {elapsed_time:.4f} seconds")
-
-    # Print metrics
-    if verbose:
-        print("\n=== Metrics ===")
-        for k, v in result.get("metrics", {}).items():
-            print(f"{k}: {v}")
-
-    # Persist selection metric and full metrics for sweep ranking
-    base_prefix = Path(args.output_prefix)
-    metrics_path = base_prefix.with_name(base_prefix.name + "_metrics.json")
-    os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
-
-    metrics_dict = result.get("metrics", {})
-    # Also record the selector for clarity
-    payload = {
-        "best_selection_metric": args.best_selection_metric,  # e.g., "val_bpd"
-        "best_selection_value": metrics_dict.get(args.best_selection_metric, None),
-        "metrics": metrics_dict,
-        "val_history": result.get("val_history", []),
-    }
-
-    with open(metrics_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
-
-    if verbose:
-        print(f"[metrics] wrote {metrics_path}")
-
-    # If trainer didn't dump JSON and user asked for it, try to write from returned stats
-    if args.dataset_normalizers_json and os.path.dirname(args.dataset_normalizers_json):
-        dn = result.get("dataset_normalizers", None)
-        if dn is not None:
-            os.makedirs(os.path.dirname(args.dataset_normalizers_json), exist_ok=True)
-            with open(args.dataset_normalizers_json, "w", encoding="utf-8") as f:
-                json.dump(dn, f, indent=2)
-
-    # Optional exports using the apply helper
-    base_prefix = Path(args.output_prefix)
-    os.makedirs(os.path.dirname(args.output_prefix), exist_ok=True)
-    if args.save_z or args.save_whitened or args.save_recon:
-
-        if verbose:
-            print("\n=== Save outputs ===")
-
-        # Detect which apply() API we have
-        apply_sig = inspect.signature(apply_lamnr_flows_whitener)
-        supports_new = "normalization_mode" in apply_sig.parameters
-
-        # Prepare normalization hints for apply()
-        norm_stats = result.get("dataset_normalizers", None)
-        apply_common = dict(
-            batch_size=args.val_batch_size,
-            device=args.cuda_device,
-        )
-
-        # Forward transforms
-        if args.save_z:
-            if supports_new:
-                z_views = apply_lamnr_flows_whitener(
-                    trainer_output=result,
-                    data=views,
-                    direction="forward",
-                    output_space="z",
-                    normalization_mode=norm_mode,
-                    normalization_stats=norm_stats,
-                    fit_stats_on_data_if_missing=(norm_stats is None and norm_mode is not None),
-                    **apply_common,
-                )
-            else:
-                z_views = apply_lamnr_flows_whitener(
-                    trainer_output=result,
-                    data=views,
-                    direction="forward",
-                    output_space="z",
-                    use_training_standardization=True,
-                    **apply_common,
-                )
-            z_paths = save_views(z_views, base_prefix, "z")
-            if verbose:
-                print("  z latents:")
-                for p in z_paths:
-                    print("  ", p)
-
-        wh_views = None
-        if args.save_whitened == "pca" and args.base_distribution == "GaussianPCA":
-            if supports_new:
-                wh_views = apply_lamnr_flows_whitener(
-                    trainer_output=result,
-                    data=views,
-                    direction="forward",
-                    output_space="whitened",
-                    normalization_mode=norm_mode,
-                    normalization_stats=norm_stats,
-                    fit_stats_on_data_if_missing=(norm_stats is None and norm_mode is not None),
-                    **apply_common,
-                )
-            else:
-                wh_views = apply_lamnr_flows_whitener(
-                    trainer_output=result,
-                    data=views,
-                    direction="forward",
-                    output_space="whitened",
-                    use_training_standardization=True,
-                    **apply_common,
-                )
-            wh_paths = save_views(wh_views, base_prefix, "whitened")
-            if verbose:
-                print("  whitened pca latents:")
-                for p in wh_paths:
-                    print("  ", p)
-
-        elif args.save_whitened == "full" and args.base_distribution == "GaussianPCA":
-            if supports_new:
-                wh_views = apply_lamnr_flows_whitener(
-                    trainer_output=result,
-                    data=views,
-                    direction="forward",
-                    output_space="whitened_full",
-                    normalization_mode=norm_mode,
-                    normalization_stats=norm_stats,
-                    fit_stats_on_data_if_missing=(norm_stats is None and norm_mode is not None),
-                    **apply_common,
-                )
-            else:
-                wh_views = apply_lamnr_flows_whitener(
-                    trainer_output=result,
-                    data=views,
-                    direction="forward",
-                    output_space="whitened_full",
-                    use_training_standardization=True,
-                    **apply_common,
-                )
-            wh_paths = save_views(wh_views, base_prefix, "whitened_full")
-            if verbose:
-                print("  whitened full:")
-                for p in wh_paths:
-                    print("  ", p)
-
-        # Reconstructions
-        if args.save_recon:
-            # Choose input space to match what we saved; default to whitened if requested & available, else z
-            inv_input = "z"
-            inv_data = None
-            if args.base_distribution == "GaussianPCA" and wh_views is not None:
-                inv_data = wh_views
-                inv_input = "whitened" if args.save_whitened == "pca" else "whitened_full"
-            else:
-                if args.save_z and 'z_views' in locals():
-                    inv_data = z_views
-                else:
-                    # compute z on the fly
-                    if supports_new:
-                        z_views = apply_lamnr_flows_whitener(
-                            trainer_output=result,
-                            data=views,
-                            direction="forward",
-                            output_space="z",
-                            normalization_mode=norm_mode,
-                            normalization_stats=norm_stats,
-                            fit_stats_on_data_if_missing=(norm_stats is None and norm_mode is not None),
-                            **apply_common,
-                        )
-                    else:
-                        z_views = apply_lamnr_flows_whitener(
-                            trainer_output=result,
-                            data=views,
-                            direction="forward",
-                            output_space="z",
-                            use_training_standardization=True,
-                            **apply_common,
-                        )
-                    inv_data = z_views
-                    inv_input = "z"
-
-            if supports_new:
-                recon_views = apply_lamnr_flows_whitener(
-                    trainer_output=result["models"],   # list of models
-                    data=inv_data,
-                    direction="inverse",
-                    input_space=inv_input,
-                    normalization_mode=norm_mode,
-                    normalization_stats=norm_stats,
-                    fit_stats_on_data_if_missing=(norm_stats is None and norm_mode is not None),
-                    **apply_common,
-                )
-            else:
-                recon_views = apply_lamnr_flows_whitener(
-                    trainer_output=result["models"],
-                    data=inv_data,
-                    direction="inverse",
-                    input_space=inv_input,
-                    use_training_standardization=True,
-                    custom_standardizers=result.get("standardizers", None),
-                    **apply_common,
-                )
-            recon_paths = save_views(recon_views, base_prefix, "recon")
-            if verbose:
-                print("  reconstructions:")
-                for p in recon_paths:
-                    print("  ", p)
+    args    = _build_args()
+    trainer = TabularLAMNrTrainer()
+    trainer.setup(args)
+    trainer.train()
+    trainer.export()
 
 
 if __name__ == "__main__":
