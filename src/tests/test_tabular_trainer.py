@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 # Importation de votre nouveau trainer (ajustez le chemin selon votre structure)
-from lamnrflows.training.train_lamnr_flows_tabular_v2 import TabularLAMNrTrainer
+from src.lamnrflows.training.train_lamnr_flows_tabular import TabularLAMNrTrainer
 
 # ---------------------------------------------------------
 # 1. Faux Modèle (Mock Model) pour contourner Glow/RealNVP
@@ -110,3 +110,72 @@ def test_export_tabular_results(dummy_tabular_trainer, dummy_args):
         # 3. Assertions : Vérifier le contenu (Optionnel mais recommandé)
         df_z = pd.read_csv(path_z)
         assert df_z.shape == (5, 10), "La forme du DataFrame Z exporté est incorrecte."
+
+def test_tabular_trainer_with_iris(tmp_path, monkeypatch):
+    """
+    Test d'intégration vérifiant que le trainer charge correctement 
+    des données tabulaires réelles (Iris) séparées en multi-vues.
+    """
+    from sklearn.datasets import load_iris
+    import pandas as pd
+    import os
+    
+    # 1. Génération des données Iris dans le dossier temporaire de pytest
+    iris = load_iris()
+    df = pd.DataFrame(iris.data, columns=iris.feature_names)
+    
+    view0_path = tmp_path / "iris_view0.csv"
+    view1_path = tmp_path / "iris_view1.csv"
+    out_dir_path = tmp_path / "test_run_iris"
+    
+    # Vue 0: Sépales | Vue 1: Pétales
+    df[['sepal length (cm)', 'sepal width (cm)']].to_csv(view0_path, index=False)
+    df[['petal length (cm)', 'petal width (cm)']].to_csv(view1_path, index=False)
+    
+    # 2. Simulation des arguments de ligne de commande
+    class DummyArgsIris:
+        views = [str(view0_path), str(view1_path)]
+        out_dir = str(out_dir_path)
+        max_iter = 5
+        batch_size = 32
+        align = "vicreg"
+        normalization = "0mean"
+        save_z = True
+        save_whitened = False
+        save_recon = True
+        
+        # Champs techniques (bouchons) requis par BaseLAMNrTrainer
+        H, W, D = None, None, None
+        sample_mode = "off"
+        distributed = False
+        rank = 0
+        local_rank = 0
+        device = "cpu"
+        num_views = 2
+        lr = 1e-4
+        weight_decay = 0.0
+
+    args = DummyArgsIris()
+
+    # 3. (Optionnel) Si vous souhaitez utiliser le faux modèle pour que le test 
+    # soit ultra-rapide (et éviter d'instancier un lourd réseau RealNVP) :
+    monkeypatch.setattr(
+        "lamnrflows.training.train_lamnr_flows_tabular.create_real_nvp_normalizing_flow_model", 
+        lambda *a, **kw: DummyFlowModel(dim=2)
+    )
+
+    # 4. Initialisation du Trainer
+    trainer = TabularLAMNrTrainer(args)
+    
+    # 5. Assertions et Vérifications
+    assert trainer.num_views == 2, "Le trainer doit bien initialiser 2 modèles distincts."
+    
+    # Vérifie que le dataloader a bien chargé les 150 fleurs (lignes)
+    assert len(trainer.train_loader.dataset) == 150, "Le CSVMultiViewDataset n'a pas lu les 150 lignes attendues."
+    
+    # Vérification que l'exportation fonctionne avec ces vraies données
+    trainer.export_tabular_results()
+    
+    # Les fichiers de sortie doivent exister dans le dossier de destination
+    assert (out_dir_path / f"{view0_path.name}_latent_z.csv").exists()
+    assert (out_dir_path / f"{view1_path.name}_latent_z.csv").exists()        

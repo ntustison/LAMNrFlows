@@ -542,7 +542,7 @@ class TabularLAMNrTrainer(BaseLAMNrTrainer):
         au format CSV pour chaque vue à la fin de l'entraînement.
         """
         args = self.args
-        if not (args.save-z or args.save_whitened or args.save_recon):
+        if not (args.save_z or args.save_whitened or args.save_recon):
             return
 
         print("\n📊 Initialisation de l'exportation des résultats tabulaires...")
