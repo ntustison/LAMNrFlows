@@ -7,5 +7,6 @@ stitched.fdb_latexmk
 stitched.fls
 stitched.log
 stitched.synctex.gz
+stitched.pdf
 .RData
 .Rhistory
