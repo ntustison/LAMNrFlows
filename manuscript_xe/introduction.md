@@ -5,11 +5,8 @@
 
 ## Quantitative functional imaging of pulmonary ventilation
 
-The lung presents a distinctive challenge for magnetic resonance imaging (MRI).
-Its low proton density, rapid transverse signal decay, and numerous air--tissue
-interfaces substantially limit conventional proton-based imaging of regional
-pulmonary function. Hyperpolarized noble gases provide a means of circumventing
-these limitations by directly visualizing the distribution of an inhaled
+Hyperpolarized noble gases provide a means of circumventing MRI limitations 
+in the lung by directly visualizing the distribution of an inhaled
 contrast agent within the airspaces of the lung. Early studies using
 hyperpolarized helium-3 demonstrated the feasibility of depicting normal and
 abnormal ventilation and established the sensitivity of regional signal
@@ -36,10 +33,11 @@ requires decisions concerning lung delineation, intensity normalization, and
 assignment of image voxels to ventilation classes. A variety of algorithms have
 therefore been proposed, including binary thresholding, linear binning,
 hierarchical and adaptive clustering, fuzzy spatial clustering, and
-probabilistic mixture modeling [@Tustison:2011aa; @Kirby:2012aa; @Zha:2016aa; @Hughes:2018aa;
-@He:2016aa; @He:2020aa]. More recently, convolutional neural networks have
-enabled direct image-domain segmentation while incorporating spatial context
-unavailable to intensity-only approaches [@Tustison:2019ac; @Tustison:2021aa].
+probabilistic mixture modeling [@Tustison:2011aa; @Kirby:2012aa; @Zha:2016aa;
+@Hughes:2018aa; @He:2016aa; @He:2020aa]. More recently, convolutional neural
+networks have enabled direct image-domain segmentation while incorporating
+spatial context unavailable to intensity-only approaches [@Tustison:2019ac;
+@Tustison:2021aa].
 
 VDP is intuitive, clinically interpretable, and has demonstrated repeatability
 and potential utility as an imaging biomarker in single- and multisite studies

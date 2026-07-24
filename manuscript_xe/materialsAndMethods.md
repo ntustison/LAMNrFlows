@@ -3,53 +3,46 @@
 
 # Materials and methods
 
-## Study cohort
+## Image acquisition
 
-This retrospective exploratory study comprised 45 participants with
-hyperpolarized xenon-129 ($^{129}$Xe) pulmonary ventilation MRI. The cohort
-included young healthy volunteers, older healthy volunteers, and participants
-with cystic fibrosis (CF), chronic obstructive pulmonary disease (COPD), or
-interstitial lung disease (ILD). Diagnostic labels were used only for evaluation
-of the learned representation and were not provided to the normalizing-flow
-model during training.
-
-**TODO:** Provide the number of participants in each group; demographic
-characteristics; inclusion and exclusion criteria; recruitment source;
-institutional review board approval; consent or waiver-of-consent language; and
-the criteria used to assign clinical diagnoses.
-
-## Hyperpolarized xenon-129 MRI
-
-Only hyperpolarized $^{129}$Xe ventilation images were used. No paired proton
-structural image, dissolved-phase $^{129}$Xe image, clinical measurement, or
-diagnostic variable was supplied to the model. Each subject was represented by a
-single three-dimensional ventilation volume in NIfTI format.
-
-**TODO:** Provide the scanner manufacturer and model, field strength,
-radiofrequency coil, pulse sequence, acquisition dimensionality, field of view,
-acquired voxel dimensions, repetition and echo times, flip angle, breath-hold
-protocol, xenon polarization and dose, reconstruction procedure, and any
-acquisition differences across participants. If the images originated from more
-than one protocol or site, specify these factors and whether they were balanced
-across groups.
+This retrospective analysis included 51 participants: young healthy volunteers
+($n=10$), older healthy volunteers ($n=7$), and participants with cystic
+fibrosis (CF; $n=14$), interstitial lung disease (ILD; $n=10$), or chronic
+obstructive pulmonary disease (COPD; $n=10$). Hyperpolarized 129 Xe MRI was
+performed under a protocol approved by the Institutional Review Board, with
+written informed consent obtained from each participant. All imaging was
+conducted under a physician-sponsored Investigational New Drug application
+approved by the US Food and Drug Administration. MRI data were acquired on a
+1.5-T whole-body scanner (Avanto; Siemens Medical Solutions, Malvern, PA, USA)
+equipped with broadband capabilities and a flexible 129 Xe chest radiofrequency
+coil (IGC Medical Advances, Milwaukee, WI, USA, or Clinical MR Solutions,
+Brookfield, WI, USA). Participants inhaled approximately 1000 mL of
+hyperpolarized 129 Xe mixed with nitrogen to a total volume equal to one-third
+of their forced vital capacity (FVC). During a breath-hold of no more than 10 s,
+15–17 contiguous coronal slices were acquired to cover the entire lungs.
+Ventilation images were acquired using a gradient-recalled echo sequence with
+spiral k-space sampling and 12 interleaves. Acquisition parameters were as
+follows: repetition time/echo time, 7/1 ms; flip angle, 20$^\circ$; acquisition
+matrix, $128 \times 128$; in-plane voxel size, $4 \times 4$ mm$^2$ ; slice
+thickness, 15 mm; and interslice gap, 0 mm. All data were deidentified before
+analysis. The deidentified data are available from the corresponding author upon
+reasonable request and completion of an appropriate data-sharing agreement.
 
 ## Image preprocessing
 
-Each ventilation image was spatially resampled to a common matrix of $48 \times
-32 \times 48$ voxels. Resampling provided a fixed-dimensional input compatible
-with the three-dimensional invertible architecture while retaining the complete
-ventilation volume. The resulting images were subjected to probabilistic
-dequantization before likelihood-based training. Specifically, continuous noise
-with a configured scale of $\alpha=0.15$ was added to the discretized
-intensities. Dequantization replaces point masses associated with repeated
-digital intensity values---particularly the extensive black background
-characteristic of hyperpolarized gas images---with local continuous
-distributions, thereby making the observations compatible with
-continuous-density estimation [@ho2019flowpp].
-
-The same deterministic spatial and intensity preprocessing operations were applied to all subjects before assignment to the training or evaluation subsets. Diagnostic labels did not influence preprocessing.
-
-**TODO:** Specify (1) the spatial coordinate system and interpolation method used for resampling; (2) whether the images were registered to a reference image or template; (3) the procedure for cropping or padding the lung field; (4) intensity clipping and normalization; (5) whether an explicit lung mask was used; (6) the distribution of the dequantization noise and whether it was applied during every training iteration or once before training; and (7) the treatment of dequantization during validation and inference.
+Ventilation images were processed using ANTsX [@Tustison:2021aa]. Each image was
+first resampled by linear interpolation to a voxel spacing of \(4 \times 4
+\times 16\) mm\(^3\) and centrally padded or cropped to a matrix of \(128 \times
+128 \times 16\) voxels. Through-plane resolution was then increased fourfold
+using the pretrained three-dimensional MRI super-resolution model implemented in
+ANTsPyNet [@avants2023superresolution], yielding a nominal voxel spacing of \(4
+\times 4 \times 4\) mm\(^3\). To place all ventilation images in a common
+spatial coordinate system, a rigid transformation was estimated between the lung
+image and a designated lung template. Resampling into the template domain
+produced the final common matrix of \(88 \times 72 \times 128\) voxels (voxel
+resolution = $3.9 \times 3.9 \times 3.9$ mm$^3$).  No explicit lung mask was
+applied to the ventilation images, thereby retaining both the pulmonary signal
+and the surrounding background within the common image domain.
 
 ## Three-dimensional multiscale normalizing flow
 
