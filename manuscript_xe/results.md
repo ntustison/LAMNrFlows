@@ -1,172 +1,226 @@
-
 \clearpage
 
 # Results
 
-## Cohort characteristics
+## Study cohort
 
-The exploratory cohort comprised 45 participants distributed across five
-clinical groups: young healthy volunteers, older healthy volunteers, cystic
-fibrosis (CF), chronic obstructive pulmonary disease (COPD), and interstitial
-lung disease (ILD). All participants contributed a three-dimensional
-hyperpolarized xenon-129 ventilation image. Diagnostic labels were withheld from
-model training and were introduced only after latent encoding for evaluation of
-the learned representation.
+The exploratory cohort comprised 45 participants: 14 with cystic fibrosis
+(CF), 10 with chronic obstructive pulmonary disease (COPD), 10 with
+interstitial lung disease (ILD), seven older healthy participants, and four
+young healthy participants. Each participant contributed one three-dimensional
+hyperpolarized $^{129}$Xe ventilation image. Clinical labels were withheld
+during model training and were used only for post-training evaluation of the
+latent representation.
 
-**TODO:** Add a cohort table reporting the number of participants, age, sex,
-pulmonary-function measurements, ventilation defect percentage (VDP), and
-relevant clinical characteristics for each group. Report missing data explicitly
-and provide the corresponding omnibus and pairwise demographic comparisons.
+**TODO:** Add a cohort table reporting age, sex, pulmonary-function
+measurements, ventilation defect percentage (VDP), and relevant clinical
+characteristics by group. Report missing observations and the corresponding
+demographic comparisons.
 
-## Model optimization and reconstruction
+## Model fitting and invertible representation
 
-The three-dimensional multiscale normalizing flow was trained by
-exact-likelihood optimization after spatial resampling and probabilistic
-dequantization of the ventilation volumes. Training remained numerically stable,
-and all 45 images were successfully mapped to the four-level latent
-representation and reconstructed through the analytic inverse. No diagnostic
-information was used to construct the latent space.
+The ventilation volumes were spatially resampled, probabilistically
+dequantized, and used to train a three-dimensional multiscale normalizing flow
+by exact-likelihood optimization. All 45 images were successfully encoded into
+the four-level latent representation, comprising $\mathbf{z}_0$ through
+$\mathbf{z}_3$, and contributed to the subsequent distance analyses. Because
+the model is invertible by construction, the complete latent representation
+retained a one-to-one correspondence with the dequantized model input. No
+diagnostic or clinical information contributed to optimization.
 
 **TODO:** Report the selected checkpoint, training and validation bits per
-dimension, convergence behavior, and the criterion used for checkpoint
-selection. Add quantitative reconstruction error, expected to be near numerical
-precision for the dequantized model input, and distinguish this invertibility
-check from reconstruction of the original pre-dequantization image. Include a
-training-curve figure if it contributes information beyond the reported values.
+dimension, convergence behavior, and checkpoint-selection criterion. Quantify
+the numerical inversion error for the dequantized input and distinguish this
+implementation check from agreement with the original image before
+dequantization. If representative reconstructions are shown, use identical
+anatomical planes and display windows and include amplified difference images
+when the errors are not visible at the native intensity scale.
 
-Visual inspection indicated that reconstructed volumes retained the pulmonary
-signal distribution and subject-specific ventilation abnormalities present in
-their corresponding inputs. Because exact inversion alone does not establish
-that samples or interpolations occupy well-supported regions of the learned
-distribution, reconstruction fidelity was considered a verification of model
-implementation rather than evidence of generative validity.
+## Multiscale latent geometry
 
-**TODO:** Add representative input/reconstruction pairs from each clinical group
-using identical display windows and anatomical planes. If reconstruction
-differences are imperceptible, report a difference image with an appropriately
-amplified and explicitly labeled intensity scale.
+For each resolution level, subject representations were radially projected to a
+common-radius hypersphere within the Gaussian typical set. This construction
+removed variation in latent radius and avoided using the low-probability
+Gaussian origin as a reference representation. Pairwise geodesic distances were
+then calculated separately at $L_0$--$L_3$. The combined multiscale distance was
+defined by the $L_2$ norm across the four level-specific distances. Each
+distance definition produced a complete $45 \times 45$ subject-distance
+matrix.
 
-## Organization of the multiscale latent representation
+The five matrices were Euclidean within numerical precision: principal
+coordinate analysis yielded 44 positive axes and no negative axes for every
+matrix. This permitted direct use of the distance matrices in the subsequent
+PERMANOVA and PERMDISP analyses without correction for negative eigenvalues.
+The presence of significant group-associated structure at every level, as
+described below, indicated that the clinical signal was distributed across the
+multiscale representation rather than restricted to one latent component.
+However, these results alone do not establish a distinct biological
+interpretation for any individual architectural level.
 
-Encoding produced four latent components, $\mathbf{z}_0$ through $\mathbf{z}_3$,
-corresponding to the successive levels of the multiscale architecture. The
-complete representation retained a bijective correspondence with the input
-image, whereas the level-specific components provided complementary descriptions
-of variation within the cohort. After radial projection, encoded subjects
-occupied the hyperspherical Gaussian typical set and could be compared without
-treating the low-probability latent origin as a representative population image.
+**TODO:** Report the dimensionality and chosen hyperspherical radius for each
+level, the empirical latent-radius distribution before projection, and the
+distribution of pairwise distances. Add subject-by-subject distance heat maps
+ordered by clinical group. Quantify agreement among the level-specific matrices
+using an appropriate matrix-correlation analysis before describing the levels
+as complementary or nonredundant.
 
-Pairwise distances varied across resolution levels, demonstrating that subject
-relationships were not invariant to the level at which the representation was
-examined. Fine and coarse latent components produced different relative
-organizations of the cohort. The observed group relationships were consistent
-with the multiscale representation capturing complementary aspects of
-ventilation variation; however, architectural scale alone was insufficient to
-assign a specific biological interpretation to an individual level.
+## Clinical-group organization
 
-**TODO:** Report, for each level, the latent dimensionality, empirical radius
-before projection, radial dispersion, and distribution of pairwise distances.
-Add a matrix or heat map showing the subject-by-subject distances ordered by
-clinical group. Quantify the association between the level-specific distance
-matrices using Mantel or rank correlations with subject-label permutations.
-These results will establish whether the levels contain complementary
-information rather than relying on visual interpretation.
+As a proof-of-concept analysis, we evaluated whether clinical group was
+associated with the latent-distance structure observed in this small
+exploratory cohort. Omnibus PERMANOVA identified group-associated organization
+at each latent level and for the combined multiscale distance (Table 1).
+Clinical group accounted for 10.7%--12.2% of the distance variation. The
+largest proportion was observed at $L_0$ (pseudo-$F=1.390$, $R^2=0.122$,
+permutation $p=0.0042$, FDR-adjusted $q=0.0064$). Significant effects were
+also detected at $L_1$ (pseudo-$F=1.266$, $R^2=0.112$, $p=0.0020$,
+$q=0.0064$), $L_2$ (pseudo-$F=1.194$, $R^2=0.107$, $p=0.0117$,
+$q=0.0117$), and $L_3$ (pseudo-$F=1.249$, $R^2=0.111$, $p=0.0051$,
+$q=0.0064$). The combined distance yielded a similar result
+(pseudo-$F=1.244$, $R^2=0.111$, $p=0.0034$, $q=0.0064$). The consistency
+of the omnibus effect across representations suggested that group-associated
+organization was distributed throughout the multiscale geometry rather than
+confined to a single resolution level.
 
-## Image-domain interpretation of latent scale
+**Table 1. Omnibus clinical-group analyses of the latent-distance matrices.**
 
-Spherical interpolation provided continuous trajectories between subject
-representations while remaining on a common-radius hypersphere. Decoding
-intermediate points generated a corresponding sequence of three-dimensional
-ventilation images. These trajectories demonstrated the operational advantage of
-the invertible formulation: latent differences could be returned directly to the
-image domain rather than interpreted solely through a two-dimensional embedding.
+| Distance | PERMANOVA pseudo-$F$ | $R^2$ | PERMANOVA $p$ | PERMANOVA FDR $q$ | PERMDISP $F$ | PERMDISP $p$ | PERMDISP FDR $q$ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| $L_0$ | 1.390 | 0.122 | 0.0042 | 0.0064 | 1.025 | 0.4077 | 0.4077 |
+| $L_1$ | 1.266 | 0.112 | 0.0020 | 0.0064 | 1.806 | 0.1389 | 0.3587 |
+| $L_2$ | 1.194 | 0.107 | 0.0117 | 0.0117 | 1.624 | 0.1770 | 0.3587 |
+| $L_3$ | 1.249 | 0.111 | 0.0051 | 0.0064 | 1.544 | 0.2152 | 0.3587 |
+| Combined | 1.244 | 0.111 | 0.0034 | 0.0064 | 1.281 | 0.2943 | 0.3679 |
 
-**TODO:** Select prespecified subject pairs representing (1) two participants
-within the same group, (2) a healthy-to-disease comparison, and (3) two disease
-groups with similar VDP. Show equally spaced Slerp points using fixed display
-parameters. To support claims that $L_0/L_1$ represent localized abnormalities
-and $L_3$ represents global organization, perform level-restricted latent
-replacement or interpolation while holding the other levels fixed. Report
-quantitative image changes at each level, such as spatial-frequency content,
-connected-component characteristics of low-ventilation regions, or regional
-displacement of ventilation signal.
+PERMDISP detected no significant difference in within-group dispersion for any
+of the five distance matrices. Using bias-adjusted distances to group spatial
+medians, the PERMDISP statistics ranged from $F=1.025$ to $F=1.806$; the raw
+permutation $p$ values ranged from 0.1389 to 0.4077, and the FDR-adjusted
+$q$ values ranged from 0.3587 to 0.4077. The ILD group showed comparatively
+broad and asymmetric descriptive distance distributions at several levels, but
+these differences did not produce a significant omnibus dispersion effect.
+Thus, the PERMANOVA findings were not accompanied by a detectable difference
+in within-group dispersion and were compatible with differences in group
+location within the learned geometry. However, a nonsignificant PERMDISP does
+not establish equality of dispersion. The small and unequal group sizes,
+particularly the four young healthy participants, limited sensitivity to such
+differences.
 
-## Clinical organization of latent distances
+## Pairwise clinical-group comparisons
 
-Although clinical labels were absent during optimization, the distance matrices
-displayed group-associated structure after training. The strongest exploratory
-relationships involved comparisons between young healthy volunteers and disease
-groups and between the two obstructive disease groups, CF and COPD. Comparisons
-involving CF versus ILD and CF versus older healthy volunteers showed greater
-overlap. These observations suggest that the learned representation contains
-clinically relevant information beyond an undifferentiated measure of overall
-ventilation loss, while also revealing boundaries that remain ambiguous in the
-small exploratory cohort.
+Post-hoc testing considered the ten unique clinical-group pairs at each of the
+four latent levels and for the combined distance, yielding 50 planned
+comparisons. The effect size $\Delta_{AB}$ compared the mean between-group
+distance with the average of the two mean within-group distances. Clinical
+labels were permuted at the participant level, thereby preserving the
+dependence among distances that shared a participant. Exact enumeration was
+used when no more than 100,000 unique assignments were possible; otherwise,
+100,000 Monte Carlo permutations were performed. Given the proof-of-concept,
+exploratory nature of this analysis, the 50 resulting $p$ values were adjusted
+jointly using the Benjamini--Hochberg procedure to control the false discovery
+rate. An FDR of 5% was retained as the primary criterion. A secondary,
+hypothesis-generating analysis examined a less stringent FDR threshold of 10%.
 
-The previously calculated pairwise Welch tests yielded very small nominal $p$
-values for several comparisons. These values were not retained because distances
-sharing a subject are statistically dependent and cannot be treated as
-independent observations. Inferential results will instead be based on
-permutation of labels at the subject level.
+At the primary 5% FDR threshold, none of the 50 individual comparisons remained
+significant after multiplicity correction. At the secondary 10% threshold, 13
+comparisons met the exploratory criterion, with $q$ values ranging from 0.0869
+to 0.1000 (Table 2). These signals formed three descriptive patterns. First,
+older healthy participants differed from one or more disease groups at
+$L_0$--$L_2$, most consistently from COPD and ILD. Second, CF differed from ILD
+at $L_0$ and $L_1$ and from COPD at $L_0$. Third, CF differed from young healthy
+participants at $L_3$ and for the combined multiscale distance. The largest
+observed contrasts were CF versus young healthy participants at $L_3$
+($\Delta=23.743$, exact $p=0.00327$, $q=0.0869$) and for the combined distance
+($\Delta=23.729$, exact $p=0.00621$, $q=0.0869$).
 
-**TODO:** Replace this paragraph with the final statistical results. For each of
-$L_0$--$L_3$ and the total distance, report:
+**Table 2. Pairwise contrasts meeting the secondary exploratory FDR threshold
+of 10%.**
 
-- omnibus PERMANOVA pseudo-$F$, variance explained ($R^2$), and
-  permutation-derived $p$ value;
-- PERMDISP statistic and permutation-derived $p$ value;
-- pairwise PERMANOVA effect sizes and multiplicity-adjusted $p$ values;
-- within-group and between-group distance summaries with confidence intervals;
-  and
-- sensitivity analyses demonstrating that significant location effects are not
-  explained solely by unequal group dispersion.
+| Distance | Group A | Group B | $\Delta_{AB}$ | Permutation $p$ | FDR $q$ |
+|---|---|---|---:|---:|---:|
+| $L_0$ | CF | COPD | 2.335 | 0.01804 | 0.0869 |
+| $L_0$ | CF | ILD | 2.726 | 0.01911 | 0.0869 |
+| $L_0$ | CF | Older healthy | 2.976 | 0.02297 | 0.0957 |
+| $L_0$ | COPD | Older healthy | 3.293 | 0.01702 | 0.0869 |
+| $L_0$ | ILD | Older healthy | 4.101 | 0.01635 | 0.0869 |
+| $L_1$ | CF | ILD | 3.596 | 0.00999 | 0.0869 |
+| $L_1$ | CF | Older healthy | 3.088 | 0.02599 | 0.1000 |
+| $L_1$ | COPD | Older healthy | 3.819 | 0.00967 | 0.0869 |
+| $L_1$ | ILD | Older healthy | 5.091 | 0.00674 | 0.0869 |
+| $L_2$ | COPD | Older healthy | 4.290 | 0.01424 | 0.0869 |
+| $L_2$ | ILD | Older healthy | 5.571 | 0.01908 | 0.0869 |
+| $L_3$ | CF | Young healthy | 23.743 | 0.00327 | 0.0869 |
+| Combined | CF | Young healthy | 23.729 | 0.00621 | 0.0869 |
 
-With five groups, ten pairwise group comparisons were possible at each of the
-five distance definitions, yielding 50 planned tests and a Bonferroni
-family-wise threshold of $1.0\times10^{-3}$. Exact permutation counts and
-attainable $p$-value resolution should accompany the final results. A compact
-table should report all effect sizes and corrected $p$ values, whereas the main
-text should emphasize only the comparisons that address the principal
-methodological hypotheses.
+The 10% threshold was examined as a secondary analysis and was less stringent
+than the primary 5% threshold. These pairwise findings were therefore treated
+as hypothesis-generating rather than as evidence of reproducible separation
+between specific clinical groups. The especially small young healthy subgroup
+also made its two CF contrasts imprecise.
 
-## Comparison with ventilation defect percentage
+Taken together, the significant PERMANOVA and nonsignificant PERMDISP results
+provided preliminary evidence that the unsupervised latent geometry contained
+clinical-group organization that was not attributable to detectable
+differences in within-group dispersion. The pairwise analysis generated
+candidate group contrasts for future evaluation, but the available sample did
+not provide confirmatory evidence of separation between any individual pair of
+groups at the primary 5% FDR threshold.
 
-The normalizing-flow representation and VDP encode fundamentally different
-quantities. VDP assigns each subject a single defect-burden value, whereas the
-flow produces an invertible multiscale representation from which spatially
-informed subject distances can be derived. The key empirical question is
-therefore not whether the latent distance reproduces VDP, but whether it
-distinguishes images that have comparable VDP yet different spatial
-organizations of ventilation abnormality.
+## Image-domain interrogation of latent trajectories
 
-**TODO:** Add the subject-level VDP values and perform the following
-prespecified analyses:
+Spherical interpolation generated continuous paths between radially projected
+subject representations while maintaining the common latent radius. Decoding
+points along these paths returned the latent trajectories to the
+three-dimensional ventilation-image domain. This demonstrated that differences
+represented in the latent space could be interrogated as spatially resolved
+image changes rather than only through a low-dimensional visualization.
 
-1. quantify associations between VDP differences and latent distances at each
-   level using subject-label or matrix-based permutation testing;
-2. identify subject pairs with similar VDP but large latent distance and show
-   their ventilation images;
-3. identify pairs with different VDP but relatively small latent distance to
-   characterize potential failure modes; and
-4. compare the ability of VDP and latent-distance features to recover clinical
-   group structure using cross-validated or permutation-based metrics
-   appropriate for the small sample.
+Because radial projection changes the original latent codes, the endpoints of
+these trajectories correspond to decoded projected subject representations and
+are not generally identical to the observed images. The interpolation results
+should therefore be interpreted as trajectories between projected
+representations rather than exact image-to-image transformations.
 
-These analyses are required to support the central claim that the flow retains
-clinically relevant spatial information discarded by the scalar summary. Without
-them, the comparison between VDP and the latent representation should remain
-conceptual rather than be described as demonstrated superiority.
+**TODO:** Show prespecified examples comprising a within-group pair, a
+healthy-to-disease pair, and a between-disease pair with comparable VDP. Use
+fixed display parameters and report the difference between each observed image
+and its decoded projected representation. To determine what the individual
+levels encode, perform level-restricted interpolation or replacement while
+holding the remaining components fixed, and quantify the resulting spatial
+changes.
 
-## Summary of findings
+## Relationship to ventilation defect percentage
 
-The experiments established the technical feasibility of exact-likelihood,
-invertible modeling of three-dimensional hyperpolarized $^{129}$Xe ventilation
-MRI in a sparse functional-imaging setting. The learned multiscale
-representation supported reconstruction, level-specific subject comparison, and
-image-domain interpolation without diagnostic supervision. Exploratory
-organization of the latent distances was associated with clinical phenotype,
-particularly for young healthy versus diseased ventilation and for CF versus
-COPD, while other group boundaries remained less distinct. Final claims
-concerning statistical group separation, scale-specific biological
-interpretation, and added value relative to VDP await the subject-level
-permutation and image-domain analyses specified above.
+VDP and the latent geometry summarize different properties of a ventilation
+image. VDP measures the overall proportion of low-ventilation voxels, whereas
+the flow retains an invertible multiscale representation from which spatially
+informed subject relationships can be derived. The current analyses establish
+clinical-group organization in the latent distances but do not yet determine
+whether that organization contains information beyond VDP.
+
+**TODO:** Quantify the association between absolute VDP differences and latent
+distances at each level using a matrix-based permutation procedure. Identify
+and visualize pairs with similar VDP but large latent distance, as well as
+pairs with different VDP but small latent distance. Any comparison of group
+information carried by VDP and latent features should use participant-level
+cross-validation or permutation testing appropriate for this small cohort.
+Until these analyses are complete, the added value of the latent representation
+relative to VDP should remain an open empirical question.
+
+## Summary
+
+The three-dimensional normalizing flow produced an invertible, four-level
+representation of hyperpolarized $^{129}$Xe ventilation MRI without diagnostic
+supervision. Clinical group explained approximately 11% of variation in each
+level-specific and combined subject-distance matrix, and all five omnibus
+effects remained significant after FDR correction. No corresponding
+difference in within-group dispersion was detected, although the small and
+unequal group sizes limited the sensitivity of this analysis. None of the 50
+pairwise contrasts met the primary 5% FDR threshold; 13 met a secondary 10%
+exploratory threshold and were considered hypothesis-generating. The present
+proof-of-concept results therefore support global clinical organization of the
+learned representation and identify candidate pairwise patterns for subsequent
+testing, but they do not establish definitive separation of specific diagnostic
+groups or superiority to VDP. Confirmatory evaluation in the planned cohort of
+approximately 1,200 participants will permit more precise effect estimation,
+covariate adjustment, and held-out validation.
