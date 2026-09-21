@@ -5,7 +5,7 @@ library(stringr)
 library(latex2exp)
 
 # 1. Chargement des données de bootstrapping
-df <- read.csv("~/Desktop/stnava/multi_view_data/full_clinical_comparison.csv")
+df <- read.csv("../multi_view_data/full_clinical_comparison.csv")
 
 # 2. Préparation des données pour ggplot
 # On sépare les colonnes pour avoir une ligne par comparaison (Linear vs Ablation)
@@ -55,9 +55,20 @@ p <- ggplot(df_plot, aes(x = Delta, y = Outcome, color = Comparison, group = Com
   geom_point(size = 3, position = position_dodge(width = 0.6)) +
   
   # Palette de couleurs contrastée
-scale_color_manual(values = c("vs. SiMLR (Linear)" = "#1f77b4", 
-                              "vs. Baseline (lambda = 0)" = "#e31a1c"),
-                   labels = c("vs. SiMLR (Linear)", expression(paste("vs. Baseline (", lambda, " = 0)")))) +
+scale_color_manual(
+  values = c(
+    "vs. SiMLR (Linear)" = "#1f77b4",
+    "vs. Baseline (lambda = 0)" = "#e31a1c"
+  ),
+  breaks = c(
+    "vs. SiMLR (Linear)",
+    "vs. Baseline (lambda = 0)"
+  ),
+  labels = c(
+    "vs. SiMLR (Linear)",
+    expression(paste("vs. Baseline (", lambda, " = 0)"))
+  )
+) +
   # Titres et axes en anglais (Publication Ready)
   labs(
     title = "LAMNr Flows Clinical Predictive Power",
