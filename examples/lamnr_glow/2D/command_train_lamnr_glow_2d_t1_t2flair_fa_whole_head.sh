@@ -7,6 +7,7 @@ export MKL_NUM_THREADS=4
 export OPENBLAS_NUM_THREADS=4
 export ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS=4
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTHONPATH="/home/ntustison/Pkg/ANTsTorch:${PYTHONPATH:-}"
 # ------------------------------------
 
 # total steps
@@ -25,15 +26,18 @@ WEIGHT_DECAY=1e-6
 LR_DECAY_GAMMA=0.5
 LR_DECAY_STEPS=80000
 
-# --- CONFIG MULTI-GPU ROBUSTE ---
-BATCH=20           
-GRAD_ACCUM=6         
-NUM_WORKERS=4        
-DEVICES="cuda:0"
-PRECISION="float"    
+# --- CONFIG MULTI-GPU ROBUSTE (DDP) ---
+# BATCH est le batch par GPU : 10 x 2 GPU x 6 accumulations = 120 effectif.
+NPROC_PER_NODE="${NPROC_PER_NODE:-2}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
+BATCH=60
+GRAD_ACCUM=1
+NUM_WORKERS=4         # Par processus (8 workers au total avec 2 GPU)
+DEVICES="cuda:0"      # Utilisé uniquement lorsque NPROC_PER_NODE=1
+PRECISION="mixed"    
 # --------------------------------
 
-OUTDIR="runs2d/dlbs_t1_t2flair_fa_${H}x${W}_K${K}_L${L}_HC${hidden}_Round2"
+OUTDIR="runs2d/dlbs_t1_t2flair_fa_${H}x${W}_K${K}_L${L}_HC${hidden}"
 
 PLATEAU_FACTOR=0.999999
 PLATEAU_PATIENCE=100000
@@ -83,13 +87,28 @@ sd_histogram_warping:cos:0.04->0.008@${aug_iterations}"
 
 DLBS_ROOT="/home/ntustison/Data/ds004856/BIDSAlignedToTemplate/"
 
-mapfile -t T1 < <(ls -1 ${DLBS_ROOT}/sub-*/ses-wave1/anat/*T1w.nii.gz | sort)
-mapfile -t T2 < <(ls -1 ${DLBS_ROOT}/sub-*/ses-wave1/anat/*T2w.nii.gz | sort)
-mapfile -t FA < <(ls -1 ${DLBS_ROOT}/sub-*/ses-wave1/dwi/*fa.nii.gz | sort)
+mapfile -t T1 < <(compgen -G "${DLBS_ROOT}/sub-*/ses-wave1/anat/*T1w.nii.gz" | sort)
+mapfile -t T2 < <(compgen -G "${DLBS_ROOT}/sub-*/ses-wave1/anat/*T2w.nii.gz" | sort)
+mapfile -t FA < <(compgen -G "${DLBS_ROOT}/sub-*/ses-wave1/dwi/*fa.nii.gz" | sort)
 
 echo "T1: ${#T1[@]}  T2: ${#T2[@]}  FA: ${#FA[@]}"
 
-python train_lamnr_glow_2d.py \
+if (( ${#T1[@]} == 0 || ${#T2[@]} == 0 || ${#FA[@]} == 0 )); then
+  echo "Error: each view must contain at least one image under ${DLBS_ROOT}." >&2
+  exit 1
+fi
+
+if (( NPROC_PER_NODE > 1 )); then
+  LAUNCHER=(
+    python -m torch.distributed.run
+    --standalone
+    --nproc_per_node="${NPROC_PER_NODE}"
+  )
+else
+  LAUNCHER=(python)
+fi
+
+"${LAUNCHER[@]}" -m antstorch.lamnr_flows.scripts.train_lamnr_glow_2d \
   --view "${T1[@]}" \
   --view "${T2[@]}" \
   --view "${FA[@]}" \
@@ -121,8 +140,11 @@ python train_lamnr_glow_2d.py \
   --screen-warmup "${SCREEN_WARMUP}" --screen-refresh "${SCREEN_REFRESH}" --screen-frac "${SCREEN_FRAC}" \
   --cca-ridge "${CCA_RIDGE}" --prefilter-frac "${PREFILTER_FRAC}" \
   --scale-cap ${SCALE_CAP} \
+  --glowbase-logscale-factor ${GLOWBASE_LOGSCALE_FACTOR} \
   --glowbase-max-log ${GLOWBASE_MAX_LOG} --glowbase-min-log ${GLOWBASE_MIN_LOG} \
   --out-dir "${OUTDIR}" \
   --num-workers ${NUM_WORKERS} \
   --weight-decay ${WEIGHT_DECAY} \
-  --scale-map ${SCALE_MAP}
+  --scale-map ${SCALE_MAP} \
+  --grad-checkpoint off
+
