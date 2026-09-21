@@ -268,6 +268,22 @@ Comparison of population Fréchet mean approximations. (Top) The standard
 
 ***
 
+### Current implementation
+
+The current LAMNr implementation is distributed across two complementary Python packages within the ANTsX ecosystem. [ANTsNormalizingFlows](https://github.com/ANTsX/ANTsNormalizingFlows) extends the PyTorch-based `normflows` library with the invertible layers, base distributions, and multiscale architectures used by LAMNr, including support for volumetric images. [ANTsTorch](https://github.com/ANTsX/ANTsTorch) provides model construction, data handling, latent-alignment objectives, training workflows, and post-training analysis tools.
+
+Available trainers and analysis capabilities include:
+
+- **Tabular data:** `train_lamnr_flows_tabular` trains RealNVP models on one or more CSV-based views, with configurable feature normalization and diagonal Gaussian or GaussianPCA base distributions. It supports learning nonlinear latent representations while aligning information shared across views.
+- **2D and 3D images:** `train_lamnr_glow_2d` and `train_lamnr_glow_3d` train multiscale Glow models for image data. Training combines likelihood optimization with optional multiview latent alignment and supports image augmentation, including spatial transformations, noise, simulated bias fields, and histogram warping.
+- **Hybrid image–tabular data:** `train_lamnr_flows_hybrid` jointly trains tabular, 2D image, and 3D image views, each with its own flow and a projection into a common alignment space. A CSV manifest and JSON configuration define paired observations and view-specific models. Missing views are supported: likelihoods use available observations, and alignment uses observations shared by each view pair. See the [hybrid trainer documentation](https://github.com/ANTsX/ANTsTorch/blob/main/docs/lamnr_hybrid_trainer.md).
+- **Alignment and training controls:** Available alignment objectives include VICReg, InfoNCE, Barlow Twins, HSIC, Pearson correlation, and MSE. Training workflows provide validation metrics, checkpointing and resumption, and reconstruction previews; the hybrid trainer additionally supports distributed training and exports latent representations, whitened features, and reconstructions.
+- **Image inference and analysis:** `lamnr_glow_tool_2d` and `lamnr_glow_tool_3d` provide image reconstruction and sampling, Gaussian modeling of multiview latent distributions, conditional imputation of missing modalities, population and cohort template generation, latent interpolation, and distance calculations. They also support editing selected latent scales and exploring principal modes of anatomical variation.
+
+This repository contains the accompanying manuscript materials and example workflows. Please refer to the package repositories for the current source code and installation instructions.
+
+*** 
+
 ### Funding support
 
 We gratefully acknowledge the grant support of the Office of Naval Research (N0014-23-1-2317)
