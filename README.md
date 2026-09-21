@@ -270,7 +270,8 @@ Comparison of population Fréchet mean approximations. (Top) The standard
 
 ### Current implementation
 
-The current LAMNr implementation is distributed across two complementary Python packages within the ANTsX ecosystem. [ANTsNormalizingFlows](https://github.com/ANTsX/ANTsNormalizingFlows) extends the PyTorch-based `normflows` library with the invertible layers, base distributions, and multiscale architectures used by LAMNr, including support for volumetric images. [ANTsTorch](https://github.com/ANTsX/ANTsTorch) provides model construction, data handling, latent-alignment objectives, training workflows, and post-training analysis tools.
+The current LAMNr implementation is distributed across two complementary Python packages within the ANTsX ecosystem
+(original code is [here](sandbox/src_old)). [ANTsNormalizingFlows](https://github.com/ANTsX/ANTsNormalizingFlows) extends the PyTorch-based `normflows` library with the invertible layers, base distributions, and multiscale architectures used by LAMNr, including support for volumetric images. [ANTsTorch](https://github.com/ANTsX/ANTsTorch) provides model construction, data handling, latent-alignment objectives, training workflows, and post-training analysis tools.
 
 Available trainers and analysis capabilities include:
 
