@@ -224,7 +224,7 @@ aug_params="noise_std:cos:0.05->0.015@${iterations},\
             sd_histogram_warping:cos:0.04->0.008@${iterations}"
 ```
 Visualization cycle (~20 seconds)
-<img src="manuscript/Figures/aug_dlbs.gif" alt="HCP YA T1 aug" width="100%">
+<img src="biorxiv_manuscript/Figures/aug_dlbs.gif" alt="HCP YA T1 aug" width="100%">
 
 </details>
 
@@ -233,7 +233,7 @@ Visualization cycle (~20 seconds)
 
 * [OpenNeuro data](https://openneuro.org/datasets/ds004856) 
 * [Command script](https://github.com/ntustison/LAMNrFlows/blob/main/examples/lamnr_glow/2D/command_train_lamnr_glow_2d_t1_t2flair_fa_whole_head.sh)
-* [Trainer](https://github.com/ntustison/LAMNrFlows/blob/main/src/lamnrflows/train_lamnr_glow_2d.py)
+* [Trainer](https://github.com/ntustison/LAMNrFlows/blob/main/sandbox/src_old/lamnrflows/train_lamnr_glow_2d.py)
 
 Training evolution samples (100000 iterations)
 <img src="manuscript/Figures/training_evolution_dlbs_2d_views.gif" alt="training evolution" width="100%">
@@ -241,14 +241,14 @@ Training evolution samples (100000 iterations)
 Template comparison
 
 <p align="center">
-  <img src="manuscript/Figures/T_templateT1_slice115.png" alt="ANTsX T1" width="25%">
-  <img src="manuscript/Figures/T_templateT2Flair_slice115.png" alt="ANTsX FLAIR" width="25%">
-  <img src="manuscript/Figures/T_templateFA_slice115.png" alt="ANTsX FA" width="25%"><br>
+  <img src="biorxiv_manuscript/Figures/T_templateT1_slice115.png" alt="ANTsX T1" width="25%">
+  <img src="biorxiv_manuscript/Figures/T_templateT2Flair_slice115.png" alt="ANTsX FLAIR" width="25%">
+  <img src="biorxiv_manuscript/Figures/T_templateFA_slice115.png" alt="ANTsX FA" width="25%"><br>
   ANTsX multimodal template
   <br>
-  <img src="manuscript/Figures/L_templateT1.png" alt="LAMNr flows T1" width="25%">
-  <img src="manuscript/Figures/L_templateT2Flair.png" alt="LAMNr flows FLAIR" width="25%">
-  <img src="manuscript/Figures/L_templateFA.png" alt="LAMNr flows FA" width="25%"><br>
+  <img src="biorxiv_manuscript/Figures/L_templateT1.png" alt="LAMNr flows T1" width="25%">
+  <img src="biorxiv_manuscript/Figures/L_templateT2Flair.png" alt="LAMNr flows FLAIR" width="25%">
+  <img src="biorxiv_manuscript/Figures/L_templateFA.png" alt="LAMNr flows FA" width="25%"><br>
   LAMNr flows multimodal template
 </p>
 Comparison of population Fréchet mean approximations. (Top) The standard
