@@ -75,7 +75,7 @@ Latent-aligned multiview normalizing (LAMNr) flows leverage exact-likelihood, bi
 Data from [*Joint representations from multi-view MRI-based learning support cognitive and functional performance domains*](https://www.medrxiv.org/content/10.1101/2025.09.27.25336706v2)
 
 <p align="center">
-  <img src="manuscript/Figures/clinical_comparison_multipanel2.png" alt="NNHEmbed" width="75%">
+  <img src="examples/lamnr_tabular/NNHEmbed_example/multi_view_scripts/clinical_comparison_multipanel.png" alt="NNHEmbed" width="75%">
 </p>
 
 The forest plot illustrates the correlation uplift ($\Delta r$)
